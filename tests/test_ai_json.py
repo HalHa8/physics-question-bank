@@ -88,8 +88,8 @@ def test_paper_prompts_require_valid_json_escaping():
 
 def test_classification_prompts_prefer_later_curriculum_module():
     curriculum = {
-        "必修一": {"5. 三角函数": []},
-        "必修二": {"6. 平面向量及其应用": []},
+        "必修第一册": {"第四章 运动和力的关系": []},
+        "必修第二册": {"第八章 机械能守恒定律": []},
     }
     prompts = (
         build_classification_system_prompt(curriculum),
@@ -101,7 +101,7 @@ def test_classification_prompts_prefer_later_curriculum_module():
         assert "选择位置最靠后的模块作为最终分类" in prompt
         assert "先比较学段从上到下的顺序" in prompt
         assert "若属于同一学段，再比较章节从前到后的顺序" in prompt
-        assert "必修二的“平面向量及其应用”" in prompt
+        assert "必修第二册“机械能守恒定律”" in prompt
         assert "仅作为背景条件被提及" in prompt
 
 

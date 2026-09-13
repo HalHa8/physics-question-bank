@@ -1,9 +1,4 @@
-"""Curriculum preset loading and metadata defaults.
-
-The four textbook trees live in JSON resources so the backend and browser use
-one authoritative copy instead of maintaining independent Python and
-JavaScript constants.
-"""
+"""Physics curriculum preset loading and metadata defaults."""
 
 from copy import deepcopy
 from functools import lru_cache
@@ -13,6 +8,7 @@ from mathbank.paths import CURRICULUMS_DIR
 
 
 CURRICULUM_NAMES = {
+    "P": "人教版高中物理（2019）",
     "A": "人教A版",
     "B": "人教B版",
     "S": "苏教版",
@@ -23,7 +19,9 @@ DEFAULT_QUESTION_TYPES = [
     {"value": "single_choice", "label": "单选题"},
     {"value": "multi_choice", "label": "多选题"},
     {"value": "fill_in_blank", "label": "填空题"},
-    {"value": "detailed_answer", "label": "解答题"},
+    {"value": "experiment", "label": "实验题"},
+    {"value": "detailed_answer", "label": "计算题"},
+    {"value": "short_answer", "label": "简答题"},
 ]
 
 DEFAULT_DIFFICULTIES = [
@@ -53,7 +51,7 @@ DEFAULT_DIFFICULTIES = [
 def normalize_version_code(version: str) -> str:
     """Validate and normalize a curriculum version code."""
 
-    code = str(version or "A").strip().upper()
+    code = str(version or "P").strip().upper()
     if code not in CURRICULUM_NAMES:
         raise ValueError(f"不支持的教材大纲版本: {version}")
     return code
@@ -70,13 +68,13 @@ def _load_curriculum_cached(version: str) -> dict:
     return data
 
 
-def load_curriculum(version: str = "A") -> dict:
+def load_curriculum(version: str = "P") -> dict:
     """Return an isolated copy of one curriculum tree."""
 
     return deepcopy(_load_curriculum_cached(normalize_version_code(version)))
 
 
-def build_default_metadata(version: str = "A") -> dict:
+def build_default_metadata(version: str = "P") -> dict:
     """Build the editable metadata payload used by settings and first boot."""
 
     code = normalize_version_code(version)
@@ -87,7 +85,7 @@ def build_default_metadata(version: str = "A") -> dict:
     }
 
 
-def get_curriculum_preset(version: str = "A") -> dict:
+def get_curriculum_preset(version: str = "P") -> dict:
     """Return the API representation of a curriculum preset."""
 
     code = normalize_version_code(version)

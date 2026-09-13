@@ -262,7 +262,7 @@ def main() -> int:
     for stream in (sys.stdout, sys.stderr):
         if callable(getattr(stream, "reconfigure", None)):
             stream.reconfigure(encoding="utf-8", errors="replace")
-    print("本地数学题库（MathBank）启动器")
+    print("本地物理题库（PhysicsBank）启动器")
     try:
         run_launcher()
         return 0

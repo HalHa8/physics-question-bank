@@ -42,7 +42,7 @@ def test_shared_paths_are_absolute_and_project_anchored():
 
 
 def test_all_curriculum_presets_load_from_resources():
-    for version in ("A", "B", "S", "H"):
+    for version in ("P", "A", "B", "S", "H"):
         preset = get_curriculum_preset(version)
         assert preset["version"] == version
         assert preset["metadata"]["curriculum"] == load_curriculum(version)

@@ -197,3 +197,11 @@
 - **Python 版本**：最低 Python 3.10。
 - **本地启动**：`uvicorn main:app --reload`
 - **验证**：运行针对改动的 `python3 -m pytest tests/`、`python3 -m pip check`；JS 改动逐文件执行 `node --check`，macOS 启动器执行 `bash -n 启动题库系统.command`。Release 守卫继续检查 BAT ASCII/无 BOM/CRLF、Windows 平台接口缺失和 CP936 输出。启动器测试使用 `--noconftest`，覆盖旧状态/历史清单损坏仍可启动、现有服务直接打开、依赖补齐、端口冲突、实际错误日志和 Windows venv PID 转发。Windows CI 从最终 ZIP 解压至中文空格路径，放入损坏旧状态与指向无害进程的旧 PID，验证首次启动、重复打开保持同一服务且无关进程仍存活。macOS 用隔离目录和端口实测入口，不能以此替代真实 Windows 10/11 用户机验证。
+
+## 8. PhysicsBank 物理适配约束
+- **产品定位**：默认产品名为 PhysicsBank，默认课程预设代码为 `P`，权威课程树位于 `mathbank/resources/curriculums/P.json`。A/B/S/H 数学预设仅为旧数据库兼容，不在物理版界面暴露。
+- **默认题型**：单选题、多选题、填空题、实验题、计算题和简答题。`experiment` 与 `short_answer` 按书面作答题排版；普通试卷必须支持按元数据自定义顺序。
+- **物理内容保真**：OCR、拆卷、解题与绘图不得擅自修改物理量字母、单位大小写、矢量方向、正负号、有效数字、图像坐标或电路连接。解答须检查单位、量纲、数量级和物理意义。
+- **试卷模板**：物理版默认使用 `exam`，原数学 `exam_19` 仅保留兼容代码，不得重新设为物理版默认模板。
+- **数据隔离**：PhysicsBank 应使用独立目录与数据库，不自动迁移或复用 MathBank 用户数据。
+- **AGPL 合规**：保留 `LICENSE`、原项目历史和 `NOTICE.md`。对外提供网络服务时，关于页面必须明显链接到当前运行版本的完整对应源代码；任何个人题库、学生数据或 API 密钥均不得纳入公开仓库。

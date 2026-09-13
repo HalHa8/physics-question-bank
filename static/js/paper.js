@@ -1,5 +1,5 @@
 /**
- * paper.js - 本地化数学题库组卷系统 (Paper Studio)
+ * paper.js - 本地化物理题库组卷系统 (Paper Studio)
  * 纯 Vanilla JS + 渐进式级联架构
  * 严禁使用正则后行断言 (?<!...) 和 (?<=...)
  */
@@ -8,18 +8,18 @@
     'use strict';
 
     // Local Storage Keys
-    const STORAGE_KEY_CART = 'mathbank_paper_cart';
-    const STORAGE_KEY_META = 'mathbank_paper_meta';
-    const STORAGE_KEY_COLLAPSED = 'mathbank_paper_filter_collapsed';
+    const STORAGE_KEY_CART = 'physicsbank_paper_cart';
+    const STORAGE_KEY_META = 'physicsbank_paper_meta';
+    const STORAGE_KEY_COLLAPSED = 'physicsbank_paper_filter_collapsed';
     const PAPER_STREAM_PAGE_SIZE = 15;
 
     // Global Store State
     window.PaperStore = {
         cart: [], // Array of { id: number, score: number }
         meta: {
-            title: '2026年高中数学模拟考试试卷',
+            title: '2026年高中物理模拟考试试卷',
             subtitle: '',
-            paper_type: 'exam_19',
+            paper_type: 'exam',
             section_order: [],
             solution_space_default: '7.0',
             show_notice: true,
@@ -792,7 +792,7 @@
                         <label class="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-0.5">主标题</label>
                         <input type="text" id="paperMetaTitle" value="${escapeHtml(meta.title)}" 
                             oninput="updatePaperMeta('title', this.value)" onchange="updatePaperMeta('title', this.value)"
-                            class="glass-input w-full px-2 py-1 text-xs rounded-lg" placeholder="如：2026年高中数学期末考试">
+                            class="glass-input w-full px-2 py-1 text-xs rounded-lg" placeholder="如：2026年高中物理期末考试">
                     </div>
                     <div>
                         <label class="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-0.5">副标题 / 备注</label>
@@ -804,7 +804,6 @@
                         <label class="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-0.5">试卷类型预设</label>
                         <select id="paperMetaType" onchange="updatePaperMeta('paper_type', this.value)"
                             class="glass-select w-full px-2 py-1 text-xs rounded-lg">
-                            <option value="exam_19" ${meta.paper_type === 'exam_19' ? 'selected' : ''}>19题高考卷 (含答题卡)</option>
                             <option value="exam" ${meta.paper_type === 'exam' ? 'selected' : ''}>常规试卷</option>
                             <option value="quiz" ${meta.paper_type === 'quiz' ? 'selected' : ''}>日常小练</option>
                         </select>
@@ -1844,7 +1843,7 @@
                 <div class="a4-paper-sheet w-full max-w-[794px] min-h-[1123px] bg-white text-slate-900 px-10 py-12 shadow-2xl rounded-sm border border-slate-300 font-serif leading-relaxed relative overflow-hidden select-none">
                     ${renderA4Header(meta, totalCount, totalScore, 1)}
                     <div class="text-center py-24 text-slate-400 font-sans text-xs">暂无试题数据，请在左侧点击“加入试卷”添加题目</div>
-                    <div class="absolute bottom-5 left-0 right-0 text-center text-xs font-serif text-slate-700 tracking-wider">数学 &nbsp; 第 1 页 (共 1 页)</div>
+                    <div class="absolute bottom-5 left-0 right-0 text-center text-xs font-serif text-slate-700 tracking-wider">物理 &nbsp; 第 1 页 (共 1 页)</div>
                 </div>
             `;
         }
@@ -2161,7 +2160,7 @@
 
                     <!-- Page Footer -->
                     <div class="absolute bottom-5 left-0 right-0 text-center text-xs font-serif text-slate-700 tracking-wider">
-                        数学 &nbsp; 第 ${pgIdx + 1} 页 (共 ${totalPages} 页)
+                        物理 &nbsp; 第 ${pgIdx + 1} 页 (共 ${totalPages} 页)
                     </div>
                 </div>
             `;

@@ -111,9 +111,9 @@ def test_cross_page_text_is_merged_without_question_terminator():
 
 
 def test_pdf_parse_system_prompt_includes_formula_and_cross_page_rules():
-    prompt = build_pdf_parse_system_prompt({"必修一": {"集合": []}}, False)
-    assert "\\sqrt{...}" in prompt
-    assert "\\frac{...}{...}" in prompt
+    prompt = build_pdf_parse_system_prompt({"必修第一册": {"运动的描述": []}}, False)
+    assert "矢量、上下标、正负方向、单位、有效数字" in prompt
+    assert "不得根据语境擅自改变物理量字母" in prompt
     assert "\\fillin" in prompt
     assert "MATHBANK_PDF_PAGE:N" in prompt
     assert "必须按上下文合并为同一道完整题目" in prompt

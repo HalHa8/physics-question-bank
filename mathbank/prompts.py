@@ -1,22 +1,22 @@
-"""Central prompt constants and pure prompt builders for MathBank AI flows."""
+"""Central prompt constants and pure prompt builders for PhysicsBank AI flows."""
 
 import json
 
 
 COMMON_OCR_PROMPT = (
-    "请精确识别并提取图像中的所有文字与数学公式（不得遗漏方括号与题目来源），直接输出转录结果，严禁包含任何前言或解释。\n"
-    "【排版与 LaTeX 语法规范】:\n"
-    "1. 公式级包裹：仅对纯数学符号、方程、集合与代数式使用 LaTeX 包裹（行内 $...$，独立 $$...$$）。严禁整段中文包裹 LaTeX，严禁在公式内部滥用 \\text{...} 包裹大段中文。\n"
-    "2. 变量与坐标包裹：几何点符号、单个字母变量及坐标表达式（如 $(1,2)$）必须严格包裹单美元符号 $...$。\n"
+    "请精确识别并提取图像中的所有文字、物理量、单位与公式（不得遗漏方括号、图表标注和题目来源），直接输出转录结果，严禁包含任何前言或解释。\n"
+    "【物理排版与 LaTeX 语法规范】:\n"
+    "1. 公式级包裹：仅对物理量、方程、矢量和代数式使用 LaTeX 包裹（行内 $...$，独立 $$...$$）。物理量上下标、矢量箭头、正负号、角标和有效数字必须忠实保留；严禁整段中文包裹 LaTeX。\n"
+    "2. 单位与数值：数字和单位不得拆错或遗漏，单位优先使用 `\\mathrm{}` 或 `\\si{}` 表达；区分 m、s、kg、N、J、V、A、T、Hz 等大小写，保留科学计数法和不确定度。\n"
     "3. 选择题 choices 环境规范：选项部分统一格式化为 LaTeX 的 `choices` 环境（使用 \\begin{choices} 和 \\end{choices} 包裹，每项以 \\item 开头，剥离原本的 A., B., C., D. 标号前缀）。\n"
     "4. 空行换行规范：在多行推导、解答步骤或小标号（如 (1), (2), ①, ②）之间，必须使用空行/双回车（\\n\\n）分隔。\n"
-    "5. 表格与层级：表格用 `tabular` 保留行列，合并格用 `multicolumn/multirow`；标题、小问和图号顺序不变。\n"
+    "5. 表格与图像：实验表格用 `tabular` 保留行列、单位和有效数字；坐标图必须保留横纵轴物理量、单位、刻度、斜率和截距信息；标题、小问和图号顺序不变。\n"
     "6. 多图/表内图：在各图原位置写 `[插图待补: 图1]`（无图号按阅读顺序编号），表格内占位留在所属单元格；勿描述、猜测或重绘。\n"
     "7. 纯净符号：过滤 \\, 或 \\! 等干扰渲染的薄空格。"
 )
 
 ILLUSTRATION_BOX_PROMPT = (
-    "\n8. 自动绘图：仅当全图恰有一幅且位于表格外的独立几何/函数图时，在文末追加"
+    "\n8. 自动绘图：仅当全图恰有一幅且位于表格外的独立物理示意图（受力图、电路图、光路图、运动图像等）时，在文末追加"
     " `[ILLUSTRATION_BOX: ymin, xmin, ymax, xmax]`（0-100 整数）；多图或无图时绝不输出该标记。"
 )
 
@@ -25,8 +25,8 @@ CLASSIFICATION_PRIORITY_RULE = (
     "多模块融合题定位：先识别解题过程中实际参与推导的全部教材模块；若涉及两个或以上候选模块，"
     "必须按上方教材大纲的排列顺序，选择位置最靠后的模块作为最终分类。先比较学段从上到下的顺序，"
     "若属于同一学段，再比较章节从前到后的顺序；不得按考点在题干中的出现先后、篇幅多少或主次印象决定。"
-    "例如一道题同时实质考查必修一“三角函数”和必修二“平面向量及其应用”，最终必须定位到必修二的"
-    "“平面向量及其应用”。仅作为背景条件被提及、且解题无需使用的内容不计入候选模块。"
+    "例如一道题同时实质考查必修第一册“牛顿运动定律”和必修第二册“机械能守恒定律”，最终必须定位到"
+    "后者。仅作为背景条件被提及、且解题无需使用的内容不计入候选模块。"
 )
 
 
@@ -47,7 +47,7 @@ def build_classification_system_prompt(curriculum: dict) -> str:
         f"{curriculum_text}\n"
         "【分类规则】:\n"
         "1. 仔细阅读并推导题目考点。\n"
-        "2. 必须在上面的可选教材范围中为本题挑选最合适的一个【学段】（例如：必修一）和一个【所属章节】（例如：5. 三角函数，必须是可选章节中的精确字符串）。\n"
+        "2. 必须在上面的可选教材范围中为本题挑选最合适的一个【学段】（例如：必修第一册）和一个【所属章节】（例如：第四章 运动和力的关系，必须是可选章节中的精确字符串）。\n"
         f"3. {CLASSIFICATION_PRIORITY_RULE}\n"
         "4. 只判定粗粒度题型 `question_form`：填空题为 `fill_in_blank`，解答题为 `detailed_answer`，任何选择题一律为 `choice`，无法可靠判断时为 `unknown`。严禁输出或猜测 `single_choice`、`multi_choice`、单选题、多选题。题干出现 `\\fillin` 时应判为填空题，出现 `\\begin{choices}` 时应判为选择题。\n"
         "5. 你的输出必须是一个合法的 JSON 字符串，包含且仅包含以下三个 key，不要有任何多余的 Markdown 标记、代码块或解释文字：\n"
@@ -72,9 +72,11 @@ def build_ai_solve_prompts(
         "single_choice": "单选题",
         "multi_choice": "多选题",
         "fill_in_blank": "填空题",
-        "detailed_answer": "解答题",
+        "experiment": "实验题",
+        "detailed_answer": "计算题",
+        "short_answer": "简答题",
     }
-    type_str = type_mapping.get(question_type, "数学题")
+    type_str = type_mapping.get(question_type, "物理题")
 
     if question_type == "single_choice":
         first_block_header = "\\\\textbf{【参考答案】}"
@@ -113,11 +115,12 @@ def build_ai_solve_prompts(
         )
 
     system_instructions = (
-        "你是一位极其严谨的资深高中数学教研专家。请解答用户输入的高中数学题目。\n"
+        "你是一位极其严谨的资深高中物理教研专家。请解答用户输入的高中物理题目。\n"
         "【解题纪律与超纲禁令】\n"
-        "1. 严禁超纲：解题思路与技巧必须完全限制在中国普通高中数学大纲范围内（严禁使用微积分、洛必达法则、泰勒展开等大学高等数学方法）。\n"
-        "2. 逻辑严密与极简凝练：推导过程必须逻辑完备、因果严谨（写明公理定理前提，不盲目跳步），但语言精练直奔得分点，拒绝任何多余的口水话或过度解释。\n"
-        f"3. 零多余前言尾注：回答必须干净地从结构化板块开始，第一个字符必须是“{first_block_header}”，严禁包含任何问候语、前言、导语或尾注总结。\n"
+        "1. 严禁超纲：解题必须限制在中国普通高中物理课程范围内，不使用大学物理、微积分或超纲近似方法。\n"
+        "2. 规范建模：明确研究对象、物理过程、正方向和适用规律；列原始方程后再代数或代数值，矢量方向和正负号必须一致。\n"
+        "3. 结果检查：数值答案必须带单位并保留合理有效数字；检查量纲、数量级、边界条件和物理意义。实验题还需说明原理、操作、数据处理与误差来源。\n"
+        f"4. 零多余前言尾注：回答必须干净地从结构化板块开始，第一个字符必须是“{first_block_header}”，严禁包含任何问候语、前言、导语或尾注总结。\n"
         "【LaTeX 与段落换行规范】\n"
         "1. 必须使用标准 LaTeX 语法书写公式（行内 $...$，行间 $$\\n...\\n$$）。绝对禁止使用 Markdown 的 ** 双星号加粗语法，标题必须使用 LaTeX 粗体 `\\\\textbf{...}`。\n"
         "2. 物理换行与空行规范 (极重要)：在分步推导、证明步骤（如“解：”、“(1) 证明：”、“因为”、“所以”、“故”）、不同小问以及标题与段落之间，必须使用空行/双回车（\\n\\n）分隔！单回车无法实现物理换行。\n"
@@ -151,7 +154,7 @@ def build_paper_selection_prompts(
         else ""
     )
     system_prompt = (
-        "你是一位极其资深的高中数学教研组长和智能命题专家。\n"
+        "你是一位极其资深的高中物理教研组长和智能命题专家。\n"
         "请根据教师输入的自然语言组卷需求，从给出的候选试题池中遴选出最符合教学意图、涵盖关键结构情形、具备错解检验能力的题目。"
         f"{review_hint}\n"
         "【输出格式规范】\n"
@@ -186,16 +189,16 @@ def build_pdf_parse_system_prompt(curriculum: dict, generate_answers_bool: bool)
         )
 
     system_instructions = (
-        "你是一位资深高中数学教研专家与 LaTeX 排版大师。请阅读输入的试卷源码，智能切分为题目列表 JSON。\n\n"
+        "你是一位资深高中物理教研专家与 LaTeX 排版专家。请阅读输入的试卷源码，智能切分为题目列表 JSON。\n\n"
         "【可选教材范围与章节】:\n"
         f"{curriculum_text}\n"
         "【核心拆题与分类规范】:\n"
-        "1. 字段分类：挑选精确匹配的学段 `category_compulsory` 与章节 `category_chapter`；题型 `question_type`（single_choice / multi_choice / fill_in_blank / detailed_answer）；难度 `difficulty`（easy_error / challenge / qiangji）；剥离题号与出处信息（如 2024·全国·高考真题）填入 `source`。\n"
+        "1. 字段分类：挑选精确匹配的学段 `category_compulsory` 与章节 `category_chapter`；题型 `question_type`（single_choice / multi_choice / experiment / detailed_answer / short_answer）；难度 `difficulty`（easy_error / normal / challenge / qiangji）；剥离题号与出处信息（如 2024·全国·高考真题）填入 `source`。含实验装置、实验步骤、数据表格或误差分析的综合题优先标为 experiment；要求建立方程并求数值或表达式的主观题标为 detailed_answer。\n"
         f"1.1 {CLASSIFICATION_PRIORITY_RULE}\n"
-        "2. 文字与插图忠实保留：100% 完整保留题干所有汉字，绝对禁止删除“（如图）”、“如图所示”、“如右图所示”等几何指代描述！绝对保留 Markdown/LaTeX 原有的图片链接（如 `![](/static/uploads/...)` 或 `\\includegraphics{...}`），并将其 URL/文件名提取至 `referenced_images` 数组中。如输入中出现 `[公式待核对]`、`[公式结构待核对]`、`[特殊字符待核对]` 或“公式无法安全提取”，必须原样保留标记及紧随的预览图，绝不得猜测、补写或替换公式。\n"
+        "2. 文字与插图忠实保留：100% 完整保留题干所有汉字，绝对禁止删除“（如图）”、“如图所示”、“如右图所示”等图示指代描述！绝对保留 Markdown/LaTeX 原有的图片链接（如 `![](/static/uploads/...)` 或 `\\includegraphics{...}`），并将其 URL/文件名提取至 `referenced_images` 数组中。如输入中出现 `[公式待核对]`、`[公式结构待核对]`、`[特殊字符待核对]` 或“公式无法安全提取”，必须原样保留标记及紧随的预览图，绝不得猜测、补写或替换公式。\n"
         "2.1 公式锁定协议：若正文出现 `<mathbank-math id=\"MBM_...\">完整公式</mathbank-math>`，标签内公式在原位置完整可见，可用于理解、分类和解题，但它是只读来源。输出题干或原版答案时，必须在同一语义位置将每个标签替换为且仅替换为一次 `[[对应的完整 id]]`，例如 `[[MBM_xxx_0001]]`；禁止遗漏、重复、改名或把同一 id 放入多个题目。若需要生成新解析，可另写普通 LaTeX 公式，但不得在新解析中重复这些锁定 id。\n"
         "3. 公式格式化与排版环境：选择题选项统一格式化为 `\\begin{choices} \\item ... \\end{choices}` 环境；填空题下划线统一使用标准的 `\\fillin` 宏；文本加粗必须使用 `\\textbf{...}`（严禁双星号 `**`）。\n"
-        "4. 符号与公式规范：仅对含义明确的 Unicode 数学字符与结构（如 √、∈、α、β以及分子/分母边界清晰的分式）规范化为等价 LaTeX 语法（如 `\\sqrt{...}`, `\\frac{...}{...}`, `\\in`, `\\alpha`）。不得将普通字母 `j`、`p` 等根据语境猜成希腊字母或分式；不得根据题意自行重建原文中已损坏、缺失或标记待核对的公式。\n"
+        "4. 物理量与公式规范：保留矢量、上下标、正负方向、单位、有效数字与科学计数法；仅对含义明确的 Unicode 符号规范化为等价 LaTeX。不得根据语境擅自改变物理量字母、单位大小写或补写损坏公式。\n"
         "4.1 PDF 跨页协议：`<!-- MATHBANK_PDF_PAGE:N -->` 仅表示后续原文来自 PDF 第 N 页，用于来源追踪，不是题目边界，也不得出现在输出题干中。若一道题的题干、公式、表格、选项或解析跨越页标，必须按上下文合并为同一道完整题目，禁止按页拆成两题。\n"
         "5. 换行与段落规范：不同小问（如 (1)、(2)、(i)、(ii)）、证明推导步骤与自然段落之间，必须使用双换行/空行（`\\n\\n`）分隔！\n"
         "6. 题干净化与客观题答案：若题干/括号/下划线中夹带了答案，必须擦除还原为纯净的空占位符；客观题（选择题/填空题）必须在 `answer_markdown` 第一行醒目输出最终正确答案（如选项字母 A 或数值/表达式），再呈现解析。\n"
@@ -207,7 +210,7 @@ def build_pdf_parse_system_prompt(curriculum: dict, generate_answers_bool: bool)
         '    {\n'
         '      "content": "纯净题干（包含 LaTeX 排版与图片标记）",\n'
         '      "answer_markdown": "答案与解析",\n'
-        '      "question_type": "single_choice / multi_choice / fill_in_blank / detailed_answer",\n'
+        '      "question_type": "single_choice / multi_choice / experiment / detailed_answer / short_answer",\n'
         '      "category_compulsory": "学段名称",\n'
         '      "category_chapter": "章节名称",\n'
         '      "difficulty": "easy_error / challenge / qiangji",\n'
@@ -229,7 +232,7 @@ def build_import_parse_system_prompt(curriculum: dict) -> str:
         "3. `[MATHBANK_ORIGINAL_CORRECT]` 只表示原卷标注的正确选项：将其转换为带 `[EXTRACTED_ORIGINAL]` 的答案字母，题干 choices 中不得保留该标记。\n"
         "4. solution/answer/analysis/proof 等原卷答案环境必须关联到前一道题并标记 `[EXTRACTED_ORIGINAL]`，不得把答案误拆成新题。\n"
         "5. `[MATHBANK_TEX_MACRO_CONTEXT_BEGIN/END]` 之间仅是未展开宏的定义上下文。应将正文中的自定义宏转换为等价标准 LaTeX，不得把上下文或未定义宏原样写进题干。\n"
-        "6. 完整保留 tabular/array/matrix/cases/aligned 等数学和表格结构；TikZ 源码不得擅自改写，若无法安全转为题干插图则原样保留并提示人工核对。\n"
+        "6. 完整保留 tabular/array/matrix/cases/aligned 等公式和表格结构；TikZ 源码不得擅自改写，若无法安全转为题干插图则原样保留并提示人工核对。\n"
         "7. includegraphics 的原始文件名必须同时放入 referenced_images；不要虚构、改名或丢弃图片引用。\n"
         "8. input/include 指向的外部子文件在单文件模式下不可读取，不得根据文件名猜测缺失题目。\n"
     )
@@ -238,10 +241,10 @@ def build_import_parse_system_prompt(curriculum: dict) -> str:
 def build_latex_error_explanation_prompts(diagnostic: dict) -> tuple[str, str]:
     """Build a privacy-minimized prompt for explaining one compile error."""
     system_prompt = (
-        "你是一名高中数学试卷 LaTeX 排版故障解释助手。"
+        "你是一名高中物理试卷 LaTeX 排版故障解释助手。"
         "请把编译错误解释成普通教师能看懂的中文，并给出可操作的修复方法。"
         "只能依据提供的错误和局部源码判断，不得编造不存在的题目内容、宏包或文件。"
-        "不要重写整份试卷，不要改变数学含义。"
+        "不要重写整份试卷，不要改变物理含义。"
         "必须只返回严格 JSON 对象，字段为 summary、cause、location、fixes、package、command；"
         "fixes 必须是 1 至 4 条短句组成的数组。"
     )
@@ -274,12 +277,12 @@ def build_tikz_draw_prompt(
         "用户同时提供了一张参考图。请以参考图的拓扑关系、点线位置、"
         "字母标注和实虚线为主要视觉依据，文字要求优先用于澄清或修改局部细节。"
         if multimodal
-        else "本次没有参考图，请依据用户要求与数学上下文建立合理、简洁的示意图。"
+        else "本次没有参考图，请依据用户要求与物理上下文建立合理、简洁的示意图。"
     )
     prompt = (
-        "你是一个 LaTeX/TikZ 数学绘图专家。\n"
+        "你是一个 LaTeX/TikZ 高中物理绘图专家，能够绘制受力图、电路图、光路图、运动图像和场线图。\n"
         f"{source_description}\n"
-        "【数学上下文】\n"
+        "【物理上下文】\n"
         f"```latex\n{stem}\n```\n"
     )
     if guidance:
@@ -294,8 +297,8 @@ def build_tikz_draw_prompt(
         "【输出与绘图规范】\n"
         "1. 只输出一个 ```latex ... ``` 代码块，其中必须是完整的 "
         "\\begin{tikzpicture}...\\end{tikzpicture}；不得输出闲聊或解释。\n"
-        "2. 优先保证数学拓扑正确：点的连接、交点、平行、垂直、角标记、"
-        "箭头、实虚线和坐标方向不得凭空改变。\n"
+        "2. 优先保证物理关系正确：研究对象、受力方向、导线连接、元件符号、光线方向、场线、"
+        "箭头、实虚线、坐标方向与图像刻度不得凭空改变。\n"
         "3. 点名和符号必须优先使用参考图、用户要求或题干中已出现的名称，"
         "不得无据增加字母。\n"
         "4. 绘图比例、留白与标注位置应适合试卷黑白打印；遮挡线使用 dashed，"
@@ -316,7 +319,7 @@ def build_tikz_correction_prompt(
 
     if rendered_comparison:
         prompt = (
-            "你是一个 TikZ 几何绘图专家。对比 Image A（原题目插图）与 Image B（TikZ 当前渲染图）：\n"
+            "你是一个 TikZ 高中物理绘图专家。对比 Image A（原题目插图）与 Image B（TikZ 当前渲染图）：\n"
             "```latex\n"
             f"{tikz_code}\n"
             "```\n"
@@ -328,7 +331,7 @@ def build_tikz_correction_prompt(
         return prompt
 
     prompt = (
-        "你是一个 LaTeX/TikZ 几何绘图专家。下面第一张图是原始题目的正确几何插图。\n"
+        "你是一个 LaTeX/TikZ 高中物理绘图专家。下面第一张图是原始题目的正确物理插图。\n"
         "我试图用 TikZ 绘制它，但我的代码在编译时报错了。\n"
         "这是我当前编写的代码：\n"
         "```latex\n"
@@ -337,7 +340,7 @@ def build_tikz_correction_prompt(
         f"编译器的具体报错日志如下：\n```text\n{compile_error_log}\n```\n"
         "请完成以下任务：\n"
         "1. 结合原始图片以及报错日志，找出代码中的语法错误或逻辑死循环。\n"
-        "2. 修正这些语法错误，使其能通过 LaTeX 编译，并精准绘制出原始图中的几何图形。\n"
+        "2. 修正这些语法错误，使其能通过 LaTeX 编译，并精准绘制出原始图中的物理关系。\n"
         "3. 你的回答必须以 ```latex ... ``` 代码块包裹修正后的完整 TikZ 代码（只输出 \\begin{tikzpicture} 和 \\end{tikzpicture} 之间的部分，或者包含它们）。请确保不输出任何与代码无关的开场白或闲聊文字。"
     )
     if user_guidance.strip():

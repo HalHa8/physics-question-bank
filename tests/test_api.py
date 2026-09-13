@@ -919,7 +919,7 @@ def test_version_and_update_check_api(client):
     assert res_ver.status_code == 200
     data_ver = res_ver.json()
     assert "current_version" in data_ver
-    assert data_ver["repo"] == "JudgePeach/math-question-bank"
+    assert data_ver["repo"].endswith("/physics-question-bank")
     assert data_ver["server_instance_id"] == SERVER_INSTANCE_ID
 
     # 3. Test GET /api/version/check-update with mocked GitHub response

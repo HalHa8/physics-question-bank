@@ -3381,7 +3381,9 @@ def delete_question(
 
 # ----------------- Category Hierarchy Autocomplete API -----------------
 
-# Backward-compatible names; authoritative data lives in JSON resources.
+# Legacy mathematics presets remain loadable for existing databases, while P is
+# the PhysicsBank default and the only preset exposed by the new interface.
+PHYSICS_CURRICULUM = load_curriculum("P")
 RENJIAO_A_CURRICULUM = load_curriculum("A")
 RENJIAO_B_CURRICULUM = load_curriculum("B")
 SUJIAO_CURRICULUM = load_curriculum("S")
@@ -3391,11 +3393,11 @@ METADATA_FILE = str(DATA_BACKUP_DIR / ("custom_metadata_test.json" if IS_TESTING
 METADATA_CACHE = {}
 
 def get_current_curriculum():
-    return METADATA_CACHE.get("curriculum", RENJIAO_A_CURRICULUM)
+    return METADATA_CACHE.get("curriculum", PHYSICS_CURRICULUM)
 
 def load_or_init_metadata():
     global METADATA_CACHE
-    default_metadata = build_default_metadata("A")
+    default_metadata = build_default_metadata("P")
     
     # Ensure backup directory exists
     os.makedirs(os.path.dirname(METADATA_FILE), exist_ok=True)
@@ -3414,7 +3416,16 @@ def load_or_init_metadata():
                         modified = True
                         
                     curriculum = loaded.get("curriculum", {})
-                    mappings = {
+                    combined_loaded_chapters = " ".join(
+                        " ".join(chapters.keys())
+                        for chapters in curriculum.values()
+                        if isinstance(chapters, dict)
+                    )
+                    is_physics_curriculum = any(
+                        marker in combined_loaded_chapters
+                        for marker in ("运动的描述", "静电场", "电磁感应", "原子核")
+                    )
+                    mappings = {} if is_physics_curriculum else {
                         "选择性必修一": "选修一",
                         "选择性必修二": "选修二",
                         "选择性必修三": "选修三",
@@ -3467,6 +3478,9 @@ def get_active_version_code() -> str:
     for book_content in curriculum.values():
         if isinstance(book_content, dict):
             combined_chapters += " ".join(book_content.keys())
+    physics_markers = ("运动的描述", "运动和力的关系", "静电场", "电磁感应", "原子核")
+    if any(marker in combined_chapters for marker in physics_markers):
+        return "P"
     if "第一章" in combined_chapters:
         return "B"
     if "第 1 章 集合与逻辑" in combined_chapters or "数学建模活动案例" in combined_chapters or "第 2 章 等式与不等式" in combined_chapters or "第 3 章 幂、指数与对数" in combined_chapters:
@@ -3490,7 +3504,15 @@ def route_chapter(comp: str, chap: str, know: str, target: str) -> tuple[str, st
     """跨大纲版本智能章节与小节路由翻译算法，返回 (new_compulsory, new_chapter, new_knowledge)"""
     combined = f"{comp} {chap} {know}"
     new_comp, new_chap = "", ""
-    if target == "A":
+    if target == "P":
+        c_tree = METADATA_CACHE.get("curriculum", PHYSICS_CURRICULUM)
+        if comp in c_tree and chap in c_tree.get(comp, {}):
+            valid_knows = c_tree[comp][chap]
+            return comp, chap, know if know in valid_knows else ""
+        # A safe fallback for legacy/unclassified data. AI classification can
+        # refine this later; do not pretend a mathematics chapter maps exactly.
+        new_comp, new_chap = "必修第一册", "第一章 运动的描述"
+    elif target == "A":
         if "集合" in combined: new_comp, new_chap = "必修一", "1. 集合与常用逻辑用语"
         elif "逻辑" in combined: new_comp, new_chap = "必修一", "1. 集合与常用逻辑用语"
         elif "等式" in combined or "不等式" in combined: new_comp, new_chap = "必修一", "2. 一元二次函数、方程和不等式"
@@ -3636,7 +3658,10 @@ def save_metadata_config(
         for book_content in curriculum.values():
             if isinstance(book_content, dict):
                 combined_chapters += " ".join(book_content.keys())
-        if "第一章" in combined_chapters:
+        physics_markers = ("运动的描述", "运动和力的关系", "静电场", "电磁感应", "原子核")
+        if any(marker in combined_chapters for marker in physics_markers):
+            target_version = "P"
+        elif "第一章" in combined_chapters:
             target_version = "B"
         elif "第 1 章 集合与逻辑" in combined_chapters or "数学建模活动案例" in combined_chapters or "第 2 章 等式与不等式" in combined_chapters or "第 3 章 幂、指数与对数" in combined_chapters:
             target_version = "H"

@@ -1473,10 +1473,10 @@ class WordExamBuilder:
 
     def save_bytes(self) -> bytes:
         properties = self.doc.core_properties
-        properties.title = "MathBank 可编辑 Word 试卷"
-        properties.subject = "高中数学试卷"
-        properties.author = "MathBank"
-        properties.keywords = "数学, 试卷, OMML, 可编辑公式"
+        properties.title = "PhysicsBank 可编辑 Word 试卷"
+        properties.subject = "高中物理试卷"
+        properties.author = "PhysicsBank"
+        properties.keywords = "物理, 试卷, OMML, 可编辑公式"
         output = BytesIO()
         self.doc.save(output)
         return output.getvalue()

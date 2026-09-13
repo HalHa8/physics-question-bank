@@ -570,7 +570,7 @@ def build_latex_document(
     lines.append(r"\everymath{\displaystyle}")
     lines.append("")
     lines.append(f"\\title{{{paper_title}}}")
-    lines.append(r"\subject{数学}")
+    lines.append(r"\subject{物理}")
     lines.append("")
     lines.append(r"\begin{document}")
     lines.append(r"\raggedbottom")
@@ -1179,7 +1179,7 @@ def build_answer_sheet_latex(title: str, subtitle: str, questions_data: list) ->
         \fill[black] ([xshift=0.7cm, yshift=-0.6cm] current page.north west) rectangle ++(10mm, -6mm);
         \fill[black] ([xshift=13.9cm, yshift=-0.6cm] current page.north west) rectangle ++(10mm, -6mm);
         \fill[black] ([xshift=27.1cm, yshift=-0.6cm] current page.north west) rectangle ++(10mm, -6mm);
-        \node at (current page.south) [anchor=south, yshift=0.6cm] {\color{mycolor}\textbf{数学答题卡第\thepage 面（共2面）}};
+        \node at (current page.south) [anchor=south, yshift=0.6cm] {\color{mycolor}\textbf{物理答题卡第\thepage 面（共2面）}};
     \end{tikzpicture}%
 }
 \begin{document}
@@ -1187,7 +1187,7 @@ def build_answer_sheet_latex(title: str, subtitle: str, questions_data: list) ->
 \begin{tikzpicture}
     \useasboundingbox (0,0) rectangle (39.2,28.25);
     \node[font=\fontsize{16pt}{16pt}\selectfont] at (6.45,27.3) {\color{mycolor}\textbf{2026年普通高等学校招生全国统一考试}};
-    \node[font=\fontsize{22pt}{22pt}\selectfont] at (6.45,26.3){\textbf{数学答题卡}};
+    \node[font=\fontsize{22pt}{22pt}\selectfont] at (6.45,26.3){\textbf{物理答题卡}};
     \node at (6.45,25) {考场号：\textcolor{mycolor}{\underline{\hspace{1.3cm}}} \hspace{0.6em}座位号：\textcolor{mycolor}{\underline{\hspace{1.3cm}}}\hspace{0.6em}姓名：\textcolor{mycolor}{\underline{\hspace{2.2cm}}} \hspace{0.6em}班级：\textcolor{mycolor}{\underline{\hspace{1.8cm}}}};
     
     \def\rows{10}\def\cols{10}\def\cellw{0.8}\def\cellh{0.5}\def\beginx{4.9}\def\beginy0{24.2}\def\fontHeight{0.6}\def\smallHeight{0.2}\def\selectw{0.5}\def\selecth{0.25}
