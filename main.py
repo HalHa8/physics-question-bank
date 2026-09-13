@@ -258,7 +258,7 @@ def print_startup_diagnostics():
     pdf_insp_ok = is_pdf_inspector_available()
 
     print("=" * 64, flush=True)
-    print("      本地数学题库教研系统 (MathBank) 启动自检与诊断面板", flush=True)
+    print("      本地物理题库教研系统 (PhysicsBank) 启动自检与诊断面板", flush=True)
     print("=" * 64, flush=True)
     print(f"  • Python 运行环境   : {sys.version.split()[0]} [{env_type}]", flush=True)
     print(f"  • Python 可执行路径 : {sys.executable}", flush=True)
@@ -294,6 +294,11 @@ def print_optional_tool_diagnostics():
     )
 
 def heal_database_curriculum_names():
+    # These aliases belong to legacy mathematics curricula. PhysicsBank uses
+    # the official book names such as “必修第一册”, so applying the old repair
+    # would silently corrupt valid physics classifications on every startup.
+    if get_active_version_code() == "P":
+        return
     from mathbank.database import SessionLocal
     db = SessionLocal()
     try:
@@ -1720,7 +1725,7 @@ def check_version_update():
         url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
         headers = {
             "Accept": "application/vnd.github.v3+json",
-            "User-Agent": "MathBank-Question-Bank-App"
+            "User-Agent": "PhysicsBank-Question-Bank-App"
         }
         resp = robust_request_get(url, headers=headers, timeout=5)
         if resp.status_code == 200:

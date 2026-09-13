@@ -1,5 +1,5 @@
 #!/bin/bash
-# Locate Python; the shared local launcher prepares the environment and opens MathBank.
+# Locate Python; the shared local launcher prepares the environment and opens PhysicsBank.
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P) || exit 1
 cd "$SCRIPT_DIR" || exit 1
 

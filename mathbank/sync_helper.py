@@ -25,7 +25,10 @@ def _temporary_output_path(final_path: str) -> str:
 
 
 def _fsync_file(path: str) -> None:
-    with open(path, "rb") as handle:
+    # On Windows, os.fsync delegates to the CRT _commit operation, which
+    # returns EBADF for read-only descriptors. The file is already complete;
+    # r+b provides the write-capable descriptor required for a real flush.
+    with open(path, "r+b") as handle:
         os.fsync(handle.fileno())
 
 

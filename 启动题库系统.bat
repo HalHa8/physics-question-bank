@@ -75,12 +75,12 @@ exit /b %LAUNCHER_EXIT%
 
 :missing_main
 echo [E_PROJECT_ROOT] main.py was not found beside this launcher.
-echo Extract or clone the complete MathBank project before running this file.
+echo Extract or clone the complete PhysicsBank project before running this file.
 goto bootstrap_error
 
 :missing_runtime
 echo [E_RUNTIME] The embedded python\python.exe runtime is missing.
-echo Use the complete MathBank-Windows-x64.zip package.
+echo Use the complete PhysicsBank-Windows-x64.zip package.
 goto bootstrap_error
 
 :missing_dll

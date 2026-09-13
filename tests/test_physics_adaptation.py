@@ -44,3 +44,27 @@ def test_physics_prompts_preserve_units_and_modeling_discipline():
     assert "量纲、数量级、边界条件和物理意义" in system_prompt
     assert "experiment / detailed_answer / short_answer" in parse_prompt
     assert "受力图、电路图、光路图" in draw_prompt
+
+
+def test_legacy_math_heal_does_not_rewrite_physics_book_names(db_session, monkeypatch):
+    import main
+    from mathbank.database import Question
+
+    monkeypatch.setitem(
+        main.METADATA_CACHE,
+        "curriculum",
+        build_default_metadata()["curriculum"],
+    )
+    question = Question(
+        content="物体做匀变速直线运动。",
+        question_type="detailed_answer",
+        category_compulsory="必修第一册",
+        category_chapter="第二章 匀变速直线运动的研究",
+    )
+    db_session.add(question)
+    db_session.commit()
+
+    main.heal_database_curriculum_names()
+    db_session.expire_all()
+
+    assert db_session.get(Question, question.id).category_compulsory == "必修第一册"

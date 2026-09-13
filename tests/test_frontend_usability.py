@@ -1641,7 +1641,7 @@ global.console = { ...console, error() {} };
     assert result.returncode == 0, result.stderr
 
 
-def test_paper_selected_stream_paginates_with_full_cart_indexes_and_total_counts():
+def test_paper_selected_stream_paginates_with_full_cart_indexes_and_total_counts(tmp_path):
     paper_source = _read(STATIC_JS_DIR / "paper.js")
     state_start = paper_source.index("function clampPaperStreamPage")
     state_end = paper_source.index("function cancelBankQuestionsFetch", state_start)
@@ -1774,8 +1774,13 @@ if (window.PaperStore.streamPagination.selected.page !== 1 ||
   throw new Error('selected page did not clamp after cart shrink');
 }
 '''
+    # Windows CreateProcess has a much smaller command-line limit than POSIX.
+    # Execute this large extracted regression from a UTF-8 file instead of
+    # passing the whole program through `node -e`.
+    script_path = tmp_path / "paper_selected_stream_regression.js"
+    script_path.write_text(script, encoding="utf-8")
     result = subprocess.run(
-        [node, "-e", script],
+        [node, str(script_path)],
         cwd=PROJECT_ROOT,
         text=True,
         capture_output=True,

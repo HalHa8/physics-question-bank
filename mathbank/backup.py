@@ -374,7 +374,10 @@ def _write_zip_atomic(
             for path in sorted(payload_dir.rglob("*")):
                 if path.is_file():
                     archive.write(path, path.relative_to(payload_dir).as_posix())
-        with temp_path.open("rb") as handle:
+        # Windows' CRT rejects fsync/_commit on a read-only descriptor with
+        # EBADF. Reopen the completed archive for update so the durability
+        # barrier works on Windows as well as POSIX systems.
+        with temp_path.open("r+b") as handle:
             os.fsync(handle.fileno())
         os.replace(temp_path, output_path)
         output_path.chmod(0o600)

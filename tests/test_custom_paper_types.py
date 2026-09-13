@@ -84,7 +84,7 @@ def test_custom_label_is_literal_text_in_tex_and_word():
 
 
 def test_frontend_type_order_matches_backend_including_old_numeric_and_prototype_keys():
-    source = (Path(__file__).resolve().parents[1] / "static/js/paper.js").read_text()
+    source = (Path(__file__).resolve().parents[1] / "static/js/paper.js").read_text(encoding="utf-8")
     start = source.index("    function isWrittenQuestionType(")
     end = source.index("    function getDifficultyBadge(", start)
     script = "const window = {systemMetadata: {question_types: [{value:'proof',label:'证明题'}]}};\n" + source[start:end]
@@ -185,7 +185,7 @@ def test_partial_and_malformed_order_cannot_drop_new_types():
 
 
 def test_frontend_section_move_preserves_questions_hidden_positions_and_snapshot():
-    source = (Path(__file__).resolve().parents[1] / "static/js/paper.js").read_text()
+    source = (Path(__file__).resolve().parents[1] / "static/js/paper.js").read_text(encoding="utf-8")
     helpers = source[source.index("    function isWrittenQuestionType("):source.index("    function getDifficultyBadge(")]
     handler = source[source.index("    window.movePaperSection ="):source.index("    // Reorder Items strictly")]
     signature = source[source.index("    function getPaperCartSignature("):source.index("    function beginPaperAction(")]
