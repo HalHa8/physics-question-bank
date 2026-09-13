@@ -35,6 +35,27 @@ python -m uvicorn main:app --host 127.0.0.1 --port 8001
 - `data_backup/` 中的个人题库导出和备份
 - `static/uploads/` 中的题目图片
 
+## 可选的排版软件
+
+LaTeX 不是 Python 包，因此不会随 `pip install -r requirements-dev.txt` 安装。PhysicsBank 把它设计成可选的系统级工具：
+
+| 功能 | XeLaTeX | Pandoc |
+|---|---:|---:|
+| 题目录入、检索、分类与网页公式预览 | 不需要 | 不需要 |
+| 图片 OCR、PDF/Word/LaTeX 试卷导入 | 不需要 | 不需要 |
+| 导出 LaTeX 源码包 | 不需要 | 不需要 |
+| 编译 PDF 试卷和 TikZ 物理示意图 | **需要** | 不需要 |
+| 导出含可编辑公式的 Word 文档 | 仅降级路径需要 | **建议安装** |
+
+Windows 上如需完整 PDF 与 TikZ 功能，推荐安装完整 TeX Live，也可以使用 MiKTeX。安装后重新打开终端并确认：
+
+```powershell
+where.exe xelatex
+xelatex --version
+```
+
+本项目不会静默安装 TeX 发行版，因为它体积较大、属于系统级软件，并涉及安装位置、镜像源和自动补包策略等用户选择。启动诊断会显示 `latex=missing` 或检测到的实际路径。
+
 ## 当前限制
 
 - 原项目的 `exam_19` 数学模板仍作为兼容代码保留，但物理版界面不再将它作为默认模板；建议使用“常规试卷”并自定义题型顺序。
