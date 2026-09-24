@@ -568,7 +568,7 @@ def test_version_eight_adds_figure_size_after_verified_backup(tmp_path, monkeypa
     result = db_migrations.migrate_database(engine)
 
     assert result["from_version"] == 8
-    assert result["to_version"] == 9
+    assert result["to_version"] == db_migrations.LATEST_SCHEMA_VERSION
     assert result["added_figure_size"] == 1
     assert result["added_figure_align_custom"] == 1
     assert result["backup"]
@@ -589,7 +589,7 @@ def test_version_eight_adds_figure_size_after_verified_backup(tmp_path, monkeypa
         assert connection.execute(
             "SELECT figure_size, figure_align_custom FROM questions WHERE id = 1"
         ).fetchone() == ("auto", 0)
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 9
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == db_migrations.LATEST_SCHEMA_VERSION
 
     with _sqlite_connection(Path(result["backup"])) as backup_connection:
         backup_columns = {
@@ -616,7 +616,7 @@ def test_init_db_upgrades_v8_before_orm_metadata_can_mask_the_column(
     database_module.init_db()
 
     with _sqlite_connection(database_path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 9
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == db_migrations.LATEST_SCHEMA_VERSION
         assert connection.execute(
             "SELECT figure_size, figure_align_custom FROM questions WHERE id = 1"
         ).fetchone() == ("auto", 0)

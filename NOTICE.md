@@ -10,3 +10,5 @@ AI prompts, physics question types, interface wording, and physics paper export
 defaults.
 
 PhysicsBank is distributed under the same GNU AGPL-3.0 license. See `LICENSE`.
+The codebase also incorporates upstream MathBank changes through commit
+`cf10fff` (MathBank 2.3.1), while retaining the original repository history.

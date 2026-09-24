@@ -7,6 +7,15 @@ import pytest
 from scripts import release_overlay
 
 
+def _symlink_or_skip(link: Path, target: Path, *, target_is_directory: bool = False) -> None:
+    try:
+        link.symlink_to(target, target_is_directory=target_is_directory)
+    except OSError as exc:
+        if getattr(exc, "winerror", None) == 1314:
+            pytest.skip("Windows symlink privilege is unavailable")
+        raise
+
+
 def _write(root: Path, relative: str, content: bytes | str) -> Path:
     path = root.joinpath(*relative.split("/"))
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -154,7 +163,7 @@ def test_overlay_preserves_non_regular_replacement_of_an_old_release_file(tmp_pa
     release_overlay.apply_release_overlay(tmp_path, "macos")
 
     obsolete.unlink()
-    obsolete.symlink_to(tmp_path / "main.py")
+    _symlink_or_skip(obsolete, tmp_path / "main.py")
     _write(tmp_path, "main.py", "version two")
     _install_manifest(tmp_path, "macos", ["main.py"], version="2.0.0")
     release_overlay.apply_release_overlay(tmp_path, "macos")
@@ -171,7 +180,7 @@ def test_overlay_does_not_follow_a_replaced_parent_directory(tmp_path):
     old_file.unlink()
     old_file.parent.rmdir()
     outside = _write(tmp_path, "outside/old.py", "release-owned")
-    (tmp_path / "mathbank").symlink_to(tmp_path / "outside", target_is_directory=True)
+    _symlink_or_skip(tmp_path / "mathbank", tmp_path / "outside", target_is_directory=True)
     _write(tmp_path, "main.py", "version two")
     _install_manifest(tmp_path, "macos", ["main.py"], version="2.0.0")
 
@@ -186,7 +195,7 @@ def test_manifest_file_with_linked_parent_is_rejected(tmp_path):
     scripts = tmp_path / "scripts"
     redirected = tmp_path / "redirected-scripts"
     scripts.rename(redirected)
-    scripts.symlink_to(redirected, target_is_directory=True)
+    _symlink_or_skip(scripts, redirected, target_is_directory=True)
 
     with pytest.raises(release_overlay.ReleaseOverlayError, match="linked or unsafe parent"):
         release_overlay.apply_release_overlay(tmp_path, "macos")
@@ -244,9 +253,7 @@ def test_windows_runtime_is_reconciled_exactly(tmp_path):
 def test_windows_runtime_unlinks_directory_symlink_without_following_it(tmp_path):
     outside = _write(tmp_path, "outside-runtime/user-data.txt", "keep")
     _write(tmp_path, "python/python.exe", "runtime")
-    (tmp_path / "python" / "linked").symlink_to(
-        outside.parent, target_is_directory=True
-    )
+    _symlink_or_skip(tmp_path / "python" / "linked", outside.parent, target_is_directory=True)
     _install_manifest(tmp_path, "windows-x64", ["python/python.exe"])
 
     result = release_overlay.apply_release_overlay(tmp_path, "windows-x64")
@@ -430,9 +437,7 @@ def test_release_state_directory_link_is_rejected(tmp_path):
     _install_manifest(tmp_path, "macos", ["main.py"])
     outside = tmp_path / "outside-state"
     outside.mkdir()
-    (tmp_path / release_overlay.STATE_DIRECTORY).symlink_to(
-        outside, target_is_directory=True
-    )
+    _symlink_or_skip(tmp_path / release_overlay.STATE_DIRECTORY, outside, target_is_directory=True)
 
     with pytest.raises(release_overlay.ReleaseOverlayError, match="state path"):
         release_overlay.apply_release_overlay(tmp_path, "macos")
@@ -467,7 +472,7 @@ def test_runtime_lock_symlink_is_rejected_without_touching_target(tmp_path):
     outside = _write(tmp_path, "outside-lock", "do not touch")
     state = tmp_path / release_overlay.STATE_DIRECTORY
     state.mkdir()
-    (state / "runtime.lock").symlink_to(outside)
+    _symlink_or_skip(state / "runtime.lock", outside)
 
     with pytest.raises(release_overlay.ReleaseOverlayError, match="not a regular file"):
         release_overlay.apply_release_overlay(tmp_path, "macos")

@@ -141,9 +141,23 @@ class Question(Base):
     figure_size = Column(
         String(20), nullable=False, default="auto", server_default="auto"
     )  # 题末可分离插图尺寸: auto, small, medium, large
+    _image_layouts = Column(Text, nullable=False, default="{}", server_default="{}", name="image_layouts")
     tags = Column(Text, default="")  # 自定义标签 (逗号分隔或字符串)
     usage_count = Column(Integer, default=0, index=True)  # 组卷引用次数
     created_at = Column(DateTime, default=_utcnow_naive)
+
+    @property
+    def image_layouts(self):
+        from .image_layout import normalize_image_layouts
+        try:
+            return normalize_image_layouts(self._image_layouts or "{}", self.content)
+        except ValueError:
+            return {}
+
+    @image_layouts.setter
+    def image_layouts(self, value):
+        from .image_layout import normalize_image_layouts
+        self._image_layouts = json.dumps(normalize_image_layouts(value, self.content), ensure_ascii=False)
 
     @property
     def image_paths(self):
@@ -228,6 +242,7 @@ class Question(Base):
             "figure_align": self.figure_align or "right",
             "figure_align_custom": bool(self.figure_align_custom),
             "figure_size": normalize_figure_size(self.figure_size),
+            "image_layouts": self.image_layouts,
             "tags": self.tags,
             "usage_count": self.usage_count or 0,
             "created_at": (self.created_at.isoformat() + "Z") if self.created_at else None
@@ -250,6 +265,7 @@ class Question(Base):
             "figure_align": self.figure_align or "right",
             "figure_align_custom": bool(self.figure_align_custom),
             "figure_size": normalize_figure_size(self.figure_size),
+            "image_layouts": self.image_layouts,
             "tags": self.tags,
             "usage_count": self.usage_count or 0,
             "created_at": (self.created_at.isoformat() + "Z") if self.created_at else None
@@ -619,6 +635,8 @@ def init_db():
                 required_columns["questions"].add("tikz_reference_image_path")
             if current_version >= 5:
                 required_columns["questions"].add("content_tikz_assets")
+            if current_version >= 10:
+                required_columns["questions"].add("image_layouts")
             if current_version >= 9:
                 required_columns["questions"].add("figure_size")
                 required_columns["questions"].add("figure_align_custom")

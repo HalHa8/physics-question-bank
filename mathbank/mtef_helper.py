@@ -213,6 +213,19 @@ class _MtefParser:
                     if completed == count:
                         break
 
+    def ruler(self) -> MtefNode:
+        """Read a ruler body: count followed by (type, 16-bit offset) pairs.
+
+        LINE/PILE embed this body directly, without the standalone record tag 7.
+        Reading its count as a record type shifts all subsequent formula bytes.
+        """
+        stops = self.u8()
+        for _ in range(stops):
+            if self.u8() > 4:
+                raise MtefParseError("MTEF 制表位类型无效")
+            self.u16()
+        return MtefNode("ruler")
+
     def record(self, depth: int = 0) -> MtefNode:
         self.record_count += 1
         if self.record_count > MAX_RECORDS:
@@ -228,9 +241,7 @@ class _MtefParser:
             if options & 0x04:
                 self.u16()
             if options & 0x02:
-                ruler = self.record(depth + 1)
-                if ruler.kind != "ruler":
-                    raise MtefParseError("LINE 的 RULER 记录无效")
+                self.ruler()
             null_line = bool(options & 0x01)
             return MtefNode("line", {"null": null_line}, self.object_list(depth, null_line=null_line))
 
@@ -276,9 +287,7 @@ class _MtefParser:
             halign = self.u8()
             valign = self.u8()
             if options & 0x02:
-                ruler = self.record(depth + 1)
-                if ruler.kind != "ruler":
-                    raise MtefParseError("PILE 的 RULER 记录无效")
+                self.ruler()
             return MtefNode("pile", {"halign": halign, "valign": valign}, self.object_list(depth))
 
         if record_type == 5:  # MATRIX
@@ -303,10 +312,7 @@ class _MtefParser:
             return MtefNode("embell", {"type": self.u8()})
 
         if record_type == 7:  # RULER (no options byte)
-            stops = self.u8()
-            self._need(stops * 3)
-            self.pos += stops * 3
-            return MtefNode("ruler")
+            return self.ruler()
 
         if record_type == 8:  # FONT_STYLE_DEF
             return MtefNode("definition", {"type": record_type, "font": self.unsigned(), "style": self.u8()})
@@ -692,17 +698,27 @@ def _balanced_latex(value: str) -> bool:
 
 
 def _decode_compatibility_stream(data: bytes) -> str:
-    """Read only general textual hints from malformed legacy MathType data."""
-    if not data or len(data) < 10:
+    """Accept explicit legacy text only; never flatten binary MTEF records."""
+    parser = _MtefParser(data)
+    try:
+        parser.header()
+    except MtefParseError:
         return ""
-    font_end = data.find(b"WinAllCodePages")
-    raw_bytes = data[font_end + len(b"WinAllCodePages"):] if font_end != -1 else data
+    body = data[parser.pos:]
+    marker = b"WinAllCodePages"
+    # A real ENCODING_DEF containing this name is binary, not a text annotation.
+    # Restrict the legacy path to its untagged, text-only body after the header.
+    if not body.startswith(marker):
+        return ""
+    raw_bytes = body[len(marker):].rstrip(b"\x00")
     symbols = {
         0xB1: r" \pm ", 0xD7: r" \times ", 0xF7: r" \div ", 0xB7: r" \cdot ",
         0xB0: r"^\circ ", 0xA5: r" \infty ", 0xA3: r" \le ", 0xB3: r" \ge ",
         0xA2: r" \ne ", 0xCE: r" \in ", 0xCF: r" \notin ",
     }
-    chars = [chr(byte) if 32 <= byte < 127 else symbols.get(byte, "") for byte in raw_bytes]
+    if any(not (32 <= byte < 127 or byte in (9, 10, 13) or byte in symbols) for byte in raw_bytes):
+        return ""
+    chars = [symbols[byte] if byte in symbols else chr(byte) for byte in raw_bytes]
     value = "".join(chars)
     value = re.sub(r"(?:E|e)?quation\s*Native", "", value, flags=re.IGNORECASE)
     return re.sub(r"[\r\n]+", " ", value).strip()

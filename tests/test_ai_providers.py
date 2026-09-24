@@ -98,7 +98,7 @@ def test_unprefixed_models_keep_provider_selection_without_rewriting_model_id():
     )
     assert (deepseek.provider_code, deepseek.model_name, deepseek.api_key) == (
         "deepseek",
-        "deepseek-v4-flash",
+        "deepseek-flash",
         "deepseek-key",
     )
 
@@ -164,7 +164,6 @@ def test_reasoning_effort_is_allowlisted_normalized_and_pure(effort):
     assert result == {
         **original,
         "reasoning_effort": effort,
-        "enable_thinking": True,
     }
     assert result is not original
     assert "reasoning_effort" not in original
@@ -382,23 +381,83 @@ def test_pdf_ocr_fallbacks_respect_claude_preference():
     ]
 
 
-def test_draw_provider_strips_siliconflow_prefix_and_detects_images():
+@pytest.mark.parametrize("model", ["Qwen/Qwen3-VL-32B-Instruct", "Qwen/Qwen3.8-27B"])
+@pytest.mark.parametrize("prefix", ["SILICONFLOW/", ""])
+def test_draw_provider_strips_siliconflow_prefix_and_detects_images(model, prefix):
     config = resolve_draw_provider(
-        "SILICONFLOW/Qwen/Qwen3-VL-32B-Instruct",
+        prefix + model,
         {"SILICONFLOW_API_KEY": "sf-key"},
     )
 
     assert config.provider_code == "siliconflow"
-    assert config.model_name == "Qwen/Qwen3-VL-32B-Instruct"
+    assert config.model_name == model
     assert config.supports_image_input is True
     assert "sf-key" not in repr(config)
 
 
-def test_draw_provider_keeps_text_only_siliconflow_mode():
+@pytest.mark.parametrize("model", ["Qwen/Qwen3.5-397B-A17B", "Qwen/Qwen3.8-27B-custom"])
+def test_draw_provider_keeps_text_only_siliconflow_mode(model):
     config = resolve_draw_provider(
-        "Qwen/Qwen3.5-397B-A17B",
+        model,
         {"SILICONFLOW_API_KEY": "sf-key"},
     )
 
-    assert config.model_name == "Qwen/Qwen3.5-397B-A17B"
+    assert config.model_name == model
     assert config.supports_image_input is False
+
+
+def test_siliconflow_qwen38_ocr_preserves_selected_model_and_credentials():
+    config = resolve_ocr_provider("siliconflow", {
+        "SILICONFLOW_API_KEY": "sf-key",
+        "DEEPSEEK_API_KEY": "not-this-key",
+        "SILICONFLOW_OCR_MODEL": "Qwen/Qwen3.8-27B",
+    })
+
+    assert config.provider_code == "siliconflow"
+    assert config.model_name == "Qwen/Qwen3.8-27B"
+    assert config.api_key == "sf-key"
+    assert config.chat_completions_url == "https://api.siliconflow.cn/v1/chat/completions"
+    assert config.supports_image_input is True
+
+
+@pytest.mark.parametrize('model', ['deepseek-flash', 'deepseek-v4-flash', 'deepseek-v4-flash-vision-exp'])
+def test_deepseek_flash_aliases_use_current_official_model_only(model):
+    config = resolve_text_provider(f'DEEPSEEK/{model}:high', {'DEEPSEEK_API_KEY':'key'})
+    assert config.model_name == 'deepseek-flash'
+    assert config.reasoning_effort == 'high'
+    assert config.raw_model == f'DEEPSEEK/{model}:high'
+    assert config.chat_completions_url == 'https://api.deepseek.com/chat/completions'
+    transit = resolve_text_provider(f'ZHONGZHAN_GPT/{model}', {'ZHONGZHAN_GPT_BASE_URL':'https://relay.example/v1'})
+    assert transit.model_name == model
+
+
+def test_deepseek_ocr_uses_own_credentials_and_defaults_to_flash():
+    config = resolve_ocr_provider('deepseek', {'DEEPSEEK_API_KEY':'ds-key', 'SILICONFLOW_API_KEY':'sf-key'})
+    assert (config.provider_code, config.model_name, config.api_key) == ('deepseek', 'deepseek-flash', 'ds-key')
+    assert config.supports_image_input
+    assert config.chat_completions_url == 'https://api.deepseek.com/chat/completions'
+    assert 'ds-key' not in repr(config)
+    custom = resolve_ocr_provider('deepseek', {
+        'DEEPSEEK_API_KEY':'ds-key', 'DEEPSEEK_API_BASE':'https://proxy.example/v1',
+        'DEEPSEEK_OCR_MODEL':'deepseek-v4-flash-vision-exp:high',
+    })
+    assert custom.chat_completions_url == 'https://proxy.example/v1/chat/completions'
+    assert (custom.model_name, custom.reasoning_effort) == ('deepseek-flash', 'high')
+
+
+def test_deepseek_pdf_ocr_is_used_when_selected_without_changing_other_fallbacks():
+    environment = {'DEEPSEEK_API_KEY':'ds', 'SILICONFLOW_API_KEY':'sf', 'ALI_BAILIAN_API_KEY':'ali', 'ZHONGZHAN_GPT_API_KEY':'relay'}
+    assert [p.provider_code for p in resolve_ocr_fallbacks('deepseek', environment)] == ['deepseek', 'siliconflow', 'bailian', 'zhongzhan_gpt']
+    assert [p.provider_code for p in resolve_ocr_fallbacks('siliconflow', environment)] == ['siliconflow', 'bailian', 'zhongzhan_gpt']
+
+
+@pytest.mark.parametrize('name', ['DEEPSEEK/deepseek-flash', 'deepseek-flash', 'DEEPSEEK/deepseek-v4-flash'])
+def test_deepseek_flash_draw_provider_accepts_reference_images(name):
+    config = resolve_draw_provider(name, {'DEEPSEEK_API_KEY':'ds-key'})
+    assert (config.provider_code, config.model_name, config.api_key) == ('deepseek', 'deepseek-flash', 'ds-key')
+    assert config.supports_image_input
+
+
+def test_deepseek_pro_remains_text_only():
+    assert not resolve_ocr_provider('deepseek', {'DEEPSEEK_OCR_MODEL':'deepseek-v4-pro'}).supports_image_input
+    assert not resolve_draw_provider('DEEPSEEK/deepseek-v4-pro', {}).supports_image_input

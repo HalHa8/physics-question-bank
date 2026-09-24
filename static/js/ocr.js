@@ -485,6 +485,7 @@
 
         function hasDetachedEditorFigureGroup(sourceText) {
             const source = String(sourceText || '');
+            if (window.ImageLayoutTools) return Boolean(window.ImageLayoutTools.split(source).tail);
             const imagePattern = /!\[.*?\]\(([^)]+)\)/g;
             const matches = [...source.matchAll(imagePattern)];
             if (matches.length === 0) return false;
@@ -498,12 +499,32 @@
             const source = String(sourceText === null ? (textarea && textarea.value || '') : sourceText);
             const imagePattern = /!\[.*?\]\(([^)]+)\)/g;
             const matches = [...source.matchAll(imagePattern)];
+            const parts = window.ImageLayoutTools ? window.ImageLayoutTools.split(source) : null;
+            const detachedMatches = parts ? matches.filter(match => match.index >= parts.tailStart) : matches;
+            const containersForAnchors = targetContainer ? [targetContainer]
+                : ['contentPreview', 'paperContent'].map(id => document.getElementById(id));
+            if (parts) containersForAnchors.forEach(container => {
+                if (!container) return;
+                const images = Array.from(container.querySelectorAll('img'));
+                images.forEach((image, index) => {
+                    const match = matches[index];
+                    if (!match || match.index >= parts.tailStart) return;
+                    image.dataset.editorFigureLayout = 'true';
+                    image.dataset.editorImageKey = window.ImageLayoutTools.key(match[1]);
+                    image.setAttribute('role', 'button');
+                    image.setAttribute('tabindex', '0');
+                    image.setAttribute('aria-label', '调整此图：当前位置对齐与尺寸');
+                    image.setAttribute('title', '点击调整此图；按住 Cmd/Ctrl 点击查看原图');
+                    image.classList.remove('cursor-zoom-in');
+                    image.classList.add('cursor-pointer');
+                });
+            });
             if (!hasDetachedEditorFigureGroup(source)) return;
 
             // Keep table/interleaved images at their authored anchors, matching
             // the paper preview's existing semantic-position safeguard.
             const layout = currentEditorFigureLayout();
-            const count = Array.from(new Set(matches.map(match => match[1]))).length;
+            const count = detachedMatches.length;
             const effectiveAlign = count > 1 && layout.align === 'right' ? 'center' : layout.align;
             const baseDimensions = editorFigureDimensions(layout.size, effectiveAlign, count);
 
@@ -529,6 +550,7 @@
                 }
                 images.forEach(image => {
                     image.dataset.editorFigureLayout = 'true';
+                    image.dataset.editorImageKey = '';
                     image.setAttribute('role', 'button');
                     image.setAttribute('tabindex', '0');
                     image.setAttribute(
@@ -570,6 +592,27 @@
 
         window.setEditorFigureLayout = function(kind, value) {
             if (!window.FigureLayoutState) return;
+            const activePopover = document.getElementById('editorFigureLayoutPopover');
+            const imageKey = activePopover && activePopover.dataset.imageKey;
+            const contentElement = document.getElementById('editContent');
+            if (activePopover && contentElement && activePopover._sourceText !== contentElement.value) {
+                activePopover.remove();
+                showToast('题干已变化，请重新点击要调整的图片。', 'info');
+                return;
+            }
+            if (imageKey) {
+                const existingLayout = window.FigureLayoutState.imageLayouts[imageKey] || { align: 'center', size: 'auto' };
+                const next = { ...existingLayout };
+                if (kind === 'align' && ['left', 'center', 'right'].includes(value)) next.align = value;
+                if (kind === 'size' && ['auto', 'small', 'medium', 'large'].includes(value)) next.size = value;
+                window.FigureLayoutState.imageLayouts = window.ImageLayoutTools.normalize({
+                    ...window.FigureLayoutState.imageLayouts, [imageKey]: next
+                });
+                activePopover.remove();
+                renderIllustrationBadges();
+                if (contentElement) contentElement.dispatchEvent(new Event('input'));
+                return;
+            }
             if (kind === 'align') {
                 window.FigureLayoutState.setAlign(value);
                 window.FigureLayoutState.setCustomAlign(true);
@@ -591,11 +634,8 @@
             if (typeof window.renderIllustrationBadges === 'function') {
                 window.renderIllustrationBadges();
             }
-            applyEditorFigureLayoutPreview();
-
             const textarea = document.getElementById('editContent');
             if (textarea) textarea.dispatchEvent(new Event('input'));
-            setTimeout(applyEditorFigureLayoutPreview, 320);
         };
 
         window.showEditorFigureLayoutPopover = function(event) {
@@ -604,8 +644,12 @@
             const existing = document.getElementById('editorFigureLayoutPopover');
             if (existing) existing.remove();
 
-            const layout = currentEditorFigureLayout();
+            const selected = event.target && event.target.closest ? event.target.closest('[data-editor-image-key]') : null;
+            const imageKey = selected && selected.dataset.editorImageKey || '';
+            const layout = imageKey ? (window.FigureLayoutState.imageLayouts[imageKey] || { align: 'center', size: 'auto' }) : currentEditorFigureLayout();
             const popover = document.createElement('div');
+            popover.dataset.imageKey = imageKey;
+            popover._sourceText = document.getElementById('editContent').value;
             popover.id = 'editorFigureLayoutPopover';
             popover.setAttribute('role', 'dialog');
             popover.setAttribute('aria-label', '调整插图排版');
@@ -626,11 +670,12 @@
             popover.style.left = `${Math.max(8, left)}px`;
             popover.style.top = `${Math.max(8, top)}px`;
 
-            const alignButtons = ['right', 'bottom_left', 'center', 'bottom_right'].map(align => `
+            const alignLabels = imageKey ? { left: '当前位置居左', center: '当前位置居中', right: '当前位置居右' } : EDITOR_FIGURE_ALIGN_LABELS;
+            const alignButtons = Object.keys(alignLabels).map(align => `
                 <button type="button" onclick="window.setEditorFigureLayout('align', '${align}')"
-                    aria-label="插图位置：${EDITOR_FIGURE_ALIGN_LABELS[align]}"
+                    aria-label="插图位置：${alignLabels[align]}"
                     aria-pressed="${layout.align === align ? 'true' : 'false'}"
-                    class="min-w-0 rounded-md border px-2 py-1.5 text-[10px] ${layout.align === align ? 'border-brand-200 bg-brand-50 font-bold text-brand-700' : 'border-slate-200 text-slate-500 hover:border-brand-200 hover:text-brand-600 dark:border-slate-600 dark:text-slate-300'}">${EDITOR_FIGURE_ALIGN_LABELS[align]}</button>
+                    class="min-w-0 rounded-md border px-2 py-1.5 text-[10px] ${layout.align === align ? 'border-brand-200 bg-brand-50 font-bold text-brand-700' : 'border-slate-200 text-slate-500 hover:border-brand-200 hover:text-brand-600 dark:border-slate-600 dark:text-slate-300'}">${alignLabels[align]}</button>
             `).join('');
             const sizeButtons = ['auto', 'small', 'medium', 'large'].map(size => `
                 <button type="button" onclick="window.setEditorFigureLayout('size', '${size}')"
@@ -639,7 +684,7 @@
             `).join('');
             popover.innerHTML = `
                 <div class="mb-2 flex items-center justify-between border-b border-slate-100 px-1 pb-1.5 font-bold dark:border-slate-700">
-                    <span><i class="fa-solid fa-sliders mr-1 text-brand-500"></i>插图排版</span>
+                    <span><i class="fa-solid fa-sliders mr-1 text-brand-500"></i>${imageKey ? '此图排版' : '题末图片组排版'}</span>
                     <button type="button" onclick="document.getElementById('editorFigureLayoutPopover').remove()" aria-label="关闭插图排版" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
                 </div>
                 <div class="mb-2">
@@ -647,14 +692,17 @@
                     <div class="grid grid-cols-2 gap-1">${alignButtons}</div>
                 </div>
                 <div>
-                    <div class="mb-1 flex justify-between text-[10px] text-slate-400"><span>尺寸</span><span>${layout.align === 'right' ? '中/大图自动改为下方居右' : '下方布局生效'}</span></div>
+                    <div class="mb-1 flex justify-between text-[10px] text-slate-400"><span>尺寸</span><span>${imageKey ? '保持正文顺序' : (layout.align === 'right' ? '中/大图自动改为下方居右' : '下方布局生效')}</span></div>
                     <div class="flex gap-1">${sizeButtons}</div>
                 </div>
                 <div class="mt-2 text-[9px] text-slate-400">随题目保存后写入题库</div>
             `;
             document.body.appendChild(popover);
-            const activeChoice = popover.querySelector('[aria-pressed="true"]');
-            if (activeChoice) activeChoice.focus({ preventScroll: true });
+            popover.style.maxHeight = 'calc(100vh - 16px)';
+            popover.style.overflowY = 'auto';
+            const bounds = popover.getBoundingClientRect();
+            popover.style.top = `${Math.max(8, Math.min(top, window.innerHeight - bounds.height - 8))}px`;
+            popover.style.left = `${Math.max(8, Math.min(left, window.innerWidth - bounds.width - 8))}px`;
 
             const closeHandler = function(closeEvent) {
                 if (!popover.contains(closeEvent.target)) {
@@ -662,7 +710,19 @@
                     document.removeEventListener('click', closeHandler);
                 }
             };
-            setTimeout(() => document.addEventListener('click', closeHandler), 0);
+            const removeElement = popover.remove.bind(popover);
+            popover.remove = () => {
+                document.removeEventListener('click', closeHandler);
+                if (window.MathBankModal) window.MathBankModal.close(popover);
+                removeElement();
+            };
+            if (window.MathBankModal) {
+                if (anchor) anchor.focus({ preventScroll: true });
+                window.MathBankModal.open(popover, { onEscape: () => popover.remove() });
+            }
+            setTimeout(() => {
+                if (popover.isConnected) document.addEventListener('click', closeHandler);
+            }, 0);
         };
 
         function handleEditorFigureLayoutPreviewClick(event) {
@@ -699,26 +759,25 @@
             let layoutChipRendered = false;
             const textarea = document.getElementById('editContent');
             const allowLayoutControls = hasDetachedEditorFigureGroup(textarea ? textarea.value : '');
+            const parts = window.ImageLayoutTools.split(textarea ? textarea.value : '');
+            const anchoredKeys = new Set(parts.matches.filter(m => m.index < parts.tailStart).map(m => window.ImageLayoutTools.key(m[1])));
 
             uploadedImages.forEach((path, idx) => {
                 if (hiddenReferencePaths.has(path)) return;
                 const filename = path.split('/').pop();
                 const safeFilename = window.MathBankSafe.escapeText(filename);
                 const safeFilenameAttr = window.MathBankSafe.escapeAttribute(filename);
-                const layout = currentEditorFigureLayout();
+                const imageKey = window.ImageLayoutTools.key(path);
+                const anchored = anchoredKeys.has(imageKey);
+                const layout = anchored ? (window.FigureLayoutState.imageLayouts[imageKey] || { align: 'center', size: 'auto' }) : currentEditorFigureLayout();
                 const layoutLabel = `${EDITOR_FIGURE_ALIGN_LABELS[layout.align]} · ${EDITOR_FIGURE_SIZE_LABELS[layout.size]}`;
-                const showLayoutChip = allowLayoutControls && !layoutChipRendered;
-                if (showLayoutChip) layoutChipRendered = true;
-                const fileDisplay = allowLayoutControls
-                    ? `<button type="button" onclick="window.showEditorFigureLayoutPopover(event)" class="flex min-w-0 items-center gap-1.5 text-left hover:text-brand-600" title="点击调整${window.MathBankSafe.escapeAttribute(layoutLabel)}">
-                            <i class="fa-solid fa-file-image shrink-0 text-brand-500"></i>
-                            <span class="truncate max-w-[100px]" title="${safeFilenameAttr}">${safeFilename}</span>
-                            ${showLayoutChip ? `<span class="shrink-0 rounded bg-brand-50 px-1 py-0.5 text-[9px] text-brand-600">${window.MathBankSafe.escapeText(EDITOR_FIGURE_SIZE_LABELS[layout.size])}</span>` : ''}
-                       </button>`
-                    : `<span class="flex min-w-0 items-center gap-1.5" title="正文锚定插图保持原位置">
-                            <i class="fa-solid fa-file-image shrink-0 text-brand-500"></i>
-                            <span class="truncate max-w-[100px]" title="${safeFilenameAttr}">${safeFilename}</span>
-                       </span>`;
+                const showLayoutChip = anchored || (allowLayoutControls && !layoutChipRendered);
+                if (showLayoutChip && !anchored) layoutChipRendered = true;
+                const fileDisplay = `<button type="button" data-editor-image-key="${window.MathBankSafe.escapeAttribute(anchored ? imageKey : '')}" onclick="window.showEditorFigureLayoutPopover(event)" class="flex min-w-0 items-center gap-1.5 text-left hover:text-brand-600" title="${anchored ? '调整此图的对齐与尺寸，保持正文位置' : '调整题末图片组'}">
+                    <i class="fa-solid fa-file-image shrink-0 text-brand-500"></i>
+                    <span class="truncate max-w-[100px]" title="${safeFilenameAttr}">${safeFilename}</span>
+                    ${showLayoutChip ? `<span class="shrink-0 rounded bg-brand-50 px-1 py-0.5 text-[9px] text-brand-600">${anchored ? '正文 · ' : ''}${EDITOR_FIGURE_SIZE_LABELS[layout.size]}</span>` : ''}
+                </button>`;
                 listContainer.innerHTML += `
                     <div class="flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg border bg-white shadow-sm text-xs text-slate-600">
                         ${fileDisplay}
@@ -860,7 +919,9 @@
         // 2. OCR Answer screenshot handler
         function updateOcrPlaceholder(type) {
             const getEngineLabel = (val) => {
-                if (val === 'siliconflow') {
+                if (val === 'deepseek') {
+                    return "DeepSeek";
+                } else if (val === 'siliconflow') {
                     return "SiliconFlow 硅基流动云端";
                 } else if (val === 'ali_bailian') {
                     return "阿里百炼";

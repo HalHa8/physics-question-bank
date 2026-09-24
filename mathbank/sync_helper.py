@@ -198,11 +198,11 @@ def generate_markdown_library(questions, filepath: str):
 
     with open(filepath, "w", encoding="utf-8") as f:
         # 文件头
-        f.write("# 📚 本地化数学题库导出目录 (AI 备课专属参考)\n\n")
+        f.write("# 📚 本地化物理题库导出目录 (AI 备课专属参考)\n\n")
         f.write("> [!IMPORTANT]\n")
         f.write("> **这是由题库系统自动生成的只读导出文件，专门供 Claude Code、Cursor 等 AI 助手在备课时进行题目分析、参考与引用。**\n")
         f.write("> - **安全与免打扰**：此文件仅包含「题目题干、图片与大纲信息」，**不包含参考答案和详细解析**，防止 AI 备课或生成周测时发生“答案泄露”或输出冗余干扰。\n")
-        f.write("> - **格式完美化**：系统已对原题中的 LaTeX 排版命令（如 `\\item`, `\\begin{itemize}` 等）自动转换为了标准 Markdown 格式，**100% 完美保留了核心数学公式（$...$ 或 $$...$$）**，对 AI 识别无任何编译或阅读干扰。\n")
+        f.write("> - **格式整理**：系统将原题中的部分 LaTeX 排版命令转换为 Markdown，同时保留核心物理公式（$...$ 或 $$...$$）；使用前仍应核对原题。\n")
         f.write("> - 请勿在此文件中直接进行任何手动编辑，您的修改不会被同步回数据库。\n\n")
         
         # 数据统计
@@ -284,7 +284,7 @@ def generate_markdown_library(questions, filepath: str):
                                     tikz_codes = [legacy_tikz]
                             for index, tikz_code in enumerate(tikz_codes, start=1):
                                 title_suffix = f" {index}" if len(tikz_codes) > 1 else ""
-                                f.write(f"**【TikZ 几何绘图源码{title_suffix}】**\n\n")
+                                f.write(f"**【TikZ 物理示意图源码{title_suffix}】**\n\n")
                                 f.write(f"```latex\n{tikz_code}\n```\n\n")
                                     
                             f.write("---\n\n")

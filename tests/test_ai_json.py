@@ -5,10 +5,39 @@ import pytest
 
 from mathbank.ai_json import parse_ai_json
 from mathbank.prompts import (
+    COMMON_OCR_PROMPT,
+    build_ai_solve_prompts,
     build_classification_system_prompt,
     build_import_parse_system_prompt,
     build_pdf_parse_system_prompt,
 )
+
+
+def test_formula_producing_prompts_share_context_aware_fraction_rule():
+    curriculum = {"必修一": {"1. 集合": []}}
+    prompts = [
+        COMMON_OCR_PROMPT,
+        build_pdf_parse_system_prompt(curriculum, False),
+        build_pdf_parse_system_prompt(curriculum, True),
+        build_import_parse_system_prompt(curriculum),
+    ]
+    for question_type in (
+        "single_choice", "multi_choice", "fill_in_blank", "detailed_answer"
+    ):
+        system_prompt, user_prompt = build_ai_solve_prompts(
+            question_type, r"求 $\frac{x+1}{x-1}$"
+        )
+        prompts.append(system_prompt)
+        assert user_prompt.endswith(r"求 $\frac{x+1}{x-1}$")
+
+    for prompt in prompts:
+        assert prompt.count("【分式】") == 1
+        assert r"主体分式用 `\dfrac`" in prompt
+        assert r"上标（含指数）、下标和嵌套内层分式用 `\frac`" in prompt
+        assert r"$2^{\frac{n+1}{2}}$" in prompt
+        assert r"$\dfrac{1+\frac{1}{x}}{2}$" in prompt
+        assert r"原文显式 `\tfrac`/`\cfrac` 保留" in prompt
+        assert "锁定公式及其 ID 优先原样保留，不受本规则改写" in prompt
 
 
 def test_parse_ai_json_type_hints_resolve():

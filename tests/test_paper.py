@@ -148,7 +148,7 @@ def test_ai_paper_selection_uses_shared_provider_and_clean_effort(
     assert args[0] == "https://transit.example/v1/chat/completions"
     assert kwargs["json"]["model"] == "gpt-5.6-sol"
     assert kwargs["json"]["reasoning_effort"] == "high"
-    assert kwargs["json"]["enable_thinking"] is True
+    assert "enable_thinking" not in kwargs["json"]
 
 
 @pytest.mark.parametrize(

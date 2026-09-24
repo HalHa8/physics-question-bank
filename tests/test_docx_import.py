@@ -6,6 +6,7 @@ import struct
 import zipfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
+import pytest
 from PIL import Image
 from fastapi.testclient import TestClient
 from main import app, LOCAL_TOKEN, post_process_pdf_parsed_questions
@@ -524,6 +525,42 @@ def test_docx_mathtype_compatibility_formula_is_converted_without_review_marker(
     assert result["diagnostics"]["mtef_structural_converted"] == 0
 
 
+@pytest.mark.parametrize("valid", [True, False])
+def test_docx_tabbed_mathtype_interval_converts_or_preserves_preview(valid, tmp_path):
+    payload = bytes.fromhex(
+        (Path(__file__).parent / "fixtures/mtef/tabbed_interval.hex").read_text()
+    )
+    if not valid:
+        payload = payload[:-12]
+    body = """
+    <w:p><w:r><w:t>当</w:t></w:r><w:r><w:object>
+      <v:shape><v:imagedata r:id="rIdPreview"/></v:shape>
+      <o:OLEObject ProgID="Equation.DSMT4" r:id="rIdOle"/>
+    </w:object></w:r><w:r><w:t>时，求根的个数。</w:t></w:r></w:p>
+    """
+    rels = """
+    <Relationship Id="rIdPreview" Target="media/equation.png"/>
+    <Relationship Id="rIdOle" Target="embeddings/equation.bin"/>
+    """
+    result = extract_docx_markdown(_create_docx_package(body, rels, {
+        "word/embeddings/equation.bin": payload,
+        "word/media/equation.png": _tiny_png(),
+    }), output_dir=tmp_path, url_prefix="/static/test_uploads/tmp")
+    assert result["success"]
+    assert "APG_APAPAE" not in result["markdown"]
+    assert result["diagnostics"]["mtef_compatibility_converted"] == 0
+    if valid:
+        assert r"$\dfrac{1}{2}\le m<\dfrac{3}{4}$" in result["markdown"]
+        assert result["diagnostics"]["mtef_structural_converted"] == 1
+        assert result["diagnostics"]["review_required"] == 0
+    else:
+        assert "[公式待核对]" in result["markdown"]
+        assert "![MathType 公式待核对]" in result["markdown"]
+        assert result["diagnostics"]["mtef_fallback_images"] == 1
+        assert result["diagnostics"]["review_required"] == 1
+        assert len(result["image_paths"]) == 1
+
+
 def test_docx_mathtype_normalizes_private_bar_and_structurally_separates_cap():
     payload = _mtef_stream(_mtef_line(
         _mtef_char("x"),
@@ -644,7 +681,7 @@ def test_docx_rejects_abnormal_decompression_ratio():
     assert "压缩比异常" in result["error"]
 
 
-def test_word_temp_preview_is_attached_to_question_without_duplicate_markup():
+def test_word_temp_preview_keeps_its_formula_review_anchor():
     url = "/static/test_uploads/tmp/word_task_formula.png"
     questions = [{
         "content": f"已知 [公式待核对]\n![MathType 公式待核对]({url})",
@@ -654,7 +691,88 @@ def test_word_temp_preview_is_attached_to_question_without_duplicate_markup():
     result = post_process_pdf_parsed_questions(questions, "Word 试卷")
     assert result[0]["image_paths"] == [url]
     assert "[公式待核对]" in result[0]["content"]
-    assert "![MathType" not in result[0]["content"]
+    assert f"![MathType 公式待核对]({url})" in result[0]["content"]
+
+
+def test_document_postprocess_preserves_image_options_and_reading_order():
+    # Asset names and referenced_images deliberately disagree with A/B/C/D order.
+    paths = [f"/static/test_uploads/tmp/word_option_{name}.png" for name in ("z", "b", "x", "a")]
+    content = "图象只可能是\n\\begin{choices}\n" + "\n".join(
+        f"\\item ![{label}]({path})" for label, path in zip("ABCD", paths)
+    ) + "\n\\end{choices}"
+    questions = [{"content": content, "answer_markdown": "", "referenced_images": paths[::-1] + paths}]
+
+    result = post_process_pdf_parsed_questions(questions, "图片选项试卷")[0]
+
+    assert result["content"] == content
+    assert result["image_paths"] == paths
+
+
+def test_docx_image_only_options_keep_label_order_through_task(monkeypatch, tmp_path):
+    import re
+    import main
+
+    body = '<w:p><w:r><w:t>6. 下列图象可能正确的是</w:t></w:r></w:p><w:p>'
+    rels = []
+    assets = {}
+    for label, color in zip("ABCD", ("red", "green", "blue", "black")):
+        image = io.BytesIO()
+        Image.new("RGB", (160, 140), color).save(image, format="PNG")
+        assets[f"word/media/{label}.png"] = image.getvalue()
+        rels.append(f'<Relationship Id="r{label}" Target="media/{label}.png" Type="image"/>')
+        body += (
+            f'<w:r><w:t>{label}. </w:t></w:r>'
+            f'<w:r><w:pict><v:shape><v:imagedata r:id="r{label}"/></v:shape></w:pict></w:r>'
+        )
+    body += '</w:p>'
+    expected_paths = []
+
+    def split_extracted_word(source, _generate_answers):
+        # Stand in only for AI; exercise real DOCX extraction and task postprocessing.
+        options = re.findall(r'([A-D])\.\s*(!\[\]\(([^)]+)\))', source)
+        assert [option[0] for option in options] == list("ABCD")
+        expected_paths.extend(option[2] for option in options)
+        for (_, _, path), color in zip(options, ("red", "green", "blue", "black")):
+            with Image.open(tmp_path / Path(path).name) as image:
+                assert image.getpixel((0, 0)) == Image.new("RGB", (1, 1), color).getpixel((0, 0))
+        return [{
+            "content": "图象可能正确的是\\begin{choices}" + ''.join(
+                "\\item " + option[1] for option in options
+            ) + "\\end{choices}",
+            "answer_markdown": "",
+            "referenced_images": expected_paths[::-1],
+        }]
+
+    monkeypatch.setattr(main, "TMP_UPLOAD_DIR", str(tmp_path))
+    monkeypatch.setattr(main, "parse_paper_text_internal", split_extracted_word)
+    task_id = "word-image-options-regression"
+    main.DOCUMENT_TASKS.create(task_id, document_type="docx", temp_assets=[])
+    try:
+        main.run_docx_parsing_task(task_id, _create_docx_package(body, ''.join(rels), assets), "图片选项.docx")
+        task = main.DOCUMENT_TASKS.snapshot(task_id)
+        assert task["status"] == "completed", task
+        question = task["data"][0]
+        assert question["image_paths"] == expected_paths
+        assert re.findall(r'\\item !\[\]\(([^)]+)\)', question["content"]) == expected_paths
+    finally:
+        main.DOCUMENT_TASKS.remove(task_id)
+
+
+def test_document_postprocess_keeps_table_body_answer_and_reused_image_anchors():
+    paths = [f"/static/test_uploads/tmp/word_{part}.png" for part in ("table", "body", "answer", "extra")]
+    content = (
+        "\\begin{tabular}{cc}\n甲 & ![表内图](" + paths[0] + ") \\\\\n\\end{tabular}\n\n"
+        "先看图 ![正文图](" + paths[1] + ")，再根据图判断。\n\n"
+        "![题末复用](" + paths[0] + ")"
+    )
+    answer = "解答中的图：![解答图](" + paths[2] + ")"
+    questions = [{"content": content, "answer_markdown": answer, "referenced_images": [paths[3], paths[1]]}]
+
+    result = post_process_pdf_parsed_questions(questions, "混合插图")[0]
+
+    assert result["content"] == content
+    assert result["answer_markdown"] == answer
+    assert result["image_paths"] == paths
 
 
 def test_docx_upload_task_api_validation():

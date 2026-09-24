@@ -31,18 +31,28 @@ def test_ocr_prompt_compactly_preserves_tables_and_multi_figure_anchors():
     assert "表格内占位留在所属单元格" in prompt
     assert "仅当全图恰有一幅且位于表格外的独立物理示意图" in prompt
     assert "多图或无图时绝不输出该标记" in prompt
-    assert len(prompt) <= 900
+    assert "已有定界符不得重复包裹" in prompt
+    assert "[[MBM_...]]" in prompt
+    assert "明确的粗体正体保留 `\\mathbf`" in prompt
+    assert r"完整 `\begin{choices}...\end{choices}`" in prompt
+    assert "去掉原 A/B/C/D 标号" in prompt
+    assert "看不清公式/符号标[公式待核对]" in prompt
+    assert "勿描述、猜测或重绘" in prompt
+    assert "独立 equation/align/gather/multline、tabular 原样" in prompt
+    assert len(prompt) <= 1250
 
 
-def test_ocr_request_uses_resolved_multimodal_provider(tmp_path):
+@pytest.mark.parametrize("base", ["https://api.openai.com/v1", "https://vision.example/v1"])
+@pytest.mark.parametrize("model,effort", [("gpt-6-astra", "medium"), ("gpt-5.6-luna", "max")])
+def test_ocr_request_uses_resolved_multimodal_provider(tmp_path, base, model, effort):
     image_path = tmp_path / "question.png"
     image_path.write_bytes(b"fake-image-bytes")
     provider = resolve_ocr_provider(
         "zhongzhan_gpt",
         {
             "ZHONGZHAN_GPT_API_KEY": "ocr-key",
-            "ZHONGZHAN_GPT_BASE_URL": "https://vision.example/v1",
-            "ZHONGZHAN_GPT_OCR_MODEL": "gpt-5.6-luna:high",
+            "ZHONGZHAN_GPT_BASE_URL": base,
+            "ZHONGZHAN_GPT_OCR_MODEL": f"{model}:{effort}",
         },
     )
     response = MagicMock(status_code=200)
@@ -59,10 +69,10 @@ def test_ocr_request_uses_resolved_multimodal_provider(tmp_path):
 
     assert result == "识别结果 $x=1$"
     args, kwargs = mock_post.call_args
-    assert args[0] == "https://vision.example/v1/chat/completions"
-    assert kwargs["json"]["model"] == "gpt-5.6-luna"
-    assert kwargs["json"]["reasoning_effort"] == "high"
-    assert kwargs["json"]["enable_thinking"] is True
+    assert args[0] == f"{base}/chat/completions"
+    assert kwargs["json"]["model"] == model
+    assert kwargs["json"]["reasoning_effort"] == effort
+    assert "enable_thinking" not in kwargs["json"]
     image_item = kwargs["json"]["messages"][0]["content"][1]
     assert image_item["image_url"]["url"].startswith("data:image/png;base64,")
 
@@ -165,7 +175,8 @@ def test_draw_request_strips_siliconflow_provider_prefix(tmp_path):
     assert isinstance(kwargs["json"]["messages"][0]["content"], list)
 
 
-def test_draw_request_injects_configured_reasoning_effort(tmp_path):
+@pytest.mark.parametrize("model,effort", [("gpt-6-astra", "medium"), ("gpt-5.6-luna", "max")])
+def test_draw_request_injects_configured_reasoning_effort(tmp_path, model, effort):
     image_path = tmp_path / "diagram.png"
     image_path.write_bytes(b"fake-diagram-bytes")
     response = MagicMock(status_code=200)
@@ -181,14 +192,14 @@ def test_draw_request_injects_configured_reasoning_effort(tmp_path):
         with patch("mathbank.ai_http.robust_request_post", return_value=response) as mock_post:
             draw_tikz_via_high_model(
                 str(image_path),
-                "ZHONGZHAN_GPT/gpt-5.6-luna:high",
+                f"ZHONGZHAN_GPT/{model}:{effort}",
                 latex_content="三角形 ABC",
             )
 
     payload = mock_post.call_args.kwargs["json"]
-    assert payload["model"] == "gpt-5.6-luna"
-    assert payload["reasoning_effort"] == "high"
-    assert payload["enable_thinking"] is True
+    assert payload["model"] == model
+    assert payload["reasoning_effort"] == effort
+    assert "enable_thinking" not in payload
 
 
 def test_draw_request_supports_text_only_workbench_input():
@@ -381,11 +392,46 @@ def test_question_ocr_still_auto_draws_tikz_and_returns_original_reference(clien
         assert payload["tikz_image_path"] == rendered_url
         assert payload["image_path"].startswith("/static/test_uploads/ocr_original_")
         assert "ILLUSTRATION_BOX" not in payload["latex"]
+        assert "$$" not in payload["latex"]
+        assert payload["latex"].startswith("已知三角形 ABC\n\n![](")
         assert rendered_url in payload["latex"]
         assert observed_original is not None
     finally:
         if observed_original is not None:
             observed_original.unlink(missing_ok=True)
+
+
+def test_question_ocr_removes_illustration_marker_before_math_normalization_when_draw_is_skipped(client):
+    provider = SimpleNamespace(
+        api_key="ocr-key",
+        provider_label="Test OCR",
+        model_name="test-vision",
+        credential_label="TEST_KEY",
+    )
+    persisted_original = None
+
+    try:
+        with patch("main.resolve_ocr_provider", return_value=provider), patch(
+            "main.ocr_via_provider",
+            return_value="已知三角形 ABC\n[ILLUSTRATION_BOX: 10, 20, 90, 80]",
+        ), patch("main.draw_tikz_via_high_model") as draw:
+            response = client.post(
+                "/api/ocr",
+                data={"engine": "siliconflow", "skip_tikz": "true"},
+                files={"file": ("question.png", _png_bytes(), "image/png")},
+                headers={"X-Local-Token": LOCAL_TOKEN},
+            )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["latex"] == "已知三角形 ABC"
+        assert "ILLUSTRATION_BOX" not in payload["latex"]
+        assert "$$" not in payload["latex"]
+        draw.assert_not_called()
+        persisted_original = Path("main.py").resolve().parent / payload["image_path"].lstrip("/")
+    finally:
+        if persisted_original is not None:
+            persisted_original.unlink(missing_ok=True)
 
 
 def test_pdf_ocr_uses_claude_provider_when_selected():
@@ -455,3 +501,50 @@ def test_tikz_correction_uses_resolved_bailian_provider(tmp_path):
     assert kwargs["json"]["max_completion_tokens"] == 16384
     assert "reasoning_effort" not in kwargs["json"]
     assert len(kwargs["json"]["messages"][0]["content"]) == 2
+
+
+def test_deepseek_flash_ocr_sends_standard_image_block_and_disables_thinking(tmp_path):
+    image_path = tmp_path / 'formula.png'
+    image_path.write_bytes(_png_bytes())
+    provider = resolve_ocr_provider('deepseek', {'DEEPSEEK_API_KEY':'test-ds-key'})
+    upstream = MagicMock(status_code=200)
+    upstream.json.return_value = {'choices':[{'message':{'content':'$x=2$'}}]}
+    with patch('mathbank.ai_http.robust_request_post', return_value=upstream) as post:
+        assert ocr_via_provider(str(image_path), provider) == '$x=2$'
+    assert post.call_args.args[0] == 'https://api.deepseek.com/chat/completions'
+    request = post.call_args.kwargs['json']
+    assert request['model'] == 'deepseek-flash'
+    assert request['thinking'] == {'type':'disabled'}
+    assert request['messages'][0]['role'] == 'user'
+    assert request['messages'][0]['content'][1]['image_url']['url'].startswith('data:image/png;base64,')
+    assert 'enable_thinking' not in request and 'reasoning_effort' not in request
+
+
+def test_deepseek_text_only_model_is_rejected_before_ocr_upload():
+    provider = resolve_ocr_provider('deepseek', {'DEEPSEEK_OCR_MODEL':'deepseek-v4-pro'})
+    with patch('main.post_chat_completion') as post:
+        with pytest.raises(ValueError, match='不支持图像输入'):
+            ocr_via_provider('/not-read.png', provider)
+        post.assert_not_called()
+
+
+@pytest.mark.parametrize('engine', ['deepseek', 'default'])
+def test_single_question_ocr_supports_deepseek_choice(client, engine):
+    persisted = None
+    try:
+        with patch.dict(os.environ, {'DEEPSEEK_API_KEY':'test-ds-key', 'OCR_PREFER_ENGINE':'deepseek', 'DEEPSEEK_OCR_MODEL':'deepseek-flash'}), patch('main.ocr_via_provider', return_value='$x=2$') as ocr:
+            response = client.post('/api/ocr', data={'engine':engine, 'skip_tikz':'true'},
+                files={'file':('formula.png', _png_bytes(), 'image/png')}, headers={'X-Local-Token':LOCAL_TOKEN})
+        assert response.status_code == 200, response.text
+        assert ocr.call_args.args[1].provider_code == 'deepseek'
+        assert ocr.call_args.args[1].model_name == 'deepseek-flash'
+        persisted = Path('main.py').resolve().parent / response.json()['image_path'].lstrip('/')
+    finally:
+        if persisted is not None:
+            persisted.unlink(missing_ok=True)
+
+
+def test_pdf_ocr_uses_deepseek_when_selected():
+    with patch.dict(os.environ, {'OCR_PREFER_ENGINE':'deepseek', 'DEEPSEEK_API_KEY':'test-ds-key', 'DEEPSEEK_OCR_MODEL':'deepseek-flash'}), patch('main.ocr_via_provider', return_value='整页识别结果') as ocr:
+        assert ocr_pdf_page_image('/tmp/page.png') == '整页识别结果'
+        assert ocr.call_args.args[1].provider_code == 'deepseek'

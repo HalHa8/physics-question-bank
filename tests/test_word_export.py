@@ -1,6 +1,7 @@
 import io
 import shutil
 import zipfile
+from pathlib import Path
 
 import pytest
 from lxml import etree
@@ -178,6 +179,76 @@ def test_word_export_uses_native_omml_when_pandoc_is_available():
     assert diagnostics["native_formulas"] >= 8
     assert diagnostics["failed_formulas"] == 0
     assert "公式待核对" not in xml.decode("utf-8")
+
+
+@pytest.mark.skipif(shutil.which("pandoc") is None, reason="Pandoc is not installed")
+def test_word_export_roundtrips_the_imported_mathtype_interval():
+    from mathbank.docx_helper import extract_docx_markdown
+    from mathbank.mtef_helper import decode_mtef_formula
+
+    payload = bytes.fromhex((Path(__file__).parent / "fixtures/mtef/tabbed_interval.hex").read_text())
+    formula = decode_mtef_formula(payload).latex
+    data, diagnostics = build_word_document("公式导出核验", "", "exam", [{
+        "question": {"id": 8, "question_type": "detailed_answer",
+                     "content": f"条件为 ${formula}$。", "answer_markdown": f"原条件为 ${formula}$。"},
+        "score": 5,
+    }], include_answers=True)
+    root = etree.fromstring(_document_xml(data))
+    ns = {"m": word_export_helper.MATH_NS, "w": word_export_helper.WORD_NS}
+    formulas = root.xpath('.//m:oMath', namespaces=ns)
+    assert len(formulas) == 2
+    for math in formulas:
+        fractions = math.xpath('.//m:f', namespaces=ns)
+        assert [(
+            ''.join(f.xpath('./m:num//m:t/text()', namespaces=ns)),
+            ''.join(f.xpath('./m:den//m:t/text()', namespaces=ns)),
+        ) for f in fractions] == [('1', '2'), ('3', '4')]
+        assert math.xpath('./m:r/m:t/text()', namespaces=ns) == ['≤', 'm', '<']
+    assert not root.xpath('.//w:object', namespaces=ns)
+    assert diagnostics['native_formulas'] == 2
+    assert diagnostics['fallback_formulas'] == diagnostics['failed_formulas'] == 0
+    readback = extract_docx_markdown(data)
+    assert readback['diagnostics']['omml_converted'] == 2
+    assert r"\dfrac{1}{2}" in readback['markdown'] or r"\frac{1}{2}" in readback['markdown']
+    assert 'APG_' not in readback['markdown']
+
+
+def test_word_export_keeps_each_image_option_in_its_labeled_cell(tmp_path):
+    names = ['z.png', 'b.png', 'x.png', 'a.png']
+    colors = ['red', 'green', 'blue', 'black']
+    for name, color in zip(names, colors):
+        Image.new('RGB', (400, 300), color).save(tmp_path / name)
+    data, diagnostics = build_word_document('图片选项', '', 'exam', [{
+        'question': {'id': 6, 'question_type': 'single_choice',
+                     'content': '选择正确的图象。\\begin{choices}' + ''.join(
+                         f'\\item ![](/static/uploads/{name})' for name in names
+                     ) + '\\end{choices}',
+                     'image_paths': [f'/static/uploads/{name}' for name in names[::-1]]},
+        'score': 5,
+    }], uploads_dir=tmp_path)
+    assert diagnostics['missing_images'] == 0, diagnostics
+    root = etree.fromstring(_document_xml(data))
+    ns = {'w': word_export_helper.WORD_NS, 'a': 'http://schemas.openxmlformats.org/drawingml/2006/main',
+          'r': 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'}
+    table = root.xpath('.//w:tbl', namespaces=ns)[0]
+    cells = table.xpath('./w:tr/w:tc', namespaces=ns)
+    assert len(table.xpath('./w:tr', namespaces=ns)) == 1
+    assert [''.join(c.xpath('.//w:t/text()', namespaces=ns)) for c in cells] == ['A. ', 'B. ', 'C. ', 'D. ']
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        rels = etree.fromstring(archive.read('word/_rels/document.xml.rels'))
+        targets = {r.get('Id'): r.get('Target') for r in rels}
+        for cell, color in zip(cells, colors):
+            label_cells = cell.xpath('./w:tbl/w:tr/w:tc[1]', namespaces=ns)
+            assert len(label_cells) == 1
+            assert label_cells[0].xpath('./w:tcPr/w:vAlign/@w:val', namespaces=ns) == ['center']
+            assert not label_cells[0].xpath('.//w:drawing', namespaces=ns)
+            assert len(cell.xpath('./w:tbl/w:tr/w:tc[2]//w:drawing', namespaces=ns)) == 1
+            embedded = cell.xpath('.//a:blip/@r:embed', namespaces=ns)
+            assert len(embedded) == 1
+            with Image.open(io.BytesIO(archive.read('word/' + targets[embedded[0]]))) as image:
+                assert image.getpixel((0, 0)) == Image.new('RGB', (1, 1), color).getpixel((0, 0))
+    assert len(root.xpath('.//w:drawing', namespaces=ns)) == 4
+    assert all(width <= 1.5625 and height <= 2.36 for width, height in _drawing_extents_inches(data))
 
 
 def test_word_export_contains_choice_grid_and_marks_exam_19_answer_card_omission(monkeypatch):

@@ -6,105 +6,132 @@ let bankQuestionsLoadController = null;
 let bankQuestionsLoadSequence = 0;
 let bankQuestionsRetryTimer = null;
 
+// Formatting operates on one editor snapshot; delayed replies cannot replace
+// newer typing or a different question/draft, and never advance the saved state.
+async function normalizeEditorFractions(target, button) {
+    if (!['editContent', 'editAnswerMarkdown'].includes(target)) return;
+    const input = document.getElementById(target);
+    if (!input || !button || button.disabled) return;
+    const source = input.value;
+    if (!source.trim()) {
+        showToast('请先输入需要规范分式的内容。', 'info');
+        return;
+    }
+    const session = EditorState.snapshot();
+    let edited = false;
+    const markEdited = () => { edited = true; };
+    input.addEventListener('input', markEdited);
+    button.disabled = true;
+    button.setAttribute('aria-busy', 'true');
+    try {
+        const form = new FormData();
+        form.append('text', source);
+        const response = await fetch('/api/format/fractions', { method: 'POST', body: form });
+        if (!response.ok) throw new Error('fraction formatting failed');
+        const result = await response.json();
+        if (!EditorState.isCurrent(session)) return;
+        if (edited || input.value !== source) {
+            showToast('内容已变化，请重新点击“规范分式”。', 'info');
+            return;
+        }
+        if (typeof result.text !== 'string') throw new Error('invalid formatting response');
+        if (result.text === source) {
+            showToast('未发现可调整的分式；仅处理完整数学环境中的标准分式。', 'info');
+            return;
+        }
+        input.value = result.text;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        if (typeof refreshEditorFeedback === 'function') refreshEditorFeedback();
+        showToast('分式已规范，请核对预览后保存。', 'success');
+    } catch (error) {
+        if (EditorState.isCurrent(session)) {
+            showToast('分式规范失败，原内容已保留，请稍后重试。', 'error');
+        }
+    } finally {
+        input.removeEventListener('input', markEdited);
+        button.disabled = false;
+        button.removeAttribute('aria-busy');
+    }
+}
+window.normalizeEditorFractions = normalizeEditorFractions;
+
         function initResizers() {
+            const workspace = document.getElementById('bankWorkspaceSection');
             const sidebar = document.getElementById('sidebarSection');
-            const editor = document.getElementById('editorSection');
             const preview = document.getElementById('previewSection');
             const resizer1 = document.getElementById('resizer-1');
-            const resizer2 = document.getElementById('resizer-2');
-            const resizerV = document.getElementById('sidebar-resizer-v');
-            const sidebarTopPanel = document.getElementById('sidebarTopPanel');
-            const mainContainer = document.querySelector('main');
+            if (!workspace || !sidebar || !preview || !resizer1) return;
 
-            let isResizingLeft = false;
-            let isResizingRight = false;
-            let isResizingV = false;
+            const minRatio = Number(resizer1.getAttribute('aria-valuemin')) || 34;
+            const maxRatio = Number(resizer1.getAttribute('aria-valuemax')) || 72;
+            const defaultRatio = 45;
+            let isDragging = false;
 
-            resizer1.addEventListener('mousedown', function(e) {
-                e.preventDefault();
-                isResizingLeft = true;
-                document.body.style.cursor = 'col-resize';
-                document.body.classList.add('select-none');
-            });
-
-            resizer2.addEventListener('mousedown', function(e) {
-                e.preventDefault();
-                isResizingRight = true;
-                document.body.style.cursor = 'col-resize';
-                document.body.classList.add('select-none');
-            });
-
-            if (resizerV && sidebarTopPanel) {
-                resizerV.addEventListener('mousedown', function(e) {
-                    e.preventDefault();
-                    isResizingV = true;
-                    document.body.style.cursor = 'row-resize';
-                    document.body.classList.add('select-none');
-                });
+            function setBankSplitRatio(value, { notify = false } = {}) {
+                const ratio = Math.min(maxRatio, Math.max(minRatio, Number(value) || defaultRatio));
+                workspace.style.setProperty('--bank-list-track', `${ratio}fr`);
+                workspace.style.setProperty('--bank-detail-track', `${100 - ratio}fr`);
+                resizer1.setAttribute('aria-valuenow', String(Math.round(ratio)));
+                if (notify) window.dispatchEvent(new Event('resize'));
+                return ratio;
             }
 
-            document.addEventListener('mousemove', function(e) {
-                if (!isResizingLeft && !isResizingRight && !isResizingV) return;
+            function ratioFromPointer(clientX) {
+                const listRect = sidebar.getBoundingClientRect();
+                const detailRect = preview.getBoundingClientRect();
+                const dividerWidth = resizer1.getBoundingClientRect().width;
+                const availableWidth = Math.max(1, detailRect.right - listRect.left - dividerWidth);
+                const desiredListWidth = clientX - listRect.left - dividerWidth / 2;
+                return desiredListWidth / availableWidth * 100;
+            }
 
-                const containerRect = mainContainer.getBoundingClientRect();
-
-                if (isResizingLeft) {
-                    let newWidth = e.clientX - containerRect.left;
-                    if (newWidth < 45) {
-                        newWidth = 0;
-                        sidebar.style.width = '0px';
-                        sidebar.style.minWidth = '0px';
-                        sidebar.style.borderRightWidth = '0px';
-                    } else {
-                        sidebar.style.borderRightWidth = '1px';
-                        if (newWidth > containerRect.width * 0.5) {
-                            newWidth = containerRect.width * 0.5;
-                        }
-                        sidebar.style.width = newWidth + 'px';
-                    }
+            function finishDragging(event) {
+                if (!isDragging) return;
+                isDragging = false;
+                resizer1.classList.remove('is-dragging');
+                document.body.style.cursor = '';
+                document.body.classList.remove('select-none');
+                if (event && resizer1.hasPointerCapture && resizer1.hasPointerCapture(event.pointerId)) {
+                    resizer1.releasePointerCapture(event.pointerId);
                 }
+                window.dispatchEvent(new Event('resize'));
+            }
 
-                if (isResizingRight) {
-                    let newWidth = containerRect.right - e.clientX;
-                    if (newWidth < 45) {
-                        newWidth = 0;
-                        preview.style.width = '0px';
-                        preview.style.minWidth = '0px';
-                        preview.style.borderLeftWidth = '0px';
-                    } else {
-                        preview.style.borderLeftWidth = '1px';
-                        if (newWidth > containerRect.width * 0.5) {
-                            newWidth = containerRect.width * 0.5;
-                        }
-                        preview.style.width = newWidth + 'px';
-                    }
-                }
-
-                if (isResizingV && sidebar && sidebarTopPanel) {
-                    const sidebarRect = sidebar.getBoundingClientRect();
-                    let newHeight = e.clientY - sidebarRect.top;
-                    const minHeight = 100;
-                    const maxHeight = sidebarRect.height * 0.85;
-
-                    if (newHeight < minHeight) {
-                        newHeight = minHeight;
-                    } else if (newHeight > maxHeight) {
-                        newHeight = maxHeight;
-                    }
-                    sidebarTopPanel.style.height = newHeight + 'px';
-                }
+            resizer1.addEventListener('pointerdown', event => {
+                if (window.matchMedia('(max-width: 960px)').matches) return;
+                event.preventDefault();
+                isDragging = true;
+                resizer1.classList.add('is-dragging');
+                document.body.style.cursor = 'col-resize';
+                document.body.classList.add('select-none');
+                if (resizer1.setPointerCapture) resizer1.setPointerCapture(event.pointerId);
+                setBankSplitRatio(ratioFromPointer(event.clientX));
             });
 
-            document.addEventListener('mouseup', function() {
-                if (isResizingLeft || isResizingRight || isResizingV) {
-                    isResizingLeft = false;
-                    isResizingRight = false;
-                    isResizingV = false;
-                    document.body.style.cursor = '';
-                    document.body.classList.remove('select-none');
-                    window.dispatchEvent(new Event('resize'));
-                }
+            resizer1.addEventListener('pointermove', event => {
+                if (!isDragging) return;
+                event.preventDefault();
+                setBankSplitRatio(ratioFromPointer(event.clientX));
             });
+
+            resizer1.addEventListener('pointerup', finishDragging);
+            resizer1.addEventListener('pointercancel', finishDragging);
+
+            resizer1.addEventListener('keydown', event => {
+                if (!['ArrowLeft', 'ArrowRight', 'Home'].includes(event.key)) return;
+                event.preventDefault();
+                const currentRatio = Number(resizer1.getAttribute('aria-valuenow')) || defaultRatio;
+                const nextRatio = event.key === 'Home'
+                    ? defaultRatio
+                    : currentRatio + (event.key === 'ArrowLeft' ? -2 : 2);
+                setBankSplitRatio(nextRatio, { notify: true });
+            });
+
+            resizer1.addEventListener('dblclick', () => {
+                setBankSplitRatio(defaultRatio, { notify: true });
+            });
+
+            window.setBankSplitRatio = setBankSplitRatio;
         }
 
         // Copy Original LaTeX content to Clipboard
@@ -172,6 +199,7 @@ let bankQuestionsRetryTimer = null;
                 answer_tikz_assets: JSON.stringify(TikzState.answerAssets),
                 figure_align: FigureLayoutState.align,
                 figure_size: FigureLayoutState.size,
+                image_layouts: JSON.parse(JSON.stringify(FigureLayoutState.imageLayouts || {})),
                 figure_align_custom: FigureLayoutState.customAlign,
                 tags: document.getElementById('editTags') ? document.getElementById('editTags').value : ''
             };
@@ -195,11 +223,24 @@ let bankQuestionsRetryTimer = null;
                 answer_tikz_assets: snapshot.answer_tikz_assets || '[]',
                 figure_align: snapshot.figure_align || 'right',
                 figure_size: snapshot.figure_size || 'auto',
+                image_layouts: snapshot.image_layouts || {},
                 figure_align_custom: Boolean(snapshot.figure_align_custom),
                 tags: snapshot.tags
             };
+            if (typeof refreshEditorFeedback === 'function') refreshEditorFeedback();
         }
         window.backupEditorState = backupEditorState;
+
+        // Association endpoints save independently of the rest of the editor.
+        // Advance only this field so concurrent content/answer edits stay dirty.
+        function commitEditorRelatedBaseline(session, relatedQuestionId) {
+            if (!originalQuestionState || !EditorState.isCurrent(session)
+                    || originalQuestionState.id !== session.questionId) {
+                return false;
+            }
+            originalQuestionState.related_question_id = String(relatedQuestionId || '');
+            return true;
+        }
 
         function commitEditorFigureLayoutBaseline(
             questionId,
@@ -314,6 +355,7 @@ let bankQuestionsRetryTimer = null;
                    currentContentTikzAssets === (snapshot.content_tikz_assets || '[]') &&
                    currentAnswerTikzAssets === (snapshot.answer_tikz_assets || '[]') &&
                    currentFigureAlign === (snapshot.figure_align || 'right') &&
+                   JSON.stringify(FigureLayoutState.imageLayouts || {}) === JSON.stringify(snapshot.image_layouts || {}) &&
                    currentFigureSize === (snapshot.figure_size || 'auto') &&
                    currentFigureAlignCustom === Boolean(snapshot.figure_align_custom) &&
                    currentTags === snapshot.tags;
@@ -488,6 +530,251 @@ let bankQuestionsRetryTimer = null;
             }
         }
 
+
+        function refreshEditorFeedback() {
+            const status = document.getElementById('editorSaveStatus');
+            const hint = document.getElementById('editorValidationHint');
+            if (!status || !hint) return;
+            const missing = [];
+            const modal = document.getElementById('editorSection');
+            [['editContent', '题干'], ['editCompulsory', '学段'], ['editChapter', '章节']].forEach(([id, label]) => {
+                const input = document.getElementById(id);
+                if (!input) return;
+                const empty = !input.value.trim();
+                if (empty) missing.push(label);
+                input.setAttribute('aria-invalid', empty && modal.dataset.validationAttempted === 'true' ? 'true' : 'false');
+            });
+            status.textContent = typeof isQuestionSaveInFlight === 'function' && isQuestionSaveInFlight()
+                ? '正在保存…' : isEditorModified() ? '有未保存的修改' : EditorState.questionId ? '已保存' : '新题目 · 尚未入库';
+            hint.textContent = missing.length ? `保存前请补充：${missing.join('、')}。带 * 的项目为必填项。` : '必填信息已齐全，可以保存。';
+            hint.classList.toggle('is-complete', missing.length === 0);
+        }
+        window.refreshEditorFeedback = refreshEditorFeedback;
+        function updateBankFilterSummary() {
+            const button = document.querySelector('.bank-filter-toggle');
+            const clear = document.getElementById('clearBankFiltersBtn');
+            if (!button || !clear) return;
+            const selected = ['filterCompulsory', 'filterChapter', 'filterKnowledge', 'filterType', 'filterDifficulty', 'filterSource']
+                .map(id => document.getElementById(id)).filter(element => element && element.value);
+            button.textContent = selected.length ? `筛选 (${selected.length})` : '筛选';
+            button.setAttribute('data-tooltip', selected.map(element => element.tagName === 'SELECT' ? element.selectedOptions[0]?.textContent : element.value).join(' / ') || '按学段、章节、小节等条件筛选');
+            clear.hidden = selected.length === 0;
+        }
+        function clearBankFilters() {
+            ['filterCompulsory', 'filterChapter', 'filterKnowledge', 'filterType', 'filterDifficulty', 'filterSource'].forEach(id => {
+                const element = document.getElementById(id);
+                if (element) element.value = '';
+            });
+            document.getElementById('clearFilterSourceBtn')?.classList.add('hidden');
+            const reload = document.getElementById('filterCompulsory')?.onchange;
+            if (typeof reload === 'function') reload();
+            else {
+                currentBankPage = currentDraftPage = 1;
+                if (activeSidebarTab === 'bank') loadQuestions(); else loadDrafts();
+            }
+        }
+        window.clearBankFilters = clearBankFilters;
+        function toggleBankFilters(button) {
+            const fields = document.getElementById('bankFilterFields');
+            const open = fields.classList.toggle('is-open');
+            button.setAttribute('aria-expanded', String(open));
+            document.getElementById('bankWorkspaceSection').classList.toggle('bank-filters-open', open);
+        }
+        function showBankDetail() {
+            if (!window.matchMedia('(max-width: 960px)').matches || (window.PaperStore && window.PaperStore.activeWorkspace !== 'bank')) return;
+            document.getElementById('bankWorkspaceSection').classList.add('bank-detail-open');
+            const back = document.querySelector('.bank-detail-back');
+            if (back) back.focus({preventScroll: true});
+        }
+        function closeBankDetail() {
+            document.getElementById('bankWorkspaceSection').classList.remove('bank-detail-open');
+        }
+        window.toggleBankFilters = toggleBankFilters;
+        window.showBankDetail = showBankDetail;
+        window.closeBankDetail = closeBankDetail;
+        document.addEventListener('input', event => {
+            if (event.target.closest && event.target.closest('#editorSection')) refreshEditorFeedback();
+        });
+        document.addEventListener('change', event => {
+            if (event.target.closest && event.target.closest('#editorSection')) refreshEditorFeedback();
+        });
+
+        let questionEditorRestoreFocus = null;
+
+        function switchQuestionEditorPanel(panelId) {
+            const validPanels = ['classification', 'content', 'answer'];
+            const targetPanel = validPanels.includes(panelId) ? panelId : 'classification';
+            document.getElementById('editorSection').dataset.panel = targetPanel;
+
+            document.querySelectorAll('[data-editor-panel]').forEach(panel => {
+                const isActive = panel.dataset.editorPanel === targetPanel;
+                panel.classList.toggle('active', isActive);
+                panel.classList.toggle('hidden', !isActive);
+                panel.setAttribute('aria-hidden', isActive ? 'false' : 'true');
+            });
+
+            document.querySelectorAll('[data-editor-panel-target]').forEach(button => {
+                const isActive = button.dataset.editorPanelTarget === targetPanel;
+                button.classList.toggle('active', isActive);
+                if (isActive) {
+                    button.setAttribute('aria-current', 'step');
+                } else {
+                    button.removeAttribute('aria-current');
+                }
+            });
+
+            const body = document.querySelector('.question-editor-modal-body');
+            if (body) body.scrollTop = 0;
+        }
+
+        function setQuestionEditorBackgroundInert(isInert) {
+            document.querySelectorAll(
+                '#appNavigation, #appContentShell > header, #bankWorkspaceSection > :not(#editorSection)'
+            ).forEach(element => {
+                element.inert = isInert;
+                if (isInert) {
+                    element.setAttribute('aria-hidden', 'true');
+                } else {
+                    element.removeAttribute('aria-hidden');
+                }
+            });
+        }
+
+        function setQuestionDetailEditAvailability(isAvailable) {
+            const button = document.getElementById('editQuestionFromPreviewBtn');
+            if (!button) return;
+            button.disabled = !isAvailable;
+            button.setAttribute('aria-disabled', isAvailable ? 'false' : 'true');
+        }
+
+        function openQuestionEditorModal(panelId = 'classification') {
+            const modal = document.getElementById('editorSection');
+            const editButton = document.getElementById('editQuestionFromPreviewBtn');
+            if (!modal) return;
+            if (editButton && editButton.disabled && !modal.dataset.allowNewQuestion) {
+                showToast('请先从题库中选择一道题目', 'info');
+                return;
+            }
+
+            questionEditorRestoreFocus = document.activeElement;
+            switchQuestionEditorPanel(panelId);
+            modal.classList.remove('hidden');
+            modal.setAttribute('aria-hidden', 'false');
+            document.body.classList.add('question-editor-open');
+            setQuestionEditorBackgroundInert(true);
+
+            requestAnimationFrame(() => {
+                const activeStep = modal.querySelector('[data-editor-panel-target].active');
+                const title = document.getElementById('editorTitle');
+                if (title) { title.tabIndex = -1; title.focus({ preventScroll: true }); }
+            });
+            delete modal.dataset.allowNewQuestion;
+            delete modal.dataset.validationAttempted;
+            refreshEditorFeedback();
+        }
+
+        function finishCloseQuestionEditorModal() {
+            const modal = document.getElementById('editorSection');
+            if (!modal || modal.classList.contains('hidden')) return;
+            modal.classList.add('hidden');
+            modal.setAttribute('aria-hidden', 'true');
+            document.body.classList.remove('question-editor-open');
+            setQuestionEditorBackgroundInert(false);
+            if (questionEditorRestoreFocus && questionEditorRestoreFocus.isConnected) {
+                questionEditorRestoreFocus.focus({ preventScroll: true });
+            }
+            questionEditorRestoreFocus = null;
+        }
+
+        function restoreEditorAfterDiscard() {
+            if (!originalQuestionState) return;
+            if (originalQuestionState.id && typeof selectQuestion === 'function') {
+                selectQuestion({ id: originalQuestionState.id }, { silent: true });
+                return;
+            }
+            if (originalQuestionState.draftId) {
+                const draft = getLocalStorageDrafts().find(item => item.id === originalQuestionState.draftId);
+                if (draft) selectDraft(draft);
+                return;
+            }
+            if (typeof startNewQuestionWithoutPrompt === 'function') {
+                startNewQuestionWithoutPrompt();
+            }
+        }
+
+        function closeQuestionEditorModal() {
+            const modal = document.getElementById('editorSection');
+            if (!modal || modal.classList.contains('hidden')) return;
+            const shouldRestore = isEditorModified();
+            const isNewQuestionMode = modal.dataset.newQuestionMode === 'true';
+            const returnQuestionId = Number(modal.dataset.returnQuestionId || 0);
+            checkAndSwitch(() => {
+                finishCloseQuestionEditorModal();
+                if (isNewQuestionMode && Number.isSafeInteger(returnQuestionId) && returnQuestionId > 0) {
+                    selectQuestion({ id: returnQuestionId }, { silent: true });
+                } else if (shouldRestore) {
+                    restoreEditorAfterDiscard();
+                }
+                delete modal.dataset.newQuestionMode;
+                delete modal.dataset.returnQuestionId;
+            });
+        }
+
+        function openNewQuestionEditor() {
+            checkAndSwitch(() => {
+                const returnQuestionId = Number(EditorState.questionId || 0);
+                // The list refresh performed by startNewQuestion must not
+                // auto-select the first question again and overwrite the new
+                // question draft while its modal is opening.
+                window.__preserveNewQuestionEditor = true;
+                startNewQuestion();
+                const title = document.getElementById('editorTitle');
+                if (title) title.textContent = '录入新物理题';
+                setQuestionDetailEditAvailability(false);
+                const modal = document.getElementById('editorSection');
+                if (modal) {
+                    modal.dataset.allowNewQuestion = 'true';
+                    modal.dataset.newQuestionMode = 'true';
+                    if (Number.isSafeInteger(returnQuestionId) && returnQuestionId > 0) {
+                        modal.dataset.returnQuestionId = String(returnQuestionId);
+                    }
+                }
+                openQuestionEditorModal('content');
+                if (typeof switchContentTab === 'function') switchContentTab('manual');
+                setQuestionDetailEditAvailability(false);
+            });
+        }
+
+        document.addEventListener('keydown', event => {
+            const modal = document.getElementById('editorSection');
+            if (!modal || modal.classList.contains('hidden')) return;
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                closeQuestionEditorModal();
+                return;
+            }
+            if (event.key !== 'Tab') return;
+            const focusable = Array.from(modal.querySelectorAll(
+                'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+            )).filter(element => element.getClientRects().length > 0);
+            if (focusable.length === 0) return;
+            const first = focusable[0];
+            const last = focusable[focusable.length - 1];
+            if (event.shiftKey && document.activeElement === first) {
+                event.preventDefault();
+                last.focus();
+            } else if (!event.shiftKey && document.activeElement === last) {
+                event.preventDefault();
+                first.focus();
+            }
+        });
+
+        window.switchQuestionEditorPanel = switchQuestionEditorPanel;
+        window.openQuestionEditorModal = openQuestionEditorModal;
+        window.closeQuestionEditorModal = closeQuestionEditorModal;
+        window.openNewQuestionEditor = openNewQuestionEditor;
+        window.setQuestionDetailEditAvailability = setQuestionDetailEditAvailability;
+
         // ==========================================
         //         LOCALSTORAGE DRAFTS SYSTEM
         // ==========================================
@@ -554,6 +841,7 @@ let bankQuestionsRetryTimer = null;
                 answer_tikz_assets: TikzState.answerAssets,
                 figure_align: FigureLayoutState.align,
                 figure_size: FigureLayoutState.size,
+                image_layouts: JSON.parse(JSON.stringify(FigureLayoutState.imageLayouts || {})),
                 figure_align_custom: FigureLayoutState.customAlign,
                 isDraft: true,
                 updated_at: new Date().toISOString()
@@ -593,8 +881,8 @@ let bankQuestionsRetryTimer = null;
             
             // Populate form fields
             document.getElementById('editContent').value = draft.content || '';
-            document.getElementById('editQType').value = draft.question_type || 'single_choice';
-            document.getElementById('editDifficulty').value = draft.difficulty || 'easy_error';
+            setEditorMetadataValue(document.getElementById('editQType'), draft.question_type || 'single_choice');
+            setEditorMetadataValue(document.getElementById('editDifficulty'), draft.difficulty || 'easy_error');
             document.getElementById('editSource').value = draft.source || '';
             document.getElementById('editAnswerMarkdown').value = draft.answer_markdown || '';
             document.getElementById('editReview').value = draft.review || '';
@@ -668,6 +956,7 @@ let bankQuestionsRetryTimer = null;
             
             // Backup draft state
             backupEditorState(null, draft.id);
+            setQuestionDetailEditAvailability(true);
             
             // Active highlighting in sidebar drafts list
             if (activeSidebarTab === 'drafts') {
@@ -687,12 +976,14 @@ let bankQuestionsRetryTimer = null;
         }
 
         function loadDrafts() {
+            if (typeof updateBankFilterSummary === 'function') updateBankFilterSummary();
             const qListContainer = document.getElementById('questionsList');
             const q = document.getElementById('searchInput').value.trim().toLowerCase();
             const qtype = document.getElementById('filterType').value;
             const difficulty = document.getElementById('filterDifficulty').value;
             const compulsory = document.getElementById('filterCompulsory').value;
             const chapter = document.getElementById('filterChapter').value;
+            const knowledge = document.getElementById('filterKnowledge')?.value || '';
             const source = document.getElementById('filterSource') ? document.getElementById('filterSource').value.trim().toLowerCase() : '';
             
             let drafts = getLocalStorageDrafts();
@@ -717,6 +1008,8 @@ let bankQuestionsRetryTimer = null;
                 drafts = drafts.filter(item => item.category_chapter === chapter);
             }
             
+            if (knowledge) drafts = drafts.filter(item => item.category_knowledge === knowledge);
+
             // Filter by source
             if (source) {
                 drafts = drafts.filter(item => (item.source || '').toLowerCase().includes(source));
@@ -771,9 +1064,10 @@ let bankQuestionsRetryTimer = null;
             
             if (totalItems === 0) {
                 qListContainer.innerHTML = `
-                    <div class="p-6 text-center text-slate-400 text-xs">
-                        <i class="fa-solid fa-box-open text-2xl mb-1 text-slate-400"></i>
-                        <p>草稿箱空空如也</p>
+                    <div class="ui-state ui-state-empty bank-list-state">
+                        <span class="ui-state-icon" aria-hidden="true"><i class="fa-solid fa-box-open"></i></span>
+                        <strong class="ui-state-title">草稿箱空空如也</strong>
+                        <span class="ui-state-description">编辑题目时保存的草稿会显示在这里。</span>
                     </div>`;
                 renderSidebarPagination(0, 1, 'drafts');
                 return;
@@ -791,7 +1085,7 @@ let bankQuestionsRetryTimer = null;
                 const isActive = EditorState.draftId === item.id;
                 itemCard.className = `p-3.5 mx-1.5 rounded-xl border glass-card hover:bg-white cursor-pointer transition-all duration-200 shadow-sm flex flex-col space-y-2 select-none group relative ${isActive ? 'border-emerald-500 bg-white ring-2 ring-emerald-100 shadow-md' : 'border-slate-200'}`;
                 
-                const cleanContent = parseMarkdownWithMath(item.content || '');
+                const cleanContent = parseMarkdownWithMath(item.content || '', item.image_layouts || {});
                 
                 let tagsHtml = '';
                 if (item.tags) {
@@ -1209,57 +1503,45 @@ let bankQuestionsRetryTimer = null;
         function populateFilterDropdowns() {
             const compSelect = document.getElementById('filterCompulsory');
             const chapSelect = document.getElementById('filterChapter');
-            
-            if (!compSelect || !chapSelect) return;
-            if (!categoryTree || typeof categoryTree !== 'object') {
-                console.warn('[Security Shield] 分类数据未准备完毕，跳过过滤框分类级联填充');
-                return;
+            const knowSelect = document.getElementById('filterKnowledge');
+            if (!compSelect || !chapSelect || !knowSelect || !categoryTree || typeof categoryTree !== 'object') return;
+            const previous = [compSelect.value, chapSelect.value, knowSelect.value];
+            function fill(select, values, placeholder, selected = '') {
+                select.innerHTML = '<option value="">' + placeholder + '</option>' + values.map(value =>
+                    `<option value="${window.MathBankSafe.escapeAttribute(value)}">${window.MathBankSafe.escapeText(value)}</option>`).join('');
+                select.value = values.includes(selected) ? selected : '';
             }
-            
-            compSelect.innerHTML = '<option value="">所有学段/必选修</option>';
-            Object.keys(categoryTree).forEach(c => {
-                compSelect.innerHTML += `<option value="${window.MathBankSafe.escapeAttribute(c)}">${window.MathBankSafe.escapeText(c)}</option>`;
-            });
-            
-            compSelect.onchange = () => {
-                const comp = compSelect.value;
-                chapSelect.innerHTML = '<option value="">所有章节</option>';
-                
-                if (comp && categoryTree[comp]) {
-                    chapSelect.classList.remove('hidden');
-                    Object.keys(categoryTree[comp]).forEach(ch => {
-                        chapSelect.innerHTML += `<option value="${window.MathBankSafe.escapeAttribute(ch)}">${window.MathBankSafe.escapeText(ch)}</option>`;
-                    });
-                } else {
-                    chapSelect.classList.add('hidden');
-                }
-                
-                // Reset page numbers
+            function fillKnowledge(selected = '') {
+                const values = categoryTree[compSelect.value]?.[chapSelect.value];
+                fill(knowSelect, Array.isArray(values) ? values : [], chapSelect.value ? '所有小节' : '先选择章节', selected);
+                knowSelect.disabled = !Array.isArray(values);
+                knowSelect.classList.remove('hidden');
+            }
+            function fillChapters(chapter = '', knowledge = '') {
+                const chapters = categoryTree[compSelect.value];
+                fill(chapSelect, chapters ? Object.keys(chapters) : [], chapters ? '所有章节' : '先选择学段', chapter);
+                chapSelect.disabled = !chapters;
+                chapSelect.classList.remove('hidden');
+                fillKnowledge(knowledge);
+            }
+            function reload() {
                 currentBankPage = 1;
                 currentDraftPage = 1;
-                
-                if (activeSidebarTab === 'bank') {
-                    loadQuestions(); // Refilter
-                } else {
-                    loadDrafts(); // Refilter
-                }
-            };
-            
-            chapSelect.onchange = () => {
-                // Reset page numbers
-                currentBankPage = 1;
-                currentDraftPage = 1;
-                
-                if (activeSidebarTab === 'bank') {
-                    loadQuestions(); // Refilter
-                } else {
-                    loadDrafts(); // Refilter
-                }
-            };
+                updateBankFilterSummary();
+                if (activeSidebarTab === 'bank') loadQuestions();
+                else loadDrafts();
+            }
+            fill(compSelect, Object.keys(categoryTree), '所有学段', previous[0]);
+            fillChapters(previous[1], previous[2]);
+            compSelect.onchange = () => { fillChapters(); reload(); };
+            chapSelect.onchange = () => { fillKnowledge(); reload(); };
+            knowSelect.onchange = reload;
+            updateBankFilterSummary();
         }
 
         // Load and List Saved Questions
         function loadQuestions(retryCount = 0) {
+            if (typeof updateBankFilterSummary === 'function') updateBankFilterSummary();
             const loadSequence = ++bankQuestionsLoadSequence;
             if (bankQuestionsRetryTimer) {
                 clearTimeout(bankQuestionsRetryTimer);
@@ -1278,6 +1560,7 @@ let bankQuestionsRetryTimer = null;
             const difficulty = document.getElementById('filterDifficulty').value;
             const compulsory = document.getElementById('filterCompulsory').value;
             const chapter = document.getElementById('filterChapter').value;
+            const knowledge = document.getElementById('filterKnowledge')?.value || '';
             const source = document.getElementById('filterSource') ? document.getElementById('filterSource').value : '';
             const sortOrder = document.getElementById('filterSort') ? document.getElementById('filterSort').value : 'desc';
             const requestedPage = Math.max(1, currentBankPage);
@@ -1288,6 +1571,7 @@ let bankQuestionsRetryTimer = null;
             if (difficulty) params.append('difficulty', difficulty);
             if (compulsory) params.append('compulsory', compulsory);
             if (chapter) params.append('chapter', chapter);
+            if (knowledge) params.append('knowledge', knowledge);
             if (source) params.append('source', source);
             params.append('page', String(requestedPage));
             params.append('page_size', String(PAGE_LIMIT));
@@ -1325,12 +1609,16 @@ let bankQuestionsRetryTimer = null;
 
                     currentBankPage = Math.min(responsePage, totalPages);
                     qListContainer.innerHTML = '';
+                    const shouldAutoSelectFirstQuestion = !window.__preserveNewQuestionEditor &&
+                        !EditorState.questionId &&
+                        questions.length > 0 && !isEditorModified();
                     
                     if (totalItems === 0) {
                         qListContainer.innerHTML = `
-                            <div class="p-6 text-center text-slate-400 text-xs">
-                                <i class="fa-solid fa-box-open text-2xl mb-1 text-slate-400"></i>
-                                <p>未找到匹配题目</p>
+                            <div class="ui-state ui-state-empty bank-list-state">
+                                <span class="ui-state-icon" aria-hidden="true"><i class="fa-solid fa-box-open"></i></span>
+                                <strong class="ui-state-title">未找到匹配题目</strong>
+                                <span class="ui-state-description">请调整搜索词或筛选条件后重试。</span>
                             </div>`;
                         renderSidebarPagination(0, 1, 'bank');
                         return;
@@ -1342,10 +1630,10 @@ let bankQuestionsRetryTimer = null;
                         const typeText = getTypeText(item.question_type);
                         
                         const itemCard = document.createElement('div');
-                        itemCard.className = `question-card p-3.5 mx-1.5 flex flex-col space-y-2 select-none group relative ${EditorState.questionId === item.id ? 'active' : ''}`;
+                        itemCard.className = `question-card bank-question-card p-3.5 mx-1.5 flex flex-col space-y-2 select-none group relative ${EditorState.questionId === item.id ? 'active' : ''}`;
                         itemCard.dataset.id = item.id;
                         
-                        const cleanContent = parseMarkdownWithMath(item.content || '');
+                        const cleanContent = parseMarkdownWithMath(item.content || '', item.image_layouts || {});
                         
                         let tagsHtml = '';
                         if (item.tags) {
@@ -1374,10 +1662,10 @@ let bankQuestionsRetryTimer = null;
                         }
 
                         itemCard.innerHTML = `
-                            <div class="flex items-start justify-between">
-                                <span class="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-500 shrink-0 mt-0.5">${window.MathBankSafe.escapeText(typeText)}</span>
-                                <div class="flex items-center gap-1.5 justify-end flex-wrap flex-1 ml-2">
-                                    ${tagsHtml}
+                            <div class="bank-question-card-header flex items-start justify-between">
+                                <span class="bank-question-type text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-500 shrink-0 mt-0.5">${window.MathBankSafe.escapeText(typeText)}</span>
+                                <div class="bank-question-badges flex items-center gap-1.5 justify-end flex-wrap flex-1 ml-2">
+                                    <div class="bank-question-tags">${tagsHtml}</div>
                                     ${difficultyBadge}
                                     <span class="text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-brand-50 text-brand-600 shadow-sm">#${window.MathBankSafe.escapeText(item.seq_num)}</span>
                                     <!-- Delete Button -->
@@ -1386,15 +1674,11 @@ let bankQuestionsRetryTimer = null;
                                     </button>
                                 </div>
                             </div>
-                            <div class="text-xs text-slate-700 leading-relaxed font-medium line-clamp-2 card-formula-render">${cleanContent || '[空白题干]'}</div>
-                            <!-- Time Badge -->
-                            <div class="text-[8px] text-slate-400/80 flex items-center space-x-1 py-0.5">
-                                <i class="fa-regular fa-clock text-[8px]"></i>
-                                <span>录入：${window.MathBankSafe.escapeText(formatChineseDate(item.created_at))}</span>
-                            </div>
-                            <div class="flex justify-between items-center text-[9px] text-slate-400 border-t pt-1.5">
+                            <div class="bank-question-excerpt text-xs text-slate-700 leading-relaxed font-medium line-clamp-2 card-formula-render">${cleanContent || '[空白题干]'}</div>
+                            <div class="bank-question-meta flex justify-between items-center text-[9px] text-slate-400 border-t pt-1.5">
                                 <span class="truncate max-w-[120px] font-semibold"><i class="fa-solid fa-folder-open mr-0.5"></i>${window.MathBankSafe.escapeText(item.category_knowledge || item.category_chapter || '未分类')}</span>
                                 <span class="font-mono text-slate-400">${window.MathBankSafe.escapeText(item.source ? item.source.substring(0, 12) : '本地录入')}</span>
+                                <time class="bank-question-time" title="录入于 ${window.MathBankSafe.escapeText(formatChineseDate(item.created_at))}">${window.MathBankSafe.escapeText(String(item.created_at || '').slice(0, 10))}</time>
                             </div>
                         `;
                         
@@ -1419,6 +1703,13 @@ let bankQuestionsRetryTimer = null;
                         
                         qListContainer.appendChild(itemCard);
                     });
+
+                    if (shouldAutoSelectFirstQuestion) {
+                        // Initial list hydration is background work, not a
+                        // user selection; avoid showing a success toast on
+                        // every page refresh while keeping the first preview.
+                        selectQuestion(questions[0], { silent: true });
+                    }
                     
                     renderSidebarPagination(totalItems, currentBankPage, 'bank');
                 })
@@ -1436,11 +1727,11 @@ let bankQuestionsRetryTimer = null;
                         }, 1500);
                     } else {
                         qListContainer.innerHTML = `
-                            <div class="p-6 text-center text-red-500 text-xs">
-                                <i class="fa-solid fa-triangle-exclamation text-2xl mb-1 text-red-400"></i>
-                                <p class="font-semibold">获取题库列表失败</p>
-                                <p class="text-[10px] text-slate-500 mt-0.5 mb-2.5">后台服务正在启动或连接超时</p>
-                                <button onclick="loadQuestions()" class="px-3.5 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 font-bold rounded-xl transition-all border border-red-200 hover:scale-95 text-[10px] inline-flex items-center space-x-1 cursor-pointer">
+                            <div class="ui-state ui-state-error bank-list-state" role="alert">
+                                <span class="ui-state-icon" aria-hidden="true"><i class="fa-solid fa-triangle-exclamation"></i></span>
+                                <strong class="ui-state-title">获取题库列表失败</strong>
+                                <span class="ui-state-description">后台服务正在启动或连接超时</span>
+                                <button onclick="loadQuestions()" class="ui-state-action inline-flex items-center space-x-1 cursor-pointer">
                                     <i class="fa-solid fa-arrows-rotate"></i><span>重新加载</span>
                                 </button>
                             </div>`;
@@ -1450,6 +1741,9 @@ let bankQuestionsRetryTimer = null;
                 })
                 .finally(() => {
                     if (loadSequence !== bankQuestionsLoadSequence) return;
+                    if (window.__preserveNewQuestionEditor) {
+                        window.__preserveNewQuestionEditor = false;
+                    }
                     qListContainer.removeAttribute('aria-busy');
                     if (bankQuestionsLoadController === requestController) {
                         bankQuestionsLoadController = null;
@@ -1463,6 +1757,10 @@ let bankQuestionsRetryTimer = null;
         function renderSidebarPagination(totalItems, currentPage, tabType) {
             const container = document.getElementById('sidebarPagination');
             if (!container) return;
+            const summary = document.getElementById('questionResultSummary');
+            if (summary) {
+                summary.textContent = `共 ${totalItems} 道题`;
+            }
             
             if (totalItems === 0) {
                 container.innerHTML = '';
@@ -1473,70 +1771,19 @@ let bankQuestionsRetryTimer = null;
             
             const totalPages = Math.ceil(totalItems / PAGE_LIMIT) || 1;
             
-            // Build pages array with sliding window folding
-            let pages = [];
-            if (totalPages <= 5) {
-                for (let i = 1; i <= totalPages; i++) {
-                    pages.push(i);
-                }
-            } else {
-                pages.push(1);
-                
-                let start = Math.max(2, currentPage - 1);
-                let end = Math.min(totalPages - 1, currentPage + 1);
-                
-                if (currentPage <= 3) {
-                    end = 4;
-                }
-                if (currentPage >= totalPages - 2) {
-                    start = totalPages - 3;
-                }
-                
-                if (start > 2) {
-                    pages.push('...');
-                }
-                
-                for (let i = start; i <= end; i++) {
-                    pages.push(i);
-                }
-                
-                if (end < totalPages - 1) {
-                    pages.push('...');
-                }
-                
-                pages.push(totalPages);
+            if (totalPages <= 1) {
+                container.innerHTML = '';
+                container.style.display = 'none';
+                return;
             }
-            
-            let pagesHtml = '';
-            pages.forEach(p => {
-                if (p === '...') {
-                    pagesHtml += `<span class="pagination-ellipsis">...</span>`;
-                } else {
-                    pagesHtml += `<button class="pagination-btn ${p === currentPage ? 'active' : ''}" onclick="goToSidebarPage(${p}, '${tabType}')">${p}</button>`;
-                }
-            });
-            
             container.innerHTML = `
-                <div class="flex items-center justify-between text-[10px] text-slate-400 font-semibold px-0.5">
-                    <span>共 ${totalItems} 题 / ${totalPages} 页</span>
-                    <div class="flex items-center space-x-1">
-                        <span>跳转至</span>
-                        <input type="number" min="1" max="${totalPages}" value="${currentPage}" class="pagination-jump-input" onkeydown="if(event.key==='Enter') jumpToSidebarPage(this.value, ${totalPages}, '${tabType}')">
-                        <span>页</span>
-                    </div>
-                </div>
-                <div class="sidebar-pagination-controls flex items-center justify-center space-x-1">
-                    <button class="pagination-btn pagination-btn-nav" ${currentPage === 1 ? 'disabled' : ''} onclick="goToSidebarPage(${currentPage - 1}, '${tabType}')">
-                        <i class="fa-solid fa-chevron-left text-[9px] mr-0.5"></i>上一页
-                    </button>
-                    ${pagesHtml}
-                    <button class="pagination-btn pagination-btn-nav" ${currentPage === totalPages ? 'disabled' : ''} onclick="goToSidebarPage(${currentPage + 1}, '${tabType}')">
-                        下一页<i class="fa-solid fa-chevron-right text-[9px] ml-0.5"></i>
-                    </button>
-                </div>
-            `;
+                <div class="sidebar-pagination-controls flex items-center justify-between">
+                    <button class="pagination-btn pagination-btn-nav" ${currentPage === 1 ? 'disabled' : ''} onclick="goToSidebarPage(${currentPage - 1}, '${tabType}')">上一页</button>
+                    <label class="pagination-page-label">第 <input type="number" aria-label="跳转页码" min="1" max="${totalPages}" value="${currentPage}" class="pagination-jump-input" onkeydown="if(event.key==='Enter') jumpToSidebarPage(this.value, ${totalPages}, '${tabType}')"> / ${totalPages} 页</label>
+                    <button class="pagination-btn pagination-btn-nav" ${currentPage === totalPages ? 'disabled' : ''} onclick="goToSidebarPage(${currentPage + 1}, '${tabType}')">下一页</button>
+                </div>`;
         }
-        
+
         function goToSidebarPage(page, tabType) {
             if (tabType === 'bank') {
                 currentBankPage = page;
@@ -1587,7 +1834,7 @@ let bankQuestionsRetryTimer = null;
                 : '<span class="text-[10px] font-bold px-2 py-0.5 rounded-md bg-slate-200 text-slate-500">编号：新题目</span>';
 
             const createdAtBadge = EditorState.createdAt
-                ? `<span class="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 inline-flex items-center"><i class="fa-regular fa-clock mr-1"></i>录入于：${escapeEditorMetaText(formatChineseDate(EditorState.createdAt))}</span>`
+                ? `<span class="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 inline-flex items-center"><i class="fa-regular fa-clock mr-1"></i>${escapeEditorMetaText(String(EditorState.createdAt).slice(0, 10))}</span>`
                 : '';
 
             let paperTagsHtml = '';
@@ -1627,7 +1874,11 @@ let bankQuestionsRetryTimer = null;
         function choicesGridOverflows(grid) {
             return Array.from(grid.children).some(item => {
                 const content = item.querySelector('.choices-content') || item;
-                return content.scrollWidth > content.clientWidth + 1;
+                const imageMinWidth = grid.closest('.paper-choice-options-row') ? 100 : 140;
+                const imageTooSmall = Array.from(content.querySelectorAll('img')).some(img =>
+                    Math.min(img.naturalWidth, imageMinWidth) > content.clientWidth + 1
+                );
+                return imageTooSmall || content.scrollWidth > content.clientWidth + 1;
             });
         }
 
@@ -1660,6 +1911,11 @@ let bankQuestionsRetryTimer = null;
 
             grids.forEach(grid => {
                 adaptSingleChoicesGrid(grid);
+                grid.querySelectorAll('img').forEach(img => {
+                    if (!img.complete) {
+                        img.addEventListener('load', () => adaptSingleChoicesGrid(grid), { once: true });
+                    }
+                });
                 if (typeof ResizeObserver !== 'undefined' && !choicesGridResizeObservers.has(grid)) {
                     const observer = new ResizeObserver(() => {
                         window.requestAnimationFrame(() => adaptSingleChoicesGrid(grid));
@@ -1682,11 +1938,8 @@ let bankQuestionsRetryTimer = null;
                 
                 // Automatically sync illustrations list with text content
                 if (uploadedImages.length > 0) {
-                    const initialLength = uploadedImages.length;
                     uploadedImages = uploadedImages.filter(path => text.includes(path));
-                    if (uploadedImages.length !== initialLength) {
-                        renderIllustrationBadges();
-                    }
+                    renderIllustrationBadges();
                 }
                 
                 if (!text.trim()) {
@@ -1695,7 +1948,7 @@ let bankQuestionsRetryTimer = null;
                     return;
                 }
                 
-                const preparedHtml = renderQuestionPreviewContent(previewContainer, text);
+                const preparedHtml = renderQuestionPreviewContent(previewContainer, text, { imageLayouts: FigureLayoutState.imageLayouts });
                 renderQuestionPreviewContent(paperContainer, text, { preparedHtml: preparedHtml });
                 if (typeof window.applyEditorFigureLayoutPreview === 'function') {
                     window.applyEditorFigureLayoutPreview(previewContainer, text);
@@ -1877,12 +2130,165 @@ let bankQuestionsRetryTimer = null;
             return text.replace(/\\paren\b/g, '<span class="exam-zh-paren-preview" role="img" aria-label="选择题作答括号">（&nbsp;&nbsp;）</span>');
         }
 
-        function preprocessFormulaForKaTeX(text) {
+        function normalizeNakedMathForPreview(text) {
+            if (!text) return "";
+            let source = String(text);
+
+            const placeholders = [];
+            function save(original) {
+                const marker = `\uE000${placeholders.length}\uE001`;
+                placeholders.push({ marker, original });
+                return marker;
+            }
+            function protect(pattern, transform) {
+                source = source.replace(pattern, function(match) {
+                    return save(typeof transform === 'function' ? transform(match) : match);
+                });
+            }
+
+            [
+                /```[\s\S]*?```/g,
+                /`[^`\n]*`/g,
+                /!\[[^\]\n]*\]\([^\n)]*\)/g,
+                /\[\[MBM_[A-Za-z0-9_:-]+\]\]/g,
+                /\[ILLUSTRATION_BOX:\s*[^\]\n]*\]/gi,
+                // Cells already contain these tokens when table rendering
+                // reaches this helper. They must survive until final restore.
+                /@@MATH_PLACEHOLDER_\d+@@/g
+            ].forEach(function(pattern) { protect(pattern); });
+
+            source = replaceDelimitedMathForPreview(source, save);
+            source = replaceLatexEnvironmentsForPreview(source, function(environment, name, body) {
+                if (/^(tabular\*?|tabularx|longtable|tblr|longtblr|talltblr)$/.test(name)) {
+                    return save(environment);
+                }
+                if (/^(equation\*?|align\*?|alignat\*?|gather\*?|multline\*?|displaymath)$/.test(name)) {
+                    // KaTeX has no multline environment. Preserve every row
+                    // in a centered gathered preview; stored/exported TeX is unchanged.
+                    const innerEnvironment = /^alignat/.test(name) ? 'alignedat'
+                        : /^align/.test(name) ? 'aligned'
+                        : /^(gather|multline)/.test(name) ? 'gathered' : '';
+                    const preview = innerEnvironment
+                        ? '\\begin{' + innerEnvironment + '}' + body + '\\end{' + innerEnvironment + '}'
+                        : body;
+                    return save('$$' + preview + '$$');
+                }
+                return save('$' + (name === 'math' ? body : environment) + '$');
+            });
+
+            [
+                /\\(?:begin|end)\{[^}\n]+\}/g,
+                /\\item\b/g,
+                /\\fillin\b/g,
+                /\\paren\b/g,
+                /\\textbf\{[^{}\n]*\}/g,
+                /\\includegraphics(?:\s*\[[^\]\n]*\])?\s*\{[^}\n]+\}/g,
+                /<\/?[A-Za-z][^>\n]*>/g
+            ].forEach(function(pattern) { protect(pattern); });
+
+            source = source.replace(/[A-Za-z0-9\\{}_^+\-*/=<>|(),.:\[\]\t ]+/g, function(raw) {
+                const core = raw.trim();
+                if (!core) return raw;
+                const nonMathCommands = new Set([
+                    'begin', 'bottomrule', 'centering', 'cline', 'end', 'fillin',
+                    'hline', 'includegraphics', 'item', 'midrule', 'multicolumn',
+                    'multirow', 'paren', 'renewcommand', 'textbf', 'toprule'
+                ]);
+                const commands = core.match(/\\[A-Za-z]+/g) || [];
+                const hasMathCommand = commands.some(command => !nonMathCommands.has(command.slice(1).toLowerCase()));
+                const hasScript = /[A-Za-z0-9})\]]\s*[_^](?:\s*\{|\s*[A-Za-z0-9\\])/.test(core);
+                const hasRelation = /[A-Za-z0-9})\]]\s*(?:=|<|>)\s*(?:[A-Za-z0-9({\[\\+\-])/.test(core);
+                const hasFunction = /\b[A-Za-z]\s*\([^)]*[A-Za-z0-9_+\-,\\][^)]*\)/.test(core);
+                const hasCoordinate = /\(\s*[+\-]?(?:\d+(?:\.\d+)?|[A-Za-z])\s*,[^)]*\)/.test(core);
+                if (!hasMathCommand && !hasScript && !hasRelation && !hasFunction && !hasCoordinate) return raw;
+                const leading = raw.slice(0, raw.length - raw.trimStart().length);
+                const trailing = raw.slice(raw.trimEnd().length);
+                return leading + '$' + core + '$' + trailing;
+            });
+
+            placeholders.slice().reverse().forEach(function(entry) {
+                source = source.replace(entry.marker, function() { return entry.original; });
+            });
+            return source;
+        }
+
+        function isLatexTokenEscaped(text, index) {
+            let cursor = index - 1;
+            while (cursor >= 0 && text[cursor] === '\\') cursor--;
+            return (index - cursor - 1) % 2 === 1;
+        }
+
+        function replaceDelimitedMathForPreview(text, replace) {
+            const parts = [];
+            let cursor = 0;
+            let copied = 0;
+            while (cursor < text.length) {
+                const opening = ['$$', '$', '\\(', '\\['].find(token => text.startsWith(token, cursor));
+                if (!opening || isLatexTokenEscaped(text, cursor)) {
+                    cursor++;
+                    continue;
+                }
+                const closing = opening === '\\(' ? '\\)' : opening === '\\[' ? '\\]' : opening;
+                let end = text.indexOf(closing, cursor + opening.length);
+                while (end >= 0 && isLatexTokenEscaped(text, end)) {
+                    end = text.indexOf(closing, end + closing.length);
+                }
+                if (end < 0) {
+                    cursor += opening.length;
+                    continue;
+                }
+                const finish = end + closing.length;
+                parts.push(text.slice(copied, cursor), replace(
+                    text.slice(cursor, finish), text.slice(cursor + opening.length, end), opening, closing
+                ));
+                cursor = copied = finish;
+            }
+            parts.push(text.slice(copied));
+            return parts.join('');
+        }
+
+        function replaceLatexEnvironmentsForPreview(text, replace) {
+            const recognized = /^(tabular\*?|tabularx|longtable|tblr|longtblr|talltblr|equation\*?|align\*?|alignat\*?|gather\*?|multline\*?|displaymath|math|cases|aligned|alignedat|gathered|matrix|pmatrix|bmatrix|Bmatrix|vmatrix|Vmatrix|smallmatrix|array|split)$/;
+            const tokenPattern = /\\(begin|end)\{([^{}\n]+)\}/g;
+            const parts = [];
+            let copied = 0;
+            let match;
+            while ((match = tokenPattern.exec(text))) {
+                const name = match[2];
+                if (match[1] !== 'begin' || !recognized.test(name) || isLatexTokenEscaped(text, match.index)) continue;
+                const bodyStart = tokenPattern.lastIndex;
+                const nestedPattern = /\\(begin|end)\{([^{}\n]+)\}/g;
+                nestedPattern.lastIndex = bodyStart;
+                const stack = [name];
+                let nested;
+                while ((nested = nestedPattern.exec(text))) {
+                    if (isLatexTokenEscaped(text, nested.index)) continue;
+                    if (nested[1] === 'begin') stack.push(nested[2]);
+                    else if (nested[2] !== stack[stack.length - 1]) break;
+                    else stack.pop();
+                    if (stack.length === 0) {
+                        const end = nestedPattern.lastIndex;
+                        parts.push(text.slice(copied, match.index), replace(
+                            text.slice(match.index, end), name, text.slice(bodyStart, nested.index)
+                        ));
+                        copied = tokenPattern.lastIndex = end;
+                        break;
+                    }
+                }
+            }
+            parts.push(text.slice(copied));
+            return parts.join('');
+        }
+        window.normalizeNakedMathForPreview = normalizeNakedMathForPreview;
+
+        function preprocessFormulaForKaTeX(text, imageLayouts = {}) {
             if (!text) return "";
             
             // Clean up any historical \vphantom{...} or \strut from underline text to prevent KaTeX rendering artifact letters
             let clean = text.replace(/\\vphantom\s*\{\s*[^}]*?\}/g, '')
                             .replace(/\\strut\b/g, '');
+
+            clean = normalizeNakedMathForPreview(clean);
 
             // Auto-heal punctuation inside math environment between \fillin and closing dollar (e.g. $ \fillin, $ -> $ \fillin $,) using safe replacer function
             clean = clean.replace(/(\$[^$]*?\\fillin)\s*([。，,；;！？!?\.]+)\s*\$/g, function(match, p1, p2) {
@@ -1893,14 +2299,14 @@ let bankQuestionsRetryTimer = null;
             clean = transformFillinMacro(clean);
 
             // Safely escape raw < and > inside math environments to \lt and \gt without lookbehind regex for maximum browser compatibility
-            clean = clean.replace(/\$([^\$]+?)\$/g, function(match, inner) {
+            clean = replaceDelimitedMathForPreview(clean, function(match, inner, opening, closing) {
                 let safeInner = inner.replace(/\\</g, '@@ESCAPED_LESS@@')
                                      .replace(/</g, '\\lt ')
                                      .replace(/@@ESCAPED_LESS@@/g, '\\<')
                                      .replace(/\\>/g, '@@ESCAPED_GREAT@@')
                                      .replace(/>/g, '\\gt ')
                                      .replace(/@@ESCAPED_GREAT@@/g, '\\>');
-                return '$' + safeInner + '$';
+                return opening + safeInner + closing;
             });
 
             // Clean up illegal nesting like \underline{\quad $\mathbf{14}$ \quad} in KaTeX
@@ -1929,15 +2335,7 @@ let bankQuestionsRetryTimer = null;
             }
             
             let tempText = clean;
-            tempText = tempText.replace(/\$\$([\s\S]*?)\$\$/g, savePlaceholder)
-                               .replace(/\\\[([\s\S]*?)\\\]/g, savePlaceholder)
-                               .replace(/\\\(([\s\S]*?)\\\)/g, savePlaceholder)
-                               .replace(/\$([^\$]+?)\$/g, savePlaceholder);
-            
-            // Auto-heal exposed LaTeX math environments (e.g. \begin{cases}...\end{cases}) that lack $...$ wrapper
-            tempText = tempText.replace(/\\begin\{(cases|aligned|matrix|pmatrix|bmatrix|array|equation|gather)\}([\s\S]*?)\\end\{\1\}/g, function(match) {
-                return savePlaceholder('$' + match.trim() + '$');
-            });
+            tempText = replaceDelimitedMathForPreview(tempText, savePlaceholder);
             
             // Strip HTML tags from non-math parts
             tempText = tempText.replace(/<[^>]*>/g, '');
@@ -1960,8 +2358,13 @@ let bankQuestionsRetryTimer = null;
                 const items = inner.split(/\\item/).map(item => item.trim()).filter(item => item.length > 0);
                 const labels = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
                 let maxLen = 0;
+                const hasImages = items.some(item => /!\[[^\]]*\]\([^)]+\)/.test(item));
+                const fourImageOptions = items.length === 4 && items.every(item =>
+                    /^!\[[^\]]*\]\([^)]+\)$/.test(item.trim())
+                );
                 items.forEach(item => {
-                    const approxText = item.replace(/@@MATH_PLACEHOLDER_\d+@@/g, '********');
+                    const approxText = item.replace(/!\[[^\]]*\]\([^)]+\)/g, '')
+                        .replace(/@@MATH_PLACEHOLDER_\d+@@/g, '********');
                     if (approxText.length > maxLen) {
                         maxLen = approxText.length;
                     }
@@ -1970,20 +2373,20 @@ let bankQuestionsRetryTimer = null;
                 let gridCols = "grid-cols-4";
                 if (maxLen > 24) {
                     gridCols = "grid-cols-1";
-                } else if (maxLen > 10) {
+                } else if ((hasImages && !fourImageOptions) || maxLen > 10) {
                     gridCols = "grid-cols-2";
                 }
 
                 const preferredColumns = gridCols === 'grid-cols-1' ? 1 : (gridCols === 'grid-cols-2' ? 2 : 4);
-                let html = `<div class="grid ${gridCols} gap-2 my-2 select-none choices-grid items-baseline" data-preferred-columns="${preferredColumns}">`;
+                let html = `<div class="grid ${gridCols} gap-2 my-2 select-none choices-grid ${hasImages ? 'choices-has-images' : ''} items-baseline" data-preferred-columns="${preferredColumns}">`;
                 items.forEach((item, idx) => {
                     const label = labels[idx] || (idx + 1);
                     let cleanItem = item;
                     // Auto-wrap LaTeX math macros (e.g. \dfrac{5}{2}) in choices option if missing $
-                    if (/\\(dfrac|frac|sqrt|cdot|times|pm|le|ge|ne|in|vec|mathbf|mathrm|text|alpha|beta|gamma|delta|theta|pi|varphi|omega)\b/.test(cleanItem) && !/\$/.test(cleanItem)) {
+                    if (/\\(dfrac|frac|sqrt|cdot|times|pm|le|ge|ne|in|vec|mathbf|boldsymbol|mathrm|text|alpha|beta|gamma|delta|theta|pi|varphi|omega)\b/.test(cleanItem) && !/\$/.test(cleanItem)) {
                         cleanItem = '$' + cleanItem + '$';
                     }
-                    html += `<div class="choices-item flex items-baseline"><span class="choices-label font-bold mr-1.5 text-slate-800 shrink-0">${label}.</span><span class="choices-content flex-1 [&>p]:m-0 [&>p]:inline">${cleanItem}</span></div>`;
+                    html += `<div class="choices-item flex items-baseline"><span class="choices-label font-bold mr-1.5 text-slate-800 shrink-0">${label}.</span><div class="choices-content flex-1 [&>p]:m-0 [&>p]:inline">${cleanItem}</div></div>`;
                 });
                 html += '</div>';
                 return html;
@@ -2157,7 +2560,7 @@ let bankQuestionsRetryTimer = null;
                             }
                         }
 
-                        cell = unescapeTableCellForHtml(cell);
+                        cell = normalizeNakedMathForPreview(unescapeTableCellForHtml(cell));
                         const borderClass = "border border-slate-300 dark:border-slate-700";
                         const rowspanAttr = rowspan > 1 ? ' rowspan="' + rowspan + '"' : "";
                         html += '<td colspan="' + colspan + '"' + rowspanAttr + ' class="px-3 py-1.5 ' + borderClass + ' ' + alignClass + ' font-normal align-middle">' + cell + '</td>';
@@ -2208,7 +2611,11 @@ let bankQuestionsRetryTimer = null;
                 const safeSrc = window.MathBankSafe.safeImageUrl(src);
                 if (!safeSrc) return '';
                 const safeAlt = window.MathBankSafe.escapeAttribute(alt || '题目配图');
-                return `<div class="my-2.5 text-center"><img src="${window.MathBankSafe.escapeAttribute(safeSrc)}" alt="${safeAlt}" class="max-w-[220px] max-h-[180px] object-contain rounded-lg border border-slate-200 shadow-sm inline-block cursor-zoom-in hover:shadow-sm hover:scale-[1.02] transition-all" data-safe-image-open="true" title="点击在新标签页查看高清原图"></div>`;
+                const key = window.ImageLayoutTools ? window.ImageLayoutTools.key(src) : src;
+                const layout = Object.prototype.hasOwnProperty.call(imageLayouts || {}, key) ? imageLayouts[key] : null;
+                const align = layout && ['left', 'center', 'right'].includes(layout.align) ? layout.align : 'center';
+                const size = layout && ['auto', 'small', 'medium', 'large'].includes(layout.size) ? layout.size : 'auto';
+                return `<div class="my-2.5 text-center mb-inline-image-align-${align}"><img src="${window.MathBankSafe.escapeAttribute(safeSrc)}" alt="${safeAlt}" class="mb-inline-image-size-${size} max-w-[220px] max-h-[180px] object-contain rounded-lg border border-slate-200 shadow-sm inline-block cursor-zoom-in hover:shadow-sm hover:scale-[1.02] transition-all" data-safe-image-open="true" title="点击在新标签页查看高清原图"></div>`;
             });
                                
             // Restore math blocks with HTML escaping
@@ -2229,9 +2636,9 @@ let bankQuestionsRetryTimer = null;
         }
         window.preprocessFormulaForKaTeX = preprocessFormulaForKaTeX;
             
-        function parseMarkdownWithMath(text) {
+        function parseMarkdownWithMath(text, imageLayouts = {}) {
             if (!text) return "";
-            return window.MathBankSafe.sanitizeRichHtml(preprocessFormulaForKaTeX(text));
+            return window.MathBankSafe.sanitizeRichHtml(preprocessFormulaForKaTeX(text, imageLayouts));
         }
         window.parseMarkdownWithMath = parseMarkdownWithMath;
 
@@ -2252,7 +2659,7 @@ let bankQuestionsRetryTimer = null;
                         .replace(/!\[[^\]\n]*\]\(\s*(?:<[^>\n]*>|[^\s)]+)(?:\s+(?:"[^"\n]*"|'[^'\n]*'))?\s*\)/gi, '')
                         .replace(/<img\b[^>]*>/gi, '');
                 }
-                preparedHtml = parseMarkdownWithMath(source);
+                preparedHtml = parseMarkdownWithMath(source, settings.imageLayouts || {});
             }
             container.innerHTML = preparedHtml;
             try {

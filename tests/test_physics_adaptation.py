@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from mathbank.curriculums import build_default_metadata, get_curriculum_preset
 from mathbank.prompts import (
     COMMON_OCR_PROMPT,
@@ -68,3 +70,27 @@ def test_legacy_math_heal_does_not_rewrite_physics_book_names(db_session, monkey
     db_session.expire_all()
 
     assert db_session.get(Question, question.id).category_compulsory == "必修第一册"
+
+
+def test_upstream_workspaces_keep_physics_brand_and_defaults():
+    root = Path(__file__).resolve().parents[1]
+    index = (root / "static/index.html").read_text(encoding="utf-8")
+    paper = (root / "static/js/paper.js").read_text(encoding="utf-8")
+    editor = (root / "static/js/editor.js").read_text(encoding="utf-8")
+    import_ui = (root / "static/js/import.js").read_text(encoding="utf-8")
+    backend = (root / "main.py").read_text(encoding="utf-8")
+
+    assert 'aria-label="PhysicsBank 主导航"' in index
+    assert '<strong>PhysicsBank</strong>' in index
+    assert 'src="/static/favicon.svg"' in index
+    assert 'id="editorTitle">录入新物理题' in index
+    assert '<option value="exam_19"' not in index
+    assert '<option value="exam_19"' not in paper
+    assert "paper_type: 'exam'" in paper
+    assert "数学 &nbsp; 第" not in paper
+    assert "数学　 第" not in paper
+    assert "录入新数学题" not in editor + import_ui
+    assert 'app = FastAPI(title="本地化物理题库管理系统 API"' in backend
+    assert 'payload.get("paper_type", "exam_19")' not in backend
+    assert "'电磁感应'" in backend
+    assert "'experiment'" in backend

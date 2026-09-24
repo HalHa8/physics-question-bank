@@ -75,6 +75,8 @@ from mathbank.task_manager import (
 )
 from mathbank.docx_helper import extract_docx_markdown
 from mathbank.content_locks import lock_visible_math, restore_visible_math
+from mathbank.math_markdown import normalize_question_math_markdown
+from mathbank.fraction_style import normalize_fraction_style
 from mathbank.tex_helper import (
     MAX_TEX_BYTES,
     decode_and_prepare_tex,
@@ -92,8 +94,7 @@ from mathbank.ai_http import (
 )
 from mathbank.ai_providers import (
     MultimodalProviderConfig,
-    apply_bailian_thinking_policy,
-    inject_reasoning_effort,
+    apply_model_thinking_policy,
     resolve_draw_provider,
     resolve_ocr_fallbacks,
     resolve_ocr_provider,
@@ -409,7 +410,7 @@ async def app_lifespan(_app: FastAPI):
         DOCUMENT_TASKS.shutdown(wait=False)
 
 
-app = FastAPI(title="本地化数学题库管理系统 API", lifespan=app_lifespan)
+app = FastAPI(title="本地化物理题库管理系统 API", lifespan=app_lifespan)
 
 # Enable CORS for local development (restrict allowed origins)
 app.add_middleware(
@@ -646,7 +647,7 @@ def read_index():
             html_content = f.read()
         
         # Inject dynamic cache-busting version parameter based on file mtime
-        js_files = ["api.js", "editor.js", "ocr.js", "import.js", "paper.js"]
+        js_files = ["api.js", "editor.js", "ocr.js", "import.js", "paper.js", "dashboard.js"]
         for js in js_files:
             js_path = str(STATIC_JS_DIR / js)
             mtime = int(os.path.getmtime(js_path)) if os.path.exists(js_path) else 0
@@ -660,9 +661,9 @@ def read_index():
         css_mtime = int(os.path.getmtime(css_path)) if os.path.exists(css_path) else 0
         html_content = html_content.replace('/static/css/app.css', f'/static/css/app.css?v={css_mtime}')
 
-        fav_path = str(STATIC_DIR / "favicon.png")
+        fav_path = str(STATIC_DIR / "favicon.svg")
         fav_mtime = int(os.path.getmtime(fav_path)) if os.path.exists(fav_path) else 0
-        html_content = html_content.replace('/static/favicon.png', f'/static/favicon.png?v={fav_mtime}')
+        html_content = html_content.replace('/static/favicon.svg', f'/static/favicon.svg?v={fav_mtime}')
             
         # Inject the token and server_instance_id directly into index.html to bypass any cookie blocking policies
         token_script = f'<script>window.__localToken = "{LOCAL_TOKEN}"; window.__serverInstanceId = "{SERVER_INSTANCE_ID}";</script>'
@@ -736,6 +737,13 @@ def read_apple_touch_icon():
         content={"status": "error", "message": "apple touch icon not found."},
         status_code=404
     )
+
+@app.post("/api/format/fractions")
+def format_fraction_style(text: str = Form("", max_length=200000)):
+    """Format an editor snapshot without reading or writing stored questions."""
+    normalized = normalize_fraction_style(text)
+    return {"text": normalized, "changed": normalized != text}
+
 
 # ----------------- Upload API -----------------
 
@@ -819,6 +827,12 @@ def ocr_via_provider(
     """Use one resolved multimodal provider for formula and text OCR."""
     import base64
 
+    if not provider.supports_image_input:
+        raise ValueError(
+            f"{provider.provider_label} 模型 {provider.model_name} 不支持图像输入，"
+            "请在默认公式识图模型中选择支持图片的模型。"
+        )
+
     print(
         f"[OCR Flow] 正在向 {provider.provider_label} 提交多模态识别任务: "
         f"{image_path} (模型: {provider.model_name})..."
@@ -852,11 +866,9 @@ def ocr_via_provider(
         "stream": False
     }
 
-    payload = inject_reasoning_effort(payload, provider.reasoning_effort)
-    payload = apply_bailian_thinking_policy(
+    payload = apply_model_thinking_policy(
         payload,
-        provider_code=provider.provider_code,
-        model_name=provider.model_name,
+        provider=provider,
         task="ocr",
     )
 
@@ -925,11 +937,9 @@ def request_tikz_completion(provider, content_payload, *, timeout: int = 120) ->
         "messages": [{"role": "user", "content": content_payload}],
         "stream": False,
     }
-    payload = inject_reasoning_effort(payload, provider.reasoning_effort)
-    payload = apply_bailian_thinking_policy(
+    payload = apply_model_thinking_policy(
         payload,
-        provider_code=provider.provider_code,
-        model_name=provider.model_name,
+        provider=provider,
         task="draw",
     )
     response = post_chat_completion(
@@ -1067,6 +1077,7 @@ def ocr_formula(
         provider = ""
 
         known_ocr_engines = {
+            "deepseek",
             "siliconflow",
             "ali_bailian",
             "bailian",
@@ -1100,7 +1111,7 @@ def ocr_formula(
                 )
 
         if not latex_content:
-            raise RuntimeError("当前分配的识图引擎均无法启动或识别失败。请检查右上角「API设置」中是否正确配置了 硅基流动(SiliconFlow) 或是 阿里百炼(Alibaba Bailian) 的 API Key。")
+            raise RuntimeError("当前分配的识图引擎无法启动或识别失败。请检查系统设置中所选识图平台的 API Key、模型名称和接口地址。")
 
         # 成功，返回且进一步清洗
         if latex_content:
@@ -1139,6 +1150,11 @@ def ocr_formula(
             else:
                 # 剔除可能存在的由于大模型幻觉或者部分输出造成的残缺标记
                 latex_content = re.sub(r"\[ILLUSTRATION_BOX:.*?\]", "", latex_content).strip()
+
+            # Remove OCR protocol markers before repairing naked math. Otherwise
+            # the underscore in ILLUSTRATION_BOX can be mistaken for a subscript
+            # and leave behind an empty ``$$`` pair after marker cleanup.
+            latex_content = normalize_question_math_markdown(latex_content)
 
         # 如果高级模型成功生成了 TikZ 代码，我们在后台自动进行编译预览，并格式化追加到 latex 文本中！
         if tikz_code_from_high_model:
@@ -1198,10 +1214,10 @@ def ai_solve(
     ocr_result: str = Form(""),
     custom_prompt: str = Form(""),
     thinking: str = Form("enabled"),
-    model: str = Form("deepseek-v4-pro"),
+    model: str = Form(""),
     stream: str = Form("false")
 ):
-    provider = resolve_text_provider(model)
+    provider = resolve_text_provider(model or os.getenv("PREFER_SOLVE_MODEL") or "deepseek-v4-pro")
     api_key = provider.api_key
     api_base = provider.api_base
     model_name = provider.model_name
@@ -1227,8 +1243,6 @@ def ai_solve(
         # Keep the legacy fallback cap for older Bailian models. Current
         # Qwen3.7/3.8 requests are converted below to max_completion_tokens.
         max_output_tokens = 8192 if provider.provider_code == "bailian" else 16384
-            
-        explicit_effort = provider.reasoning_effort
 
         data = {
             "model": model_name,
@@ -1239,58 +1253,14 @@ def ai_solve(
             "max_tokens": max_output_tokens
         }
         
-        # Configure thinking parameter if specified (only for DeepSeek models/endpoints, excluding legacy models that don't support it)
-        is_deepseek = ("deepseek" in model_name.lower() or "deepseek" in api_base.lower()) and "deepseek-chat" not in model_name.lower() and "deepseek-reasoner" not in model_name.lower()
-        is_siliconflow = api_base and "siliconflow" in api_base.lower()
-        
-        is_bailian = provider.provider_code == "bailian"
-        if is_bailian:
-            # Connect the front-end '深度思考' toggle button to Alibaba Bailian's 'enable_thinking' API parameter
-            if thinking == "enabled":
-                data["enable_thinking"] = True
-            else:
-                data["enable_thinking"] = False
-
-        if is_siliconflow:
-            # Native R1 models on SiliconFlow do not use enable_thinking (they are always reasoning)
-            # Other models (V3, V4 Pro, Flash, etc.) use enable_thinking and reasoning_effort
-            if "r1" not in model_name.lower():
-                is_deepseek = False  # Bypass OpenAI standard thinking parameter
-                if thinking == "enabled":
-                    data["enable_thinking"] = True
-                    if "v4" in model_name.lower():
-                        data["reasoning_effort"] = "max"
-                else:
-                    data["enable_thinking"] = False
-
-        # Support OpenAI reasoning models (gpt-5, o1, o3, etc.) on transit APIs
-        is_openai_reasoning = ("gpt-5" in model_name.lower() or "o1" in model_name.lower() or "o3" in model_name.lower())
-        if is_openai_reasoning:
-            is_deepseek = False  # Bypass DeepSeek thinking parameter
-            if thinking == "enabled":
-                data["reasoning_effort"] = "high"    # Maximum mathematical depth and verification
-            else:
-                data["reasoning_effort"] = "medium"  # Balanced speed and analytical quality
-        
-        if is_deepseek and thinking in ["enabled", "disabled"]:
-            data["thinking"] = {"type": thinking}
-            
-        # The 7:3 model selector may provide an explicit allowlisted effort.
-        # Apply it last so it intentionally overrides the generic toggle.
-        data = inject_reasoning_effort(data, explicit_effort)
-        data = apply_bailian_thinking_policy(
+        data["temperature"] = 0.2
+        data = apply_model_thinking_policy(
             data,
-            provider_code=provider.provider_code,
-            model_name=model_name,
+            provider=provider,
             task="solve",
             thinking_enabled=thinking == "enabled",
         )
-            
-        # When thinking mode is active, temperature is ignored/deprecated by DeepSeek.
-        # But when thinking is disabled or non-DeepSeek model, specify it.
-        if not is_deepseek or thinking == "disabled":
-            data["temperature"] = 0.2
-            
+
         if stream == "true":
             def event_generator():
                 data["stream"] = True
@@ -1423,11 +1393,12 @@ def get_settings():
     zz_claude_ocr_model = os.getenv("ZHONGZHAN_CLAUDE_OCR_MODEL", "claude-3-5-sonnet")
     
     prefer_engine = os.getenv("OCR_PREFER_ENGINE", "siliconflow")
+    ds_model = os.getenv("DEEPSEEK_OCR_MODEL") or "deepseek-flash"
     sf_model = os.getenv("SILICONFLOW_OCR_MODEL", "Qwen/Qwen3-VL-8B-Instruct")
     ali_model = os.getenv("ALI_BAILIAN_OCR_MODEL", "qwen3.7-flash")
     prefer_solve_model = os.getenv("PREFER_SOLVE_MODEL", "deepseek-v4-pro")
-    prefer_parse_model = os.getenv("PREFER_PARSE_MODEL", "deepseek-v4-flash")
-    prefer_classify_model = os.getenv("PREFER_CLASSIFY_MODEL") or os.getenv("DEEPSEEK_CLASSIFY_MODEL", "deepseek-v4-flash")
+    prefer_parse_model = os.getenv("PREFER_PARSE_MODEL", "deepseek-flash")
+    prefer_classify_model = os.getenv("PREFER_CLASSIFY_MODEL") or os.getenv("DEEPSEEK_CLASSIFY_MODEL", "deepseek-flash")
     prefer_draw_model = os.getenv("PREFER_DRAW_MODEL", "Qwen/Qwen3-VL-32B-Instruct")
     
     masked_ds = ""
@@ -1461,6 +1432,7 @@ def get_settings():
         "zhongzhan_claude_base_url": zz_claude_base,
         "zhongzhan_claude_ocr_model": zz_claude_ocr_model,
         "prefer_engine": prefer_engine,
+        "deepseek_model": ds_model,
         "siliconflow_model": sf_model,
         "ali_bailian_model": ali_model,
         "prefer_solve_model": prefer_solve_model,
@@ -1481,14 +1453,17 @@ def save_settings(
     zhongzhan_claude_base_url: str = Form(""),
     zhongzhan_claude_ocr_model: str = Form(""),
     prefer_engine: str = Form("siliconflow"),
+    deepseek_model: str | None = Form(None),
     siliconflow_model: str = Form("Qwen/Qwen3-VL-8B-Instruct"),
     ali_bailian_model: str = Form("qwen3.7-flash"),
     prefer_solve_model: str = Form("deepseek-v4-pro"),
-    prefer_parse_model: str = Form("deepseek-v4-flash"),
-    prefer_classify_model: str = Form("deepseek-v4-flash"),
+    prefer_parse_model: str = Form("deepseek-flash"),
+    prefer_classify_model: str = Form("deepseek-flash"),
     prefer_draw_model: str = Form("Qwen/Qwen3-VL-32B-Instruct")
 ):
     try:
+        # Older clients and other OCR providers may omit this new field.
+        deepseek_model = deepseek_model or os.getenv("DEEPSEEK_OCR_MODEL") or "deepseek-flash"
         settings_values = {
             "deepseek_key": deepseek_key,
             "siliconflow_key": siliconflow_key,
@@ -1500,6 +1475,7 @@ def save_settings(
             "zhongzhan_claude_base_url": zhongzhan_claude_base_url,
             "zhongzhan_claude_ocr_model": zhongzhan_claude_ocr_model,
             "prefer_engine": prefer_engine,
+            "deepseek_model": deepseek_model,
             "siliconflow_model": siliconflow_model,
             "ali_bailian_model": ali_bailian_model,
             "prefer_solve_model": prefer_solve_model,
@@ -1530,6 +1506,7 @@ def save_settings(
         
         keys_replaced = {
             "DEEPSEEK_API_KEY": False,
+            "DEEPSEEK_OCR_MODEL": False,
             "SILICONFLOW_API_KEY": False,
             "ALI_BAILIAN_API_KEY": False,
             "ZHONGZHAN_GPT_API_KEY": False,
@@ -1557,6 +1534,9 @@ def save_settings(
             if line_strip.startswith("DEEPSEEK_API_KEY="):
                 new_lines.append(f"DEEPSEEK_API_KEY={deepseek_key}\n")
                 keys_replaced["DEEPSEEK_API_KEY"] = True
+            elif line_strip.startswith("DEEPSEEK_OCR_MODEL="):
+                new_lines.append(f"DEEPSEEK_OCR_MODEL={deepseek_model}\n")
+                keys_replaced["DEEPSEEK_OCR_MODEL"] = True
             elif line_strip.startswith("SILICONFLOW_API_KEY="):
                 new_lines.append(f"SILICONFLOW_API_KEY={siliconflow_key}\n")
                 keys_replaced["SILICONFLOW_API_KEY"] = True
@@ -1608,6 +1588,8 @@ def save_settings(
         # Append keys if not replaced
         if not keys_replaced["DEEPSEEK_API_KEY"]:
             new_lines.append(f"DEEPSEEK_API_KEY={deepseek_key}\n")
+        if not keys_replaced["DEEPSEEK_OCR_MODEL"]:
+            new_lines.append(f"DEEPSEEK_OCR_MODEL={deepseek_model}\n")
         if not keys_replaced["SILICONFLOW_API_KEY"]:
             new_lines.append(f"SILICONFLOW_API_KEY={siliconflow_key}\n")
         if not keys_replaced["ALI_BAILIAN_API_KEY"]:
@@ -1646,6 +1628,7 @@ def save_settings(
         os.environ.pop("PIX2TEXT_SERVER_TYPE", None)
         
         os.environ["DEEPSEEK_API_KEY"] = deepseek_key
+        os.environ["DEEPSEEK_OCR_MODEL"] = deepseek_model
         os.environ["SILICONFLOW_API_KEY"] = siliconflow_key
         os.environ["ALI_BAILIAN_API_KEY"] = ali_bailian_key
         os.environ["ZHONGZHAN_GPT_API_KEY"] = zhongzhan_gpt_key
@@ -2774,6 +2757,7 @@ def create_question(
     figure_align: str = Form("right"),
     figure_align_custom: bool = Form(False),
     figure_size: str = Form("auto"),
+    image_layouts: str = Form("{}"),
     tags: str = Form(""),
     related_question_id: str = Form(""),
     image_paths: str = Form("[]"),  # JSON array string
@@ -2840,6 +2824,7 @@ def create_question(
             figure_size=figure_size,
             tags=tags
         )
+        db_question.image_layouts = image_layouts
         db_question.image_paths = parsed_img_paths
         db_question.content_tikz_assets = parsed_content_tikz_assets
         db_question.answer_tikz_assets = parsed_answer_tikz_assets
@@ -2964,6 +2949,7 @@ def update_question(
     figure_align: str = Form("right"),
     figure_align_custom: Optional[bool] = Form(None),
     figure_size: Optional[str] = Form(None),
+    image_layouts: Optional[str] = Form(None),
     tags: str = Form(""),
     related_question_id: str = Form(""),
     image_paths: str = Form("[]"),
@@ -3040,6 +3026,7 @@ def update_question(
         # Physical cleanup happens only after the database commit succeeds.
         removed_images = set(old_images) - set(parsed_img_paths)
 
+        db_question.image_layouts = image_layouts if image_layouts is not None else db_question.image_layouts
         db_question.image_paths = parsed_img_paths
         db_question.content_tikz_assets = parsed_content_tikz_assets
         db_question.answer_tikz_assets = parsed_answer_tikz_assets
@@ -3853,7 +3840,7 @@ def ai_classify(content: str = Form(...)):
         os.getenv("PREFER_CLASSIFY_MODEL") 
         or os.getenv("DEEPSEEK_CLASSIFY_MODEL") 
         or os.getenv("PREFER_PARSE_MODEL") 
-        or "deepseek-v4-flash"
+        or "deepseek-flash"
     )
     
     provider = resolve_text_provider(classify_model)
@@ -3886,17 +3873,9 @@ def ai_classify(content: str = Form(...)):
             "max_tokens": 512
         }
         
-        # Only add thinking if using a DeepSeek model or DeepSeek base URL, excluding legacy models that don't support it
-        is_deepseek = ("deepseek" in model_name.lower() or "deepseek" in api_base.lower()) and "deepseek-chat" not in model_name.lower() and "deepseek-reasoner" not in model_name.lower()
-        if is_deepseek and provider.reasoning_effort in {None, "default"}:
-            data["thinking"] = {
-                "type": "disabled"
-            }
-        data = inject_reasoning_effort(data, provider.reasoning_effort)
-        data = apply_bailian_thinking_policy(
+        data = apply_model_thinking_policy(
             data,
-            provider_code=provider.provider_code,
-            model_name=model_name,
+            provider=provider,
             task="classify",
         )
         
@@ -4042,7 +4021,7 @@ def parse_paper_text_internal(
     generate_answers_bool: bool
 ) -> list:
     """内部通用函数：调用选定的 LLM 接口，将 LaTeX 试卷内容解析拆分为结构化 JSON 卡片"""
-    parse_model = os.getenv("PREFER_PARSE_MODEL") or os.getenv("DEEPSEEK_PARSE_MODEL", "deepseek-v4-flash")
+    parse_model = os.getenv("PREFER_PARSE_MODEL") or os.getenv("DEEPSEEK_PARSE_MODEL", "deepseek-flash")
     provider = resolve_text_provider(parse_model)
     api_key = provider.api_key
     api_base = provider.api_base
@@ -4071,16 +4050,9 @@ def parse_paper_text_internal(
         "max_tokens": max_output_tokens
     }
     
-    is_deepseek = ("deepseek" in model_name.lower() or "deepseek" in api_base.lower()) and "deepseek-chat" not in model_name.lower() and "deepseek-reasoner" not in model_name.lower()
-    if is_deepseek and provider.reasoning_effort in {None, "default"}:
-        data["thinking"] = {
-            "type": "disabled"
-        }
-    data = inject_reasoning_effort(data, provider.reasoning_effort)
-    data = apply_bailian_thinking_policy(
+    data = apply_model_thinking_policy(
         data,
-        provider_code=provider.provider_code,
-        model_name=model_name,
+        provider=provider,
         task="parse",
     )
     
@@ -4119,14 +4091,18 @@ def parse_paper_text_internal(
         ans = q.get("answer_markdown", "")
         if not ans:
             q["answer_markdown"] = ""
-            continue
-        if not generate_answers_bool:
+        elif not generate_answers_bool:
             if "[EXTRACTED_ORIGINAL]" in ans:
                 q["answer_markdown"] = ans.replace("[EXTRACTED_ORIGINAL]", "").strip()
             else:
                 q["answer_markdown"] = ""
         else:
             q["answer_markdown"] = ans.replace("[EXTRACTED_ORIGINAL]", "").strip()
+
+        for field in ("content", "answer_markdown"):
+            value = q.get(field, "")
+            if isinstance(value, str) and value:
+                q[field] = normalize_question_math_markdown(value)
         
     return parsed_questions
 
@@ -4139,7 +4115,7 @@ def ai_parse_paper(
     generate_answers: str = Form("false")
 ):
     generate_answers_bool = generate_answers.lower() in ("true", "1", "yes")
-    parse_model = os.getenv("PREFER_PARSE_MODEL") or os.getenv("DEEPSEEK_PARSE_MODEL", "deepseek-v4-flash")
+    parse_model = os.getenv("PREFER_PARSE_MODEL") or os.getenv("DEEPSEEK_PARSE_MODEL", "deepseek-flash")
     provider = resolve_text_provider(parse_model)
     api_key = provider.api_key
     api_base = provider.api_base
@@ -4190,17 +4166,9 @@ def ai_parse_paper(
             "max_tokens": max_output_tokens
         }
         
-        # Only add thinking if using a DeepSeek model or DeepSeek base URL, excluding legacy models that don't support it
-        is_deepseek = ("deepseek" in model_name.lower() or "deepseek" in api_base.lower()) and "deepseek-chat" not in model_name.lower() and "deepseek-reasoner" not in model_name.lower()
-        if is_deepseek and provider.reasoning_effort in {None, "default"}:
-            data["thinking"] = {
-                "type": "disabled"
-            }
-        data = inject_reasoning_effort(data, provider.reasoning_effort)
-        data = apply_bailian_thinking_policy(
+        data = apply_model_thinking_policy(
             data,
-            provider_code=provider.provider_code,
-            model_name=model_name,
+            provider=provider,
             task="parse",
         )
         
@@ -4730,7 +4698,7 @@ def ocr_pdf_page_image(image_path: str) -> str:
     providers_to_try = resolve_ocr_fallbacks(prefer_engine)
 
     if not providers_to_try:
-        raise ValueError("未配置任何识图 Key，请在右上角「API设置」面板中配置 硅基流动、阿里百炼 或 中转站 API 密钥。")
+        raise ValueError("未配置任何识图 Key，请在系统设置中配置所选识图平台的 DeepSeek、硅基流动、阿里百炼或中转站 API 密钥。")
 
     for ocr_provider in providers_to_try:
         label = ocr_provider.provider_label
@@ -4836,9 +4804,15 @@ def ai_select_paper(payload: dict, db: Session = Depends(get_db)):
                 if '填空' in prompt: question_type = 'fill_in_blank'
                 elif '单选' in prompt: question_type = 'single_choice'
                 elif '多选' in prompt: question_type = 'multi_choice'
-                elif '解答' in prompt: question_type = 'detailed_answer'
+                elif '实验' in prompt: question_type = 'experiment'
+                elif '简答' in prompt: question_type = 'short_answer'
+                elif '计算' in prompt or '解答' in prompt: question_type = 'detailed_answer'
 
-            known_topics = ['立体几何', '集合', '函数', '导数', '数列', '三角函数', '平面向量', '概率', '解析几何', '圆锥曲线', '复数', '不等式', '排列组合']
+            known_topics = [
+                '运动学', '匀变速直线运动', '牛顿运动定律', '曲线运动', '圆周运动',
+                '万有引力', '机械能', '动量', '振动', '波', '光学', '静电场', '电路',
+                '磁场', '电磁感应', '交变电流', '热学', '原子物理', '实验',
+            ]
             extracted_topics = [t for t in known_topics if t in prompt]
 
         # 1. 结构化过滤基础题目池
@@ -4871,7 +4845,7 @@ def ai_select_paper(payload: dict, db: Session = Depends(get_db)):
         target_model = (
             os.getenv("PREFER_SOLVE_MODEL")
             or os.getenv("PREFER_PARSE_MODEL")
-            or "deepseek-chat"
+            or "deepseek-flash"
         )
         provider = resolve_text_provider(target_model)
         api_key = provider.api_key
@@ -4916,13 +4890,9 @@ def ai_select_paper(payload: dict, db: Session = Depends(get_db)):
                         ],
                         "temperature": 0.3
                     }
-                    payload_data = inject_reasoning_effort(
-                        payload_data, provider.reasoning_effort
-                    )
-                    payload_data = apply_bailian_thinking_policy(
+                    payload_data = apply_model_thinking_policy(
                         payload_data,
-                        provider_code=provider.provider_code,
-                        model_name=model_name,
+                        provider=provider,
                         task="paper_selection",
                     )
                     response = post_chat_completion(
@@ -5025,8 +4995,10 @@ def ai_select_paper(payload: dict, db: Session = Depends(get_db)):
 
 
 def post_process_pdf_parsed_questions(parsed_questions: list, paper_title: str, task_id: str = None, ocr_results: list = None) -> list:
-    """PDF 专属解析卡片后处理：正则搜寻 /tmp/ 下的图片，以及将未解析的图n占位符智能映射回真实的裁剪插图图片，
-    最后将其灌入 image_paths 数组中，并在 content 中静默清除以配合布局展示。支持文本重合度兜底映射，防大模型删除路径！"""
+    """PDF/Word 解析卡片后处理：修复图片路径并登记资产，保留正文中的图片锚点。
+
+    image_paths 负责资产生命周期，不能替代选项、表格或正文中的图片位置。
+    """
     import re
     import os
     import glob
@@ -5102,11 +5074,11 @@ def post_process_pdf_parsed_questions(parsed_questions: list, paper_title: str, 
                         q[field] = re.sub(latex_img_pattern, f'![插图]({real_url})', q[field])
 
         # 寻找本题正文中夹带的所有临时图片 URL (注意：UUID 中含有 -，所以 regex 必须支持 [a-zA-Z0-9_-]+)
-        found_crops = set()
+        found_crops = {}
         for field in ["content", "answer_markdown"]:
             if field in q and isinstance(q[field], str):
                 for match in re.finditer(r'/static/(?:uploads|test_uploads)/tmp/[a-zA-Z0-9_.-]+', q[field]):
-                    found_crops.add(match.group(0))
+                    found_crops[match.group(0)] = None
                     
         # 顺带检查 referenced_images 属性并应用修复映射
         ref_imgs = q.get("referenced_images", [])
@@ -5114,9 +5086,9 @@ def post_process_pdf_parsed_questions(parsed_questions: list, paper_title: str, 
             mapped_ref = mapping.get(ref, ref)
             if "/tmp/" in mapped_ref:
                 filename = os.path.basename(mapped_ref)
-                found_crops.add(f"/{UPLOAD_DIR_REL}/tmp/{filename}")
+                found_crops[f"/{UPLOAD_DIR_REL}/tmp/{filename}"] = None
                 
-        # 灌入 image_paths 作为独立配图卡片关联
+        # 按正文、解答、补充引用的首次出现顺序登记，不能用无序集合打乱图片。
         q["image_paths"] = list(found_crops)
 
     # 5. 极致兜底机制：如果大模型在拆题时完全删除了图片占位标记或路径，导致最终题目关联的图片为空，
@@ -5126,7 +5098,7 @@ def post_process_pdf_parsed_questions(parsed_questions: list, paper_title: str, 
         for p_idx, page_text in enumerate(ocr_results):
             # 获取当前页生成的所有 pdf_crop_ 临时文件 URL
             urls_on_page = re.findall(r'/static/uploads(?:_test|/test_uploads|/uploads)?/tmp/pdf_crop_[a-zA-Z0-9_-]+\.png', page_text or "")
-            page_crops[p_idx] = list(set(urls_on_page))
+            page_crops[p_idx] = list(dict.fromkeys(urls_on_page))
             
         print(f"[PDF PostProcess Failsafe] 每页识别到的插图关系: {page_crops}")
         
@@ -5138,14 +5110,9 @@ def post_process_pdf_parsed_questions(parsed_questions: list, paper_title: str, 
                     q["image_paths"] = crops
                     print(f"[PDF PostProcess Failsafe] 成功通过重合度，将第 {p_source + 1} 页的插图 {crops} 兜底分配给题目: {q.get('content')[:40]}...")
 
-    # 6. 从 content 题干中静默移除已经绑定至 image_paths 内部的占位图片语法，以避免重叠渲染
-    for q in parsed_questions:
-        found_crops = q.get("image_paths", [])
-        if "content" in q and isinstance(q["content"], str):
-            for crop_url in found_crops:
-                q["content"] = re.sub(r'!\[.*?\]\(' + re.escape(crop_url) + r'\)', '', q["content"])
-            q["content"] = q["content"].strip()
-            
+    # Keep image markup in place. The preview already skips thumbnails for images
+    # rendered in Markdown; stripping markup here empties image-only choices and
+    # destroys the relationship between an option label and its graph.
     return parsed_questions
 
 
@@ -5372,7 +5339,7 @@ def run_pdf_parsing_task(
             paper_title = auto_title
         parsed_questions = parse_paper_text_internal(
             full_latex_content,
-            generate_answers,
+            False,  # Extract original answers only; the frontend solves missing answers.
         )
         DOCUMENT_TASKS.check_cancelled(task_id)
         final_questions = post_process_pdf_parsed_questions(
@@ -5386,6 +5353,7 @@ def run_pdf_parsing_task(
             task_id,
             log="完成！已为您提取并拆分全部题目卡片。",
             data=final_questions,
+            generate_answers=generate_answers,
             page_images=list(page_urls),
             temp_assets=list(temp_assets),
             document_type="pdf",
@@ -6038,7 +6006,7 @@ def _prepare_paper_export_questions(questions_input, db: Session) -> list[dict]:
 def export_paper_tex(payload: dict, db: Session = Depends(get_db)):
     """导出 LaTeX 源码 ZIP 压缩包"""
     try:
-        title = payload.get("title", "2026年高中数学模拟考试试卷")
+        title = payload.get("title", "2026年高中物理模拟考试试卷")
         subtitle = payload.get("subtitle", "")
         paper_type = payload.get("paper_type", "exam")
         show_secret = payload.get("show_secret", True)
@@ -6072,7 +6040,7 @@ def export_paper_tex(payload: dict, db: Session = Depends(get_db)):
 def export_paper_bundle(payload: dict, db: Session = Depends(get_db)):
     """一键导出合并全套 Zip 压缩包（包含 LaTeX 源码、相关插图以及已编译好的 PDF）"""
     try:
-        title = payload.get("title", "2026年高中数学模拟考试试卷")
+        title = payload.get("title", "2026年高中物理模拟考试试卷")
         subtitle = payload.get("subtitle", "")
         paper_type = payload.get("paper_type", "exam")
         show_secret = payload.get("show_secret", True)
@@ -6122,7 +6090,7 @@ def explain_latex_compile_error(log_text: str, tex_content: str) -> dict:
     """Explain one compile failure locally, then enrich it with the parse model."""
     diagnostic = build_local_latex_diagnostic(log_text, tex_content)
     parse_model = os.getenv("PREFER_PARSE_MODEL") or os.getenv(
-        "DEEPSEEK_PARSE_MODEL", "deepseek-v4-flash"
+        "DEEPSEEK_PARSE_MODEL", "deepseek-flash"
     )
     provider = resolve_text_provider(parse_model)
     if not provider.api_key:
@@ -6140,17 +6108,9 @@ def explain_latex_compile_error(log_text: str, tex_content: str) -> dict:
         "temperature": 0.1,
         "max_tokens": 1200,
     }
-    is_deepseek = (
-        "deepseek" in provider.model_name.lower()
-        or "deepseek" in (provider.api_base or "").lower()
-    ) and provider.model_name not in {"deepseek-chat", "deepseek-reasoner"}
-    if is_deepseek and provider.reasoning_effort in {None, "default"}:
-        payload["thinking"] = {"type": "disabled"}
-    payload = inject_reasoning_effort(payload, provider.reasoning_effort)
-    payload = apply_bailian_thinking_policy(
+    payload = apply_model_thinking_policy(
         payload,
-        provider_code=provider.provider_code,
-        model_name=provider.model_name,
+        provider=provider,
         task="latex_diagnostic",
     )
 
@@ -6173,9 +6133,9 @@ def explain_latex_compile_error(log_text: str, tex_content: str) -> dict:
 def export_paper_pdf(payload: dict, db: Session = Depends(get_db)):
     """在线静默编译生成高清 PDF"""
     try:
-        title = payload.get("title", "2026年高中数学模拟考试试卷")
+        title = payload.get("title", "2026年高中物理模拟考试试卷")
         subtitle = payload.get("subtitle", "")
-        paper_type = payload.get("paper_type", "exam_19")
+        paper_type = payload.get("paper_type", "exam")
         target = payload.get("target", "paper")  # "paper" or "sheet"
         include_answers = payload.get("include_answers", False)
         show_secret = payload.get("show_secret", True)
@@ -6247,7 +6207,7 @@ def get_pandoc_install_status(task_id: str):
 def export_paper_word(payload: dict, db: Session = Depends(get_db)):
     """导出包含试卷正文与含答案解析两个 Word 文件的 ZIP 压缩包。"""
     try:
-        title = payload.get("title", "2026年高中数学模拟考试试卷")
+        title = payload.get("title", "2026年高中物理模拟考试试卷")
         subtitle = payload.get("subtitle", "")
         paper_type = payload.get("paper_type", "exam")
         show_secret = payload.get("show_secret", True)

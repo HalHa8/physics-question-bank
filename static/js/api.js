@@ -519,14 +519,48 @@
             }
         };
         window.TikzState = TikzState;
+        // Image references remain at their authored anchors; only the final cluster detaches.
+        window.ImageLayoutTools = {
+            key(path) { return String(path || '').trim().replace(/^\/?(?:static\/)?uploads\//, ''); },
+            split(raw) {
+                const source = String(raw || '');
+                const matches = [...source.matchAll(/!\[.*?\]\(([^)]+)\)/g)];
+                let end = source.length;
+                for (const match of matches.slice().reverse()) {
+                    if (source.slice(match.index + match[0].length, end).trim()) break;
+                    const stack = [];
+                    const envs = source.slice(0, match.index).matchAll(/\\(begin|end)\{(tabular\*?|tabularx|longtable|tblr|longtblr|talltblr|choices)\}/g);
+                    for (const env of envs) {
+                        if (env[1] === 'begin') stack.push(env[2]);
+                        else if (stack[stack.length - 1] === env[2]) stack.pop();
+                    }
+                    if (stack.length) break;
+                    end = match.index;
+                }
+                return { body: source.slice(0, end).trimEnd(), tail: source.slice(end).trim(), tailStart: end, matches };
+            },
+            normalize(layouts) {
+                const result = {};
+                if (!layouts || typeof layouts !== 'object' || Array.isArray(layouts)) return result;
+                Object.entries(layouts).slice(0, 200).forEach(([path, layout]) => {
+                    if (layout && ['left', 'center', 'right'].includes(layout.align)
+                            && ['auto', 'small', 'medium', 'large'].includes(layout.size)) {
+                        Object.defineProperty(result, this.key(path), { value: { align: layout.align, size: layout.size }, enumerable: true, writable: true, configurable: true });
+                    }
+                });
+                return result;
+            }
+        };
         const FigureLayoutState = {
             align: 'right',
             size: 'auto',
             customAlign: false,
+            imageLayouts: {},
             reset() {
                 this.align = 'right';
                 this.size = 'auto';
                 this.customAlign = false;
+                this.imageLayouts = {};
             },
             hydrate(record) {
                 const align = String(record && record.figure_align || 'right');
@@ -538,6 +572,7 @@
                     ? size
                     : 'auto';
                 this.customAlign = Boolean(record && record.figure_align_custom);
+                this.imageLayouts = window.ImageLayoutTools ? window.ImageLayoutTools.normalize(record && record.image_layouts) : {};
             },
             setAlign(value) {
                 if (['right', 'bottom_left', 'center', 'bottom_right'].includes(value)) {
@@ -556,7 +591,8 @@
                 return {
                     figure_align: this.align,
                     figure_size: this.size,
-                    figure_align_custom: this.customAlign
+                    figure_align_custom: this.customAlign,
+                    image_layouts: JSON.parse(JSON.stringify(this.imageLayouts || {}))
                 };
             }
         };
@@ -607,7 +643,7 @@
 
         let systemPreferEngine = 'siliconflow';
         let systemPreferSolveModel = 'deepseek-v4-pro';
-        let systemPreferParseModel = 'deepseek-v4-flash';
+        let systemPreferParseModel = 'deepseek-flash';
 
         // Fetch Environment Config Settings Status
         function fetchConfigStatus() {
@@ -617,7 +653,7 @@
                 .then(settings => {
                     systemPreferEngine = settings.prefer_engine || 'siliconflow';
                     systemPreferSolveModel = settings.prefer_solve_model || 'deepseek-v4-pro';
-                    systemPreferParseModel = settings.prefer_parse_model || 'deepseek-v4-flash';
+                    systemPreferParseModel = settings.prefer_parse_model || 'deepseek-flash';
                     
                     // Update main page model selector to match preference
                     const mainModelSelect = document.getElementById('aiModelSelect');
@@ -630,21 +666,21 @@
                     updateOcrPlaceholder('answer');
 
                     // Populate settings modal selectors on start as well
-                    const solveCfg = parseModelConfig(settings.prefer_solve_model, 'deepseek', 'deepseek-v4-flash');
+                    const solveCfg = parseModelConfig(settings.prefer_solve_model, 'deepseek', 'deepseek-flash');
                     const solveProv = document.getElementById('solveModelProvider');
                     if (solveProv) {
                         solveProv.value = solveCfg.provider;
                         renderModelSelector('solve', solveCfg.provider, solveCfg.model);
                     }
                     
-                    const parseCfg = parseModelConfig(settings.prefer_parse_model, 'deepseek', 'deepseek-v4-flash');
+                    const parseCfg = parseModelConfig(settings.prefer_parse_model, 'deepseek', 'deepseek-flash');
                     const parseProv = document.getElementById('parseModelProvider');
                     if (parseProv) {
                         parseProv.value = parseCfg.provider;
                         renderModelSelector('parse', parseCfg.provider, parseCfg.model);
                     }
                     
-                    const classifyCfg = parseModelConfig(settings.prefer_classify_model, 'deepseek', 'deepseek-v4-flash');
+                    const classifyCfg = parseModelConfig(settings.prefer_classify_model, 'deepseek', 'deepseek-flash');
                     const classifyProv = document.getElementById('classifyModelProvider');
                     if (classifyProv) {
                         classifyProv.value = classifyCfg.provider;
@@ -658,7 +694,8 @@
                     if (ocrProv) {
                         ocrProv.value = ocrProvider;
                         let ocrModel = "";
-                        if (ocrProvider === 'siliconflow') ocrModel = settings.siliconflow_model || 'Qwen/Qwen3-VL-8B-Instruct';
+                        if (ocrProvider === 'deepseek') ocrModel = settings.deepseek_model || 'deepseek-flash';
+                        else if (ocrProvider === 'siliconflow') ocrModel = settings.siliconflow_model || 'Qwen/Qwen3-VL-8B-Instruct';
                         else if (ocrProvider === 'bailian') ocrModel = settings.ali_bailian_model || 'qwen3.7-flash';
                         else if (ocrProvider === 'zhongzhan_gpt') ocrModel = settings.zhongzhan_gpt_ocr_model || 'gpt-4o';
                         else if (ocrProvider === 'zhongzhan_claude') ocrModel = settings.zhongzhan_claude_ocr_model || 'claude-3-5-sonnet';
@@ -732,12 +769,13 @@
         // 默认预设模型列表
         const MODEL_PRESETS = {
             deepseek: [
-                "deepseek-v4-flash",
+                "deepseek-flash",
                 "deepseek-v4-pro"
             ],
             siliconflow: [
                 "Qwen/Qwen3-VL-32B-Instruct",
                 "Qwen/Qwen3-VL-8B-Instruct",
+                "Qwen/Qwen3.8-27B",
                 "deepseek-ai/DeepSeek-V4-Pro",
                 "deepseek-ai/DeepSeek-V4-Flash"
             ],
@@ -746,7 +784,16 @@
             zhongzhan_claude: []
         };
 
+        function normalizeDeepseekModelName(value) {
+            const parts = String(value || '').split(':');
+            if (['deepseek-v4-flash', 'deepseek-v4-flash-vision-exp'].includes(parts[0].toLowerCase())) {
+                parts[0] = 'deepseek-flash';
+            }
+            return parts.join(':');
+        }
+
         function getPresetModels(provider, typeKey = "") {
+            if (provider === 'deepseek' && typeKey === 'ocr') return ['deepseek-flash'];
             const configured = MODEL_PRESETS[provider];
             if (Array.isArray(configured)) return configured;
             if (configured && typeof configured === 'object') {
@@ -774,7 +821,9 @@
             } catch (e) {
                 console.error(`解析自定义模型列表失败 for ${provider}:`, e);
             }
-            let list = Array.from(new Set([...presets, ...customs]));
+            let list = Array.from(new Set([...presets, ...customs].map(model =>
+                provider === 'deepseek' ? normalizeDeepseekModelName(model) : model
+            )));
             if (provider === 'siliconflow' && typeKey === 'ocr') {
                 list = list.filter(m => !m.toLowerCase().includes('deepseek'));
             }
@@ -884,16 +933,18 @@
                 if (['deepseek', 'siliconflow', 'bailian', 'zhongzhan', 'zhongzhan_gpt', 'zhongzhan_claude'].includes(prov)) {
                     let targetProv = prov;
                     if (targetProv === 'zhongzhan') targetProv = 'zhongzhan_gpt'; // 兼容老数据
-                    return { provider: targetProv, model: name };
+                    return { provider: targetProv, model: targetProv === 'deepseek' ? normalizeDeepseekModelName(name) : name };
                 }
             }
-            return { provider: defaultProvider, model: val || defaultModel };
+            const model = val || defaultModel;
+            return { provider: defaultProvider, model: defaultProvider === 'deepseek' ? normalizeDeepseekModelName(model) : model };
         }
 
         // 动态装载模型选择/手写输入区域
         function renderModelSelector(typeKey, provider, selectedValue = "") {
             const container = document.getElementById(`${typeKey}ModelValueContainer`);
             if (!container) return;
+            if (provider === 'deepseek') selectedValue = normalizeDeepseekModelName(selectedValue);
             
             const isZhongzhan = provider === 'zhongzhan' || provider === 'zhongzhan_gpt' || provider === 'zhongzhan_claude';
             
@@ -993,7 +1044,7 @@
             
             // 默认取个常用模型初始化
             let defVal = "";
-            if (provider === 'deepseek') defVal = "deepseek-v4-flash";
+            if (provider === 'deepseek') defVal = "deepseek-flash";
             else if (provider === 'siliconflow') {
                 defVal = typeKey === 'ocr' ? "Qwen/Qwen3-VL-8B-Instruct" : "deepseek-ai/DeepSeek-V4-Flash";
             } else if (provider === 'bailian') {
@@ -1012,6 +1063,38 @@
         window.removeCustomModelName = removeCustomModelName;
         window.saveCustomZhongzhanModel = saveCustomZhongzhanModel;
         window.deleteCustomZhongzhanModel = deleteCustomZhongzhanModel;
+
+        // Responsive utility navigation is independent of API settings.
+        document.addEventListener('DOMContentLoaded', () => {
+            const header = document.getElementById('headerUtilityActions');
+            if (header) {
+                const more = document.createElement('details');
+                more.id = 'headerMoreActions';
+                more.innerHTML = '<summary aria-label="更多工具"><i class="fa-solid fa-ellipsis" aria-hidden="true"></i></summary><div></div>';
+                ['statsOpenBtn', 'shutdownBtn'].forEach(id => {
+                    const button = document.getElementById(id);
+                    if (!button) return;
+                    const label = button.querySelector('span') || document.createElement('span');
+                    label.textContent = id === 'statsOpenBtn' ? '数据统计' : '关闭题库';
+                    button.appendChild(label);
+                    button.addEventListener('click', () => { more.open = false; });
+                    more.lastElementChild.appendChild(button);
+                });
+                header.appendChild(more);
+                const compact = window.matchMedia('(max-width: 768px)');
+                const updateBadge = document.getElementById('updateBadge');
+                const desktopSettings = document.getElementById('appNavSettings');
+                const headerSettings = document.getElementById('settingsOpenBtn');
+                const placeUpdateBadge = () => {
+                    const target = compact.matches ? headerSettings : desktopSettings;
+                    if (updateBadge && target) target.appendChild(updateBadge);
+                    more.open = false;
+                };
+                placeUpdateBadge();
+                if (compact.addEventListener) compact.addEventListener('change', placeUpdateBadge);
+                else if (compact.addListener) compact.addListener(placeUpdateBadge);
+            }
+        });
 
         // Settings Modal Controls
         function openSettingsModal() {
@@ -1041,17 +1124,17 @@
                     document.getElementById('settingsZhongzhanClaudeBaseUrl').value = settings.zhongzhan_claude_base_url || '';
                     
                     // 1. AI 智能解题模型
-                    const solveCfg = parseModelConfig(settings.prefer_solve_model, 'deepseek', 'deepseek-v4-flash');
+                    const solveCfg = parseModelConfig(settings.prefer_solve_model, 'deepseek', 'deepseek-flash');
                     document.getElementById('solveModelProvider').value = solveCfg.provider;
                     renderModelSelector('solve', solveCfg.provider, solveCfg.model);
                     
                     // 2. 试卷智能拆解模型
-                    const parseCfg = parseModelConfig(settings.prefer_parse_model, 'deepseek', 'deepseek-v4-flash');
+                    const parseCfg = parseModelConfig(settings.prefer_parse_model, 'deepseek', 'deepseek-flash');
                     document.getElementById('parseModelProvider').value = parseCfg.provider;
                     renderModelSelector('parse', parseCfg.provider, parseCfg.model);
                     
                     // 3. 题目智能分类模型
-                    const classifyCfg = parseModelConfig(settings.prefer_classify_model, 'deepseek', 'deepseek-v4-flash');
+                    const classifyCfg = parseModelConfig(settings.prefer_classify_model, 'deepseek', 'deepseek-flash');
                     document.getElementById('classifyModelProvider').value = classifyCfg.provider;
                     renderModelSelector('classify', classifyCfg.provider, classifyCfg.model);
                     
@@ -1061,7 +1144,8 @@
                     if (ocrProvider === 'zhongzhan') ocrProvider = 'zhongzhan_gpt'; // 兼容老数据
                     
                     let ocrModel = "";
-                    if (ocrProvider === 'siliconflow') ocrModel = settings.siliconflow_model || 'Qwen/Qwen3-VL-8B-Instruct';
+                    if (ocrProvider === 'deepseek') ocrModel = settings.deepseek_model || 'deepseek-flash';
+                    else if (ocrProvider === 'siliconflow') ocrModel = settings.siliconflow_model || 'Qwen/Qwen3-VL-8B-Instruct';
                     else if (ocrProvider === 'bailian') ocrModel = settings.ali_bailian_model || 'qwen3.7-flash';
                     else if (ocrProvider === 'zhongzhan_gpt') ocrModel = settings.zhongzhan_gpt_ocr_model || 'gpt-4o';
                     else if (ocrProvider === 'zhongzhan_claude') ocrModel = settings.zhongzhan_claude_ocr_model || 'claude-3-5-sonnet';
@@ -1230,18 +1314,20 @@
             const classifyModel = getSelectedModelValue('classify', classifyProvider);
             const preferClassifyModel = `${classifyProvider.toUpperCase()}/${classifyModel}`;
             
-            // 4. 默认公式识图模型 (后端以 prefer_engine + siliconflow_model/ali_bailian_model/zhongzhan_gpt_ocr_model/zhongzhan_claude_ocr_model 区分)
+            // 4. 默认公式识图模型：引擎与各供应商模型分别保存。
             const ocrProvider = document.getElementById('ocrModelProvider').value;
             const ocrModel = getSelectedModelValue('ocr', ocrProvider);
             let preferEngine = ocrProvider;
             if (preferEngine === 'bailian') preferEngine = 'ali_bailian'; // 与后端对齐
             
+            let deepseekModel = "";
             let siliconflowModel = "";
             let aliBailianModel = "";
             let zhongzhanGptOcrModel = "";
             let zhongzhanClaudeOcrModel = "";
             
-            if (ocrProvider === 'siliconflow') siliconflowModel = ocrModel;
+            if (ocrProvider === 'deepseek') deepseekModel = ocrModel;
+            else if (ocrProvider === 'siliconflow') siliconflowModel = ocrModel;
             else if (ocrProvider === 'bailian') aliBailianModel = ocrModel;
             else if (ocrProvider === 'zhongzhan_gpt') zhongzhanGptOcrModel = ocrModel;
             else if (ocrProvider === 'zhongzhan_claude') zhongzhanClaudeOcrModel = ocrModel;
@@ -1264,6 +1350,7 @@
             formData.append('zhongzhan_claude_ocr_model', zhongzhanClaudeOcrModel);
             
             formData.append('prefer_engine', preferEngine);
+            formData.append('deepseek_model', deepseekModel);
             formData.append('siliconflow_model', siliconflowModel);
             formData.append('ali_bailian_model', aliBailianModel);
             formData.append('prefer_solve_model', preferSolveModel);
@@ -1366,13 +1453,32 @@
         }
 
         // Populate Metadata Select Option Lists Dynamically
+        function setEditorMetadataValue(select, value, label = '') {
+            if (!select) return;
+            const selectedValue = value == null ? '' : String(value);
+            Array.from(select.options).forEach(option => {
+                if (option.dataset.editorMetadataFallback === 'true' && option.value !== selectedValue) {
+                    option.remove();
+                }
+            });
+            if (!Array.from(select.options).some(option => option.value === selectedValue)) {
+                const option = document.createElement('option');
+                option.value = selectedValue;
+                option.textContent = label || selectedValue || '-- 未选择 --';
+                option.dataset.editorMetadataFallback = 'true';
+                select.appendChild(option);
+            }
+            select.value = selectedValue;
+        }
+
         function populateMetadataDropdowns() {
             if (!systemMetadata || !systemMetadata.question_types || !systemMetadata.difficulties) return;
 
             // 1. Edit Question Type select
             const editQType = document.getElementById('editQType');
             if (editQType) {
-                const currentVal = editQType.value || 'single_choice';
+                const currentVal = editQType.value;
+                const currentLabel = editQType.options[editQType.selectedIndex]?.textContent || '';
                 editQType.innerHTML = '';
                 systemMetadata.question_types.forEach(item => {
                     const opt = document.createElement('option');
@@ -1380,18 +1486,14 @@
                     opt.textContent = item.label;
                     editQType.appendChild(opt);
                 });
-                // Restore selected value if matches
-                if (systemMetadata.question_types.some(t => t.value === currentVal)) {
-                    editQType.value = currentVal;
-                } else if (systemMetadata.question_types.length > 0) {
-                    editQType.value = systemMetadata.question_types[0].value;
-                }
+                setEditorMetadataValue(editQType, currentVal, currentLabel);
             }
 
             // 2. Edit Difficulty select
             const editDiff = document.getElementById('editDifficulty');
             if (editDiff) {
-                const currentVal = editDiff.value || 'easy_error';
+                const currentVal = editDiff.value;
+                const currentLabel = editDiff.options[editDiff.selectedIndex]?.textContent || '';
                 editDiff.innerHTML = '';
                 systemMetadata.difficulties.forEach(item => {
                     const opt = document.createElement('option');
@@ -1399,11 +1501,7 @@
                     opt.textContent = item.label;
                     editDiff.appendChild(opt);
                 });
-                if (systemMetadata.difficulties.some(d => d.value === currentVal)) {
-                    editDiff.value = currentVal;
-                } else if (systemMetadata.difficulties.length > 0) {
-                    editDiff.value = systemMetadata.difficulties[0].value;
-                }
+                setEditorMetadataValue(editDiff, currentVal, currentLabel);
             }
 
             // 3. Sidebar Filter Question Type select
@@ -1885,8 +1983,10 @@
                 if (type === 'single_choice') return '单选题';
                 if (type === 'multi_choice') return '多选题';
                 if (type === 'fill_in_blank') return '填空题';
-                if (type === 'detailed_answer') return '解答题';
-                return '数学题';
+                if (type === 'detailed_answer') return '计算题';
+                if (type === 'experiment') return '实验题';
+                if (type === 'short_answer') return '简答题';
+                return '物理题';
             }
             const found = systemMetadata.question_types.find(t => t.value === type);
             return found ? found.label : type;
@@ -2041,124 +2141,64 @@
             closeWorkspaceDropdown();
         }
 
+        window.setAppNavigationActive = function(targetId) {
+            document.querySelectorAll('[data-app-nav-target]').forEach((button) => {
+                const isActive = button.dataset.appNavTarget === targetId;
+                if (isActive) {
+                    button.setAttribute('aria-current', 'page');
+                } else {
+                    button.removeAttribute('aria-current');
+                }
+            });
+        };
+
         window.selectWorkspace = function(workspaceId, workspaceName) {
+            window.setAppNavigationActive(workspaceId);
             const currentWorkspaceName = document.getElementById('currentWorkspaceName');
             if (currentWorkspaceName) {
                 currentWorkspaceName.textContent = workspaceName;
             }
 
-            const toggleSidebarBtn = document.getElementById('toggleSidebarBtn');
-            if (toggleSidebarBtn) {
-                if (workspaceId === 'paper') {
-                    toggleSidebarBtn.classList.add('hidden');
-                } else {
-                    toggleSidebarBtn.classList.remove('hidden');
-                }
-            }
-
+            const checkDashboard = document.getElementById('ws-check-dashboard');
             const checkBank = document.getElementById('ws-check-bank');
             const checkPaper = document.getElementById('ws-check-paper');
+            const btnDashboard = document.getElementById('ws-btn-dashboard');
             const btnBank = document.getElementById('ws-btn-bank');
             const btnPaper = document.getElementById('ws-btn-paper');
 
-            if (checkBank && checkPaper) {
-                if (workspaceId === 'bank') {
+            if (checkDashboard && checkBank && checkPaper) {
+                if (workspaceId === 'dashboard') {
+                    checkDashboard.classList.remove('hidden');
+                    checkBank.classList.add('hidden');
+                    checkPaper.classList.add('hidden');
+                    if (btnDashboard) btnDashboard.classList.add('font-medium');
+                    if (btnBank) btnBank.classList.remove('font-medium');
+                    if (btnPaper) btnPaper.classList.remove('font-medium');
+                } else if (workspaceId === 'bank') {
+                    checkDashboard.classList.add('hidden');
                     checkBank.classList.remove('hidden');
                     checkPaper.classList.add('hidden');
+                    if (btnDashboard) btnDashboard.classList.remove('font-medium');
                     if (btnBank) btnBank.classList.add('font-medium');
                     if (btnPaper) btnPaper.classList.remove('font-medium');
-                } else {
+                } else if (workspaceId === 'paper') {
+                    checkDashboard.classList.add('hidden');
                     checkBank.classList.add('hidden');
                     checkPaper.classList.remove('hidden');
+                    if (btnDashboard) btnDashboard.classList.remove('font-medium');
                     if (btnBank) btnBank.classList.remove('font-medium');
                     if (btnPaper) btnPaper.classList.add('font-medium');
+                } else {
+                    checkDashboard.classList.add('hidden');
+                    checkBank.classList.add('hidden');
+                    checkPaper.classList.add('hidden');
+                    if (btnDashboard) btnDashboard.classList.remove('font-medium');
+                    if (btnBank) btnBank.classList.remove('font-medium');
+                    if (btnPaper) btnPaper.classList.remove('font-medium');
                 }
             }
 
             closeWorkspaceDropdown();
-        };
-
-        let isSidebarCollapsed = false;
-        let lastSidebarWidth = 320;
-        let lastPreviewWidth = 450;
-
-        window.toggleSidebarCollapse = function() {
-            const sidebar = document.getElementById('sidebarSection');
-            const preview = document.getElementById('previewSection');
-            const resizer = document.getElementById('resizer-1');
-            const toggleBtn = document.getElementById('toggleSidebarBtn');
-            if (!sidebar) return;
-            
-            if (!isSidebarCollapsed) {
-                // Collapse
-                const currentSidebarWidth = parseFloat(getComputedStyle(sidebar).width) || 320;
-                if (currentSidebarWidth > 50) lastSidebarWidth = currentSidebarWidth;
-                
-                if (preview) {
-                    const currentPreviewWidth = parseFloat(getComputedStyle(preview).width) || 450;
-                    if (currentPreviewWidth > 100) lastPreviewWidth = currentPreviewWidth;
-                }
-
-                sidebar.style.transition = 'width 0.25s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease';
-                sidebar.style.width = '0px';
-                sidebar.style.minWidth = '0px';
-                sidebar.style.opacity = '0';
-                sidebar.style.pointerEvents = 'none';
-                if (resizer) resizer.style.display = 'none';
-                if (toggleBtn) {
-                    toggleBtn.classList.add('text-brand-600', 'bg-slate-100/80');
-                    toggleBtn.setAttribute('title', '展开左侧题库栏');
-                }
-                const toggleIcon = document.getElementById('toggleSidebarIcon');
-                if (toggleIcon) {
-                    toggleIcon.classList.remove('fa-angles-left');
-                    toggleIcon.classList.add('fa-angles-right');
-                }
-
-                // Expand preview panel proportionally to 40% window width (60:40 ratio with editor)
-                if (preview) {
-                    const windowWidth = window.innerWidth || document.documentElement.clientWidth || 1400;
-                    const targetPreviewWidth = Math.min(Math.max(Math.round(windowWidth * 0.40), 480), 750);
-                    preview.style.transition = 'width 0.25s cubic-bezier(0.4, 0, 0.2, 1)';
-                    preview.style.width = targetPreviewWidth + 'px';
-                }
-
-                isSidebarCollapsed = true;
-                setTimeout(() => {
-                    if (preview && isSidebarCollapsed) preview.style.transition = '';
-                }, 260);
-            } else {
-                // Expand
-                sidebar.style.transition = 'width 0.25s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease';
-                sidebar.style.width = `${lastSidebarWidth}px`;
-                sidebar.style.minWidth = '';
-                sidebar.style.opacity = '1';
-                sidebar.style.pointerEvents = 'auto';
-                if (resizer) resizer.style.display = 'block';
-                if (toggleBtn) {
-                    toggleBtn.classList.remove('text-brand-600', 'bg-slate-100/80');
-                    toggleBtn.setAttribute('title', '收起左侧题库栏');
-                }
-                const toggleIcon = document.getElementById('toggleSidebarIcon');
-                if (toggleIcon) {
-                    toggleIcon.classList.remove('fa-angles-right');
-                    toggleIcon.classList.add('fa-angles-left');
-                }
-
-                // Restore preview panel to previous width
-                if (preview) {
-                    preview.style.transition = 'width 0.25s cubic-bezier(0.4, 0, 0.2, 1)';
-                    preview.style.width = `${lastPreviewWidth}px`;
-                }
-
-                isSidebarCollapsed = false;
-                setTimeout(() => {
-                    if (!isSidebarCollapsed) {
-                        sidebar.style.transition = '';
-                        if (preview) preview.style.transition = '';
-                    }
-                }, 260);
-            }
         };
 
         window.toggleDarkMode = function() {

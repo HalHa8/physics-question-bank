@@ -957,3 +957,52 @@ def test_version_and_update_check_api(client):
         assert "macOS" in data_update["assets"]
         assert "Windows" in data_update["assets"]
         assert data_update["assets"]["macOS"]["size_mb"] == 10.0
+
+
+def test_solve_without_model_uses_saved_solver_and_shared_prompt(client):
+    from mathbank.prompts import build_ai_solve_prompts
+
+    with patch.dict(os.environ, {"PREFER_SOLVE_MODEL": "DEEPSEEK/deepseek-chat", "DEEPSEEK_API_KEY": "fake"}), patch("main.post_chat_completion") as post:
+        post.return_value.json.return_value = {"choices": [{"message": {"content": "answer"}}]}
+        response = client.post("/api/ai/solve", data={"content": "求 1+1", "question_type": "fill_in_blank"}, headers={"X-Local-Token": LOCAL_TOKEN})
+        assert response.status_code == 200
+        payload = post.call_args.args[1]
+        assert payload["model"] == "deepseek-chat"
+        system, user = build_ai_solve_prompts("fill_in_blank", "求 1+1")
+        assert payload["messages"] == [{"role": "system", "content": system}, {"role": "user", "content": user}]
+
+
+def test_deepseek_ocr_settings_persist_and_support_older_clients(client, tmp_path, monkeypatch):
+    import main
+    env_path = tmp_path / '.env'
+    monkeypatch.setattr(main, 'ENV_FILE', env_path)
+    with patch.dict(os.environ, {'DEEPSEEK_API_KEY':'test-key', 'DEEPSEEK_OCR_MODEL':''}):
+        assert client.get('/api/settings').json()['deepseek_model'] == 'deepseek-flash'
+        response = client.post('/api/settings/save', data={
+            'deepseek_key':'test-key', 'prefer_engine':'deepseek', 'deepseek_model':'deepseek-flash:high',
+        }, headers={'X-Local-Token':LOCAL_TOKEN})
+        assert response.status_code == 200
+        settings = client.get('/api/settings').json()
+        assert settings['prefer_engine'] == 'deepseek'
+        assert settings['deepseek_model'] == 'deepseek-flash:high'
+        assert 'DEEPSEEK_OCR_MODEL=deepseek-flash:high' in env_path.read_text()
+        response = client.post('/api/settings/save', data={
+            'deepseek_key':settings['deepseek_key'], 'prefer_engine':'deepseek',
+        }, headers={'X-Local-Token':LOCAL_TOKEN})
+        assert response.status_code == 200
+        assert os.environ['DEEPSEEK_API_KEY'] == 'test-key'
+        assert client.get('/api/settings').json()['deepseek_model'] == 'deepseek-flash:high'
+        assert env_path.read_text().count('DEEPSEEK_OCR_MODEL=') == 1
+
+
+def test_deepseek_ocr_model_rejects_env_line_injection(client, tmp_path, monkeypatch):
+    import main
+    env_path = tmp_path / '.env'
+    env_path.write_text('DEEPSEEK_OCR_MODEL=deepseek-flash\n')
+    monkeypatch.setattr(main, 'ENV_FILE', env_path)
+    response = client.post('/api/settings/save', data={
+        'deepseek_model':'deepseek-flash\nUNEXPECTED=1',
+    }, headers={'X-Local-Token':LOCAL_TOKEN})
+    assert response.status_code == 500
+    assert '换行' in response.json()['message']
+    assert env_path.read_text() == 'DEEPSEEK_OCR_MODEL=deepseek-flash\n'

@@ -64,6 +64,22 @@ def test_solve_prompt_builder_preserves_required_structure():
     assert "若 $x=1$" in user_prompt
 
 
+def test_solve_prompt_uses_high_school_physics_methods():
+    system_prompt, _ = build_ai_solve_prompts("detailed_answer", "求物体的加速度")
+
+    assert "中国普通高中物理课程范围内" in system_prompt
+    assert "不使用大学物理、微积分或超纲近似方法" in system_prompt
+    assert "研究对象、物理过程、正方向" in system_prompt
+    assert "量纲、数量级、边界条件和物理意义" in system_prompt
+
+
+def test_solve_prompt_emits_single_latex_backslash_in_headings():
+    system_prompt, _ = build_ai_solve_prompts("single_choice", "求 1+1")
+
+    assert r"\textbf{【参考答案】}" in system_prompt
+    assert r"\\textbf{【参考答案】}" not in system_prompt
+
+
 def test_editor_identity_and_meta_preview_have_single_sources():
     api_source = (STATIC_JS_DIR / "api.js").read_text(encoding="utf-8")
     editor_source = (STATIC_JS_DIR / "editor.js").read_text(encoding="utf-8")
@@ -83,7 +99,7 @@ def test_editor_identity_and_meta_preview_have_single_sources():
     assert combined_source.count("getElementById('paperBadges')") == 1
     assert "window.renderEditorPaperMeta = renderEditorPaperMeta" in editor_source
     assert "renderEditorPaperMeta();" in import_source
-    select_start = import_source.index("function selectQuestion(item)")
+    select_start = import_source.index("function selectQuestion(")
     select_end = import_source.index("window.reloadCurrentQuestionSilently", select_start)
     select_source = import_source[select_start:select_end]
     assert "EditorState.useQuestion(item)" not in select_source
@@ -112,7 +128,7 @@ def test_all_text_ai_routes_parse_models_with_the_shared_effort_rules():
 
     assert "parse_effort=False" not in main_source
     assert "robust_request_post" not in main_source
-    assert "inject_reasoning_effort" in main_source
+    assert "apply_model_thinking_policy" in main_source
 
 
 def test_bailian_model_presets_are_current_and_task_specific():

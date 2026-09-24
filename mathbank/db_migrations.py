@@ -18,7 +18,7 @@ from sqlalchemy.engine import Engine
 from mathbank.paths import SCHEMA_SNAPSHOT_DIR
 
 
-LATEST_SCHEMA_VERSION = 9
+LATEST_SCHEMA_VERSION = 10
 LEGACY_REQUIRED_TABLES = {
     "questions",
     "question_curriculums",
@@ -255,7 +255,7 @@ def _ensure_tikz_asset_columns(connection) -> dict[str, int]:
 
 
 def _ensure_figure_layout_columns(connection) -> dict[str, int]:
-    """Add the v9 figure layout preferences without rewriting existing rows."""
+    """Add v9 group preferences and v10 per-image layouts without rewriting rows."""
 
     columns = {
         row[1]
@@ -265,6 +265,7 @@ def _ensure_figure_layout_columns(connection) -> dict[str, int]:
     }
     additions = {
         "figure_size": "VARCHAR(20) NOT NULL DEFAULT 'auto'",
+        "image_layouts": "TEXT NOT NULL DEFAULT '{}'",
         "figure_align_custom": "INTEGER NOT NULL DEFAULT 0",
     }
     stats: dict[str, int] = {}
@@ -279,12 +280,15 @@ def _ensure_figure_layout_columns(connection) -> dict[str, int]:
 
 
 def _validate_figure_layout_schema(connection) -> None:
-    """Fail closed when a v9 database lacks either layout preference."""
+    """Fail closed when the current database lacks a layout preference."""
 
     table_info = connection.exec_driver_sql(
         'PRAGMA table_info("questions")'
     ).fetchall()
     info_by_name = {row[1]: row for row in table_info}
+    image_info = info_by_name.get("image_layouts")
+    if image_info is None or int(image_info[3]) != 1:
+        raise RuntimeError("数据库表 questions 缺少核心字段或结构异常: image_layouts")
     column_info = info_by_name.get("figure_size")
     if column_info is None:
         raise RuntimeError("数据库表 questions 缺少核心字段: figure_size")

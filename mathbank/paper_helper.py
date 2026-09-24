@@ -1,3 +1,5 @@
+from .image_layout import split_image_anchors, image_key, normalize_image_layouts, SIZE_CM
+
 import hashlib
 import os
 import re
@@ -361,6 +363,7 @@ def clean_content_for_latex(
     is_answer: bool = False,
     preserve_image_positions: bool = False,
     tikz_sources: dict[str, str] | None = None,
+    image_layouts: dict | None = None,
 ) -> str:
     r"""
     Clean markdown/LaTeX question content for exam-zh LaTeX document export based on 试卷类模板.tex.
@@ -385,12 +388,66 @@ def clean_content_for_latex(
     if r"\begin{tikzpicture}" in text and not preserve_image_positions:
         text = re.sub(r'!\[.*?\]\([^)]+\)', '', text)
 
+    # Four image-only options form one compact row. Mark only complete groups;
+    # prose, multi-image options and authored choices settings keep their layout.
+    compact_choice_ranges = []
+    choice_offset = 0
+
+    def compact_image_choices(match):
+        nonlocal choice_offset
+        parts = re.split(r"\\item\b", match.group(1))
+        if len(parts) == 5 and not parts[0].strip() and all(
+            _MARKDOWN_IMAGE_RE.fullmatch(part.strip()) for part in parts[1:]
+        ):
+            replacement = r"\begin{choices}[columns=4,label-pos=left]" + match.group(1) + r"\end{choices}"
+            start = match.start() + choice_offset
+            compact_choice_ranges.append((start, start + len(replacement)))
+            choice_offset += len(replacement) - len(match.group(0))
+            return replacement
+        return match.group(0)
+
+    text = re.sub(r"\\begin\{choices\}([\s\S]*?)\\end\{choices\}", compact_image_choices, text)
+
     # Convert Markdown images ![](/static/uploads/xxx.png) or ![](uploads/xxx.png) to \includegraphics{...}
     def replace_img(match):
         img_path = match.group(1)
         base_name = os.path.basename(img_path)
         inside_table = _image_is_inside_table_environment(text, match.start())
         code = (tikz_sources or {}).get(_tikz_image_key(img_path))
+        layout = (image_layouts or {}).get(image_key(img_path))
+        if any(start <= match.start() < end for start, end in compact_choice_ranges):
+            if code:
+                if r"\begin{tikzpicture}" not in code:
+                    code = "\\begin{tikzpicture}\n" + code + "\n\\end{tikzpicture}"
+                rendered = (r"\adjustbox{max width=\linewidth}{"
+                            r"\adjustbox{max width=3.0cm,max height=3.0cm,keepaspectratio}{" + code + "\n}}")
+            else:
+                rendered = _bounded_includegraphics(base_name, "3.0cm", "3.0cm")
+            token = f"{token_prefix}N{len(tikz_blocks)}END"
+            tikz_blocks[token] = rendered
+            return token
+        if layout:
+            # All values are normalized enums. Wrap the result in a protected
+            # token so subsequent prose formatting cannot alter generated TeX.
+            width, height = SIZE_CM.get(layout['size'], (9.0, 6.0))
+            if inside_table:
+                height = min(height, 4.0)
+            if code:
+                if r"\begin{tikzpicture}" not in code:
+                    code = "\\begin{tikzpicture}\n" + code + "\n\\end{tikzpicture}"
+                visual = rf"\adjustbox{{max width={width}cm,max height={height}cm,keepaspectratio}}{{" + code + "\n}"
+            else:
+                visual = rf"\includegraphics[max width={width}cm,max height={height}cm,keepaspectratio]{{{base_name}}}"
+            visual = r"\adjustbox{max width=\linewidth}{" + visual + "}"
+            if inside_table:
+                alignment = {'left': 'l', 'center': 'c', 'right': 'r'}[layout['align']]
+                rendered = r"\makebox[\linewidth][" + alignment + "]{" + r"\adjustbox{valign=m,margin=0pt 3pt}{" + visual + "}}"
+            else:
+                environment = {'left': 'flushleft', 'center': 'center', 'right': 'flushright'}[layout['align']]
+                rendered = "\\begin{" + environment + "}\n" + visual + "\n\\end{" + environment + "}"
+            token = f"{token_prefix}N{len(tikz_blocks)}END"
+            tikz_blocks[token] = rendered
+            return token if inside_table else "\n" + token + "\n"
         if code:
             if r"\begin{tikzpicture}" not in code:
                 code = "\\begin{tikzpicture}\n" + code + "\n\\end{tikzpicture}"
@@ -670,9 +727,6 @@ def build_latex_document(
             q = item.get("question", {})
             raw_content = q.get("content", "")
             q_score = item.get("score", 5)
-            preserve_inline_images = _should_preserve_inline_image_positions(
-                raw_content
-            )
             content_tikz_assets = q.get("content_tikz_assets", [])
             if not isinstance(content_tikz_assets, list):
                 content_tikz_assets = []
@@ -685,46 +739,44 @@ def build_latex_document(
                 legacy_tikz = q.get("tikz_code", "").strip()
                 if legacy_tikz:
                     tikz_codes = [legacy_tikz]
-            tikz_image_names = {
-                os.path.basename(str(asset.get("image_path") or ""))
-                for asset in content_tikz_assets
-                if isinstance(asset, dict) and asset.get("image_path")
-            }
+
 
             fig_body = ""
-            cleaned_raw = raw_content
+            anchored_raw, detached_raw = split_image_anchors(raw_content)
+            cleaned_raw = anchored_raw
             figure_specs = []
-            img_matches = []
-            if not preserve_inline_images:
-                if tikz_codes or r"\begin{tikzpicture}" in raw_content:
-                    if not tikz_codes and r"\begin{tikzpicture}" in raw_content:
-                        m = re.search(r'(\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\})', raw_content)
-                        if m:
-                            tikz_codes = [m.group(1)]
-                            cleaned_raw = cleaned_raw.replace(tikz_codes[0], '').strip()
-
-                    cleaned_raw = re.sub(r'!\[.*?\]\([^)]+\)', '', cleaned_raw).strip()
-                for tikz_code in tikz_codes:
-                    if r"\begin{tikzpicture}" not in tikz_code:
-                        tikz_code = f"\\begin{{tikzpicture}}\n{tikz_code}\n\\end{{tikzpicture}}"
-                    figure_specs.append(("tikz", tikz_code))
-
-                img_matches = _MARKDOWN_IMAGE_RE.findall(raw_content)
-                if img_matches:
-                    for img_path in img_matches:
-                        img_filename = os.path.basename(img_path)
-                        # 每幅已有可编辑源码的 TikZ 图输出矢量代码，跳过其对应 PNG。
-                        if img_filename in tikz_image_names:
-                            continue
-                        if not content_tikz_assets and tikz_codes and img_filename.startswith("tikz_"):
-                            continue
-                        figure_specs.append(("image", img_filename))
-                    cleaned_raw = re.sub(r'!\[.*?\]\([^)]+\)', '', cleaned_raw).strip()
-
+            img_matches = _MARKDOWN_IMAGE_RE.findall(detached_raw)
+            sources = _inline_tikz_sources(raw_content, content_tikz_assets, str(q.get("tikz_code") or "").strip())
+            seen_figures = set()
+            for img_path in img_matches:
+                key = _tikz_image_key(img_path)
+                if key in seen_figures:
+                    continue
+                seen_figures.add(key)
+                code = sources.get(key)
+                if code:
+                    if r"\begin{tikzpicture}" not in code:
+                        code = "\\begin{tikzpicture}\n" + code + "\n\\end{tikzpicture}"
+                    figure_specs.append(("tikz", code))
+                else:
+                    figure_specs.append(("image", os.path.basename(img_path)))
+            # Legacy source-only drawings have no Markdown anchor.
+            if not _MARKDOWN_IMAGE_RE.search(raw_content):
+                if not tikz_codes and r"\begin{tikzpicture}" in raw_content:
+                    match = re.search(r'(\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\})', raw_content)
+                    if match:
+                        tikz_codes = [match.group(1)]
+                        cleaned_raw = cleaned_raw.replace(match.group(1), '').strip()
+                for code in tikz_codes:
+                    if r"\begin{tikzpicture}" not in code:
+                        code = "\\begin{tikzpicture}\n" + code + "\n\\end{tikzpicture}"
+                    figure_specs.append(("tikz", code))
+            preserve_inline_images = bool(_MARKDOWN_IMAGE_RE.search(cleaned_raw))
             cleaned_content = clean_content_for_latex(
                 cleaned_raw,
                 q_type=q_type,
                 preserve_image_positions=preserve_inline_images,
+                image_layouts=normalize_image_layouts(q.get("image_layouts", {}), cleaned_raw),
                 tikz_sources=(
                     _inline_tikz_sources(
                         raw_content, content_tikz_assets, str(q.get("tikz_code") or "").strip()

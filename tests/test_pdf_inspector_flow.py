@@ -114,7 +114,20 @@ def test_pdf_parse_system_prompt_includes_formula_and_cross_page_rules():
     prompt = build_pdf_parse_system_prompt({"必修第一册": {"运动的描述": []}}, False)
     assert "矢量、上下标、正负方向、单位、有效数字" in prompt
     assert "不得根据语境擅自改变物理量字母" in prompt
+    generated_prompt = build_pdf_parse_system_prompt({"必修第一册": {"运动的描述": []}}, True)
+    assert "\\sqrt{...}" in prompt
+    assert "\\dfrac{...}{...}" in prompt
     assert "\\fillin" in prompt
+    assert "`$x_1$`" in prompt
+    assert "\\boldsymbol{a}" in prompt
+    assert "\\mathbf{a}" in prompt
+    assert "不得重复包裹" in prompt
+    assert "公式锁定 ID `[[MBM_...]]`" in prompt
+    assert "禁止输出裸露的" in prompt
+    assert "仅在答案规则允许提取或生成时" in prompt
+    assert "若规则要求空字符串则保持空白" in prompt
+    assert "若原试卷无答案，必须将 `answer_markdown` 设为空字符串" in prompt
+    assert "若原试卷缺答案，请自动推导生成标准解答步骤" in generated_prompt
     assert "MATHBANK_PDF_PAGE:N" in prompt
     assert "必须按上下文合并为同一道完整题目" in prompt
 
@@ -140,7 +153,8 @@ def test_pdf_inspector_detects_formula_loss_and_triggers_ocr_fallback():
     assert result["pages"][0]["needs_ocr"] is True
 
 
-def test_pdf_parsing_force_ocr_strategy():
+@pytest.mark.parametrize("generate_answers", [False, True])
+def test_pdf_parsing_force_ocr_strategy(generate_answers):
     """当指定 pdf_strategy="force_ocr" 时，应绕过原生提取并强制发起视觉转译。"""
     from main import DOCUMENT_TASKS, run_pdf_parsing_task
     import pymupdf as fitz
@@ -151,7 +165,7 @@ def test_pdf_parsing_force_ocr_strategy():
     pdf_bytes = doc.tobytes()
 
     with patch("main.ocr_pdf_page_image", return_value="1. 测验题 1+1=2"), \
-         patch("main.parse_paper_text_internal", return_value=[{"content": "1. 测验题 1+1=2", "answer_markdown": ""}]):
+         patch("main.parse_paper_text_internal", return_value=[{"content": "1. 测验题 1+1=2", "answer_markdown": "A"}]) as parse:
         task_id = "test-force-ocr-task"
         if DOCUMENT_TASKS.exists(task_id):
             DOCUMENT_TASKS.remove(task_id)
@@ -160,13 +174,16 @@ def test_pdf_parsing_force_ocr_strategy():
             task_id,
             pdf_bytes,
             "test.pdf",
-            generate_answers=False,
+            generate_answers=generate_answers,
             page_range=None,
             pdf_strategy="force_ocr"
         )
         task = DOCUMENT_TASKS.snapshot(task_id)
         assert task is not None
         assert task["status"] == "completed"
+        assert parse.call_args.args[1] is False
+        assert task["generate_answers"] is generate_answers
+        assert task["data"][0]["answer_markdown"] == "A"
         DOCUMENT_TASKS.remove(task_id)
 
 

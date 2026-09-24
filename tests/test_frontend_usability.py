@@ -59,7 +59,7 @@ def test_editor_preview_converts_exam_zh_paren_after_protecting_math_blocks():
     css_source = _read(CSS_PATH)
 
     helper_start = editor_source.index("function transformExamZhParenForPreview(text)")
-    helper_end = editor_source.index("function preprocessFormulaForKaTeX(text)", helper_start)
+    helper_end = editor_source.index("function preprocessFormulaForKaTeX(text,", helper_start)
     helper_source = editor_source[helper_start:helper_end]
 
     assert r"/\\paren\b/g" in helper_source
@@ -68,7 +68,7 @@ def test_editor_preview_converts_exam_zh_paren_after_protecting_math_blocks():
 
     node = shutil.which("node")
     assert node, "Node.js is required for the frontend executable regression"
-    script = helper_source + r"""
+    script = "global.window = {};\n" + helper_source + r"""
 const rendered = transformExamZhParenForPreview(String.raw`题干 \paren`);
 if (rendered.includes(String.raw`\paren`)) {
   throw new Error(`paren macro leaked into preview: ${rendered}`);
@@ -104,7 +104,74 @@ if (similarlyNamed !== String.raw`\parent`) {
     assert re.search(r"\.choices-grid\s*\{[^}]*clear:\s*both;", css_source, re.DOTALL)
 
 
-def test_editor_preview_restores_adjacent_math_without_splitting_fillin_lines():
+def test_editor_preview_repairs_naked_math_without_touching_existing_blocks():
+    editor_source = _read(STATIC_JS_DIR / "editor.js")
+    helper_start = editor_source.index("function normalizeNakedMathForPreview(text)")
+    helper_marker = "window.normalizeNakedMathForPreview = normalizeNakedMathForPreview;"
+    helper_end = editor_source.index(helper_marker, helper_start) + len(helper_marker)
+    helper_source = editor_source[helper_start:helper_end]
+
+    assert "(?<!" not in helper_source
+    assert "(?<=" not in helper_source
+
+    node = shutil.which("node")
+    assert node, "Node.js is required for the frontend executable regression"
+    script = "global.window = {};\n" + helper_source + r'''
+const source = String.raw`已知平面向量 \mathbf{a}, \mathbf{b} 不共线，且 2\mathbf{a} + y\mathbf{b} = x\mathbf{a} - 3\mathbf{b}。
+当 x \geqslant 0 时，f(x_1) \leqslant f(x_2)，且 y^2 > 0；当 x < 0 时经过点 (4,8)。
+已有 $z_1^2$，以及跨行公式 $u^2 +
+v^2 = 1$。
+\begin{cases} x=1 \\ y=2 \end{cases}
+\begin{tabular}{cc} x_1 & y_1 \\ x_2 & y_2 \end{tabular}
+题干 \paren
+\begin{choices}
+\item \frac{1}{2}
+\item x = 2
+\end{choices}`;
+const rendered = normalizeNakedMathForPreview(source);
+for (const expected of [
+  String.raw`$\mathbf{a}, \mathbf{b}$`,
+  String.raw`$2\mathbf{a} + y\mathbf{b} = x\mathbf{a} - 3\mathbf{b}$`,
+  String.raw`$x \geqslant 0$`,
+  String.raw`$x < 0$`,
+  String.raw`$f(x_1) \leqslant f(x_2)$`,
+  String.raw`$y^2 > 0$`,
+  String.raw`$x < 0$`,
+  String.raw`$(4,8)$`,
+  String.raw`$z_1^2$`,
+  String.raw`$u^2 +
+v^2 = 1$`,
+  String.raw`$\begin{cases} x=1 \\ y=2 \end{cases}$`,
+  String.raw`\begin{tabular}{cc} x_1 & y_1 \\ x_2 & y_2 \end{tabular}`,
+  String.raw`题干 \paren`,
+  String.raw`\item $\frac{1}{2}$`,
+  String.raw`\item $x = 2$`,
+]) {
+  if (!rendered.includes(expected)) {
+    throw new Error(`missing normalized math ${expected}: ${rendered}`);
+  }
+}
+if (rendered.includes(String.raw`$$z_1^2$$`)) {
+  throw new Error(`existing math was double wrapped: ${rendered}`);
+}
+if (rendered.includes(String.raw`$\begin{cases} $`) || rendered.includes(String.raw`$\begin{tabular}`)) {
+  throw new Error(`structured environment was split or wrapped incorrectly: ${rendered}`);
+}
+if (rendered.includes(String.raw`$\paren$`) || rendered.includes(String.raw`\boldsymbol`)) {
+  throw new Error(`text macro or explicit vector typography was changed: ${rendered}`);
+}
+'''
+    result = subprocess.run(
+        [node, "-e", script],
+        cwd=PROJECT_ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_editor_preview_restores_adjacent_math_without_splitting_fillin_lines(tmp_path):
     editor_source = _read(STATIC_JS_DIR / "editor.js")
     helper_start = editor_source.index("function transformFillinMacro(clean)")
     helper_marker = "window.preprocessFormulaForKaTeX = preprocessFormulaForKaTeX;"
@@ -149,9 +216,32 @@ for (const source of [
     throw new Error(`math placeholder leaked: ${rendered}`);
   }
 }
+
+const structured = window.preprocessFormulaForKaTeX(String.raw`\begin{tabular}{cc} x_1 & y_1 \\ x_2 & y_2 \end{tabular}`);
+if ((structured.match(/<td\b/g) || []).length !== 4) {
+  throw new Error(`tabular structure did not render as 2x2 HTML: ${structured}`);
+}
+for (const cellMath of [String.raw`$x_1$`, String.raw`$y_1$`, String.raw`$x_2$`, String.raw`$y_2$`]) {
+  if (!structured.includes(cellMath)) {
+    throw new Error(`table cell math was not repaired safely: ${structured}`);
+  }
+}
+
+const casesSource = String.raw`\begin{cases} x=1 \\ y=2 \end{cases}`;
+const renderedCases = window.preprocessFormulaForKaTeX(casesSource);
+if (renderedCases !== '$' + casesSource + '$') {
+  throw new Error(`cases environment was not wrapped as one formula: ${renderedCases}`);
+}
+
+const multilineSource = `$x^2 +\ny^2 = 1$`;
+if (window.preprocessFormulaForKaTeX(multilineSource) !== multilineSource) {
+  throw new Error('multiline math was changed or double wrapped');
+}
 """
+    script_path = tmp_path / "editor_math_preview_regression.js"
+    script_path.write_text(script, encoding="utf-8")
     result = subprocess.run(
-        [node, "-e", script],
+        [node, str(script_path)],
         cwd=PROJECT_ROOT,
         text=True,
         capture_output=True,
@@ -160,7 +250,7 @@ for (const source of [
     assert result.returncode == 0, result.stderr
 
 
-def test_shared_question_preview_pipeline_renders_fillin_through_local_preprocessor():
+def test_shared_question_preview_pipeline_renders_fillin_through_local_preprocessor(tmp_path):
     editor_source = _read(STATIC_JS_DIR / "editor.js")
     helper_start = editor_source.index("function transformFillinMacro(clean)")
     helper_marker = "window.renderQuestionPreviewContent = renderQuestionPreviewContent;"
@@ -231,8 +321,10 @@ if (katexCalls !== 2 || choicesCalls !== 2) {
   throw new Error(`shared pipeline calls were incomplete: katex=${katexCalls}, choices=${choicesCalls}`);
 }
 """
+    script_path = tmp_path / "shared_question_preview_regression.js"
+    script_path.write_text(script, encoding="utf-8")
     result = subprocess.run(
-        [node, "-e", script],
+        [node, str(script_path)],
         cwd=PROJECT_ROOT,
         text=True,
         capture_output=True,
@@ -292,6 +384,106 @@ if (!result.choicesRaw.startsWith(String.raw`\begin{choices}`) || !result.choice
     assert 'class="paper-choice-stem-row' in paper_source
     assert 'class="paper-choice-options-row"' in paper_source
     assert ".paper-choice-options-row" in css_source
+
+
+def test_a4_preview_paginates_by_measured_height_and_keeps_every_question():
+    paper_source = _read(STATIC_JS_DIR / "paper.js")
+    css_source = _read(CSS_PATH)
+    helper_start = paper_source.index("function paginatePaperBlocksByHeight(")
+    helper_marker = "window.paginatePaperBlocksByHeight = paginatePaperBlocksByHeight;"
+    helper_end = paper_source.index(helper_marker, helper_start) + len(helper_marker)
+    helper_source = paper_source[helper_start:helper_end]
+
+    assert "PAGE_1_MAX" not in paper_source
+    assert "PAGE_N_MAX" not in paper_source
+    assert "rawContent.length > 200" not in paper_source
+    assert "getBoundingClientRect" in paper_source
+    assert "paper-page-footer" in paper_source
+    assert "new ResizeObserver(repaginateAfterLayoutChange)" in paper_source
+    assert "resizeObserver.observe(sheet)" in paper_source
+    assert "resizeObserver.observe(block)" in paper_source
+    assert "window.scheduleActiveA4Repagination" in paper_source
+    assert "sheet.innerHTML = '';" not in paper_source
+    assert "a4-paper-sheet--expanded" in paper_source
+    assert "预览已自动扩展以完整显示" in paper_source
+    assert re.search(
+        r"\.a4-paper-sheet\s*,[^{]*\{[^}]*height:\s*1123px;",
+        css_source,
+        re.DOTALL,
+    )
+    assert re.search(
+        r"\.a4-paper-sheet\.a4-paper-sheet--expanded[^}]*"
+        r"height:\s*auto\s*!important;[^}]*"
+        r"flex-shrink:\s*0\s*!important;[^}]*"
+        r"overflow:\s*visible\s*!important;",
+        css_source,
+        re.DOTALL,
+    )
+
+    node = shutil.which("node")
+    assert node, "Node.js is required for the frontend executable regression"
+    script = r"""
+global.window = {};
+""" + helper_source + r"""
+const blocks = [
+  { id: 'title', type: 'section_title', qType: 'single_choice', height: 40 },
+  { id: 'q1', type: 'question', qType: 'single_choice', height: 80 },
+  { id: 'q2', type: 'question', qType: 'single_choice', height: 100 },
+  { id: 'q3', type: 'question', qType: 'single_choice', height: 100 },
+  { id: 'q4', type: 'question', qType: 'single_choice', height: 80 },
+  { id: 'q5', type: 'question', qType: 'single_choice', height: 190 },
+  { id: 'q6', type: 'question', qType: 'single_choice', height: 120 },
+  { id: 'q7', type: 'question', qType: 'single_choice', height: 180 },
+];
+const pages = window.paginatePaperBlocksByHeight(blocks, 620, 920);
+const ids = pages.flat().map(block => block.id);
+if (JSON.stringify(ids) !== JSON.stringify(blocks.map(block => block.id))) {
+  throw new Error(`pagination lost or reordered blocks: ${JSON.stringify(ids)}`);
+}
+if (ids.filter(id => id === 'q6').length !== 1) {
+  throw new Error(`question 6 count is invalid: ${JSON.stringify(pages)}`);
+}
+if (pages.length !== 2 || pages[0].some(block => block.id === 'q6') || pages[1][0].id !== 'q6') {
+  throw new Error(`measured overflow did not move q6 intact: ${JSON.stringify(pages)}`);
+}
+
+const headingBlocks = [
+  { id: 'q1', type: 'question', qType: 'single_choice', height: 500 },
+  { id: 'title2', type: 'section_title', qType: 'fill_in_blank', height: 40 },
+  { id: 'q2', type: 'question', qType: 'fill_in_blank', height: 120 },
+];
+const headingPages = window.paginatePaperBlocksByHeight(headingBlocks, 620, 920);
+if (headingPages[0].some(block => block.id === 'title2') || headingPages[1][0].id !== 'title2') {
+  throw new Error(`section heading was orphaned: ${JSON.stringify(headingPages)}`);
+}
+
+const oversizeBlocks = [
+  { id: 'oversize-title', type: 'section_title', qType: 'detailed_answer', height: 40 },
+  { id: 'oversize-question', type: 'question', qType: 'detailed_answer', height: 1251 },
+];
+const oversizePages = window.paginatePaperBlocksByHeight(oversizeBlocks, 620, 920);
+if (oversizePages.length !== 1 || oversizePages[0].map(block => block.id).join(',') !== 'oversize-title,oversize-question') {
+  throw new Error(`oversize question lost content or orphaned its heading: ${JSON.stringify(oversizePages)}`);
+}
+
+const firstPageHeadingPair = [
+  { id: 'later-title', type: 'section_title', qType: 'detailed_answer', height: 40 },
+  { id: 'later-question', type: 'question', qType: 'detailed_answer', height: 700 },
+];
+const firstPageHeadingPages = window.paginatePaperBlocksByHeight(firstPageHeadingPair, 620, 920);
+if (firstPageHeadingPages.length !== 2 || firstPageHeadingPages[0].length !== 0 ||
+    firstPageHeadingPages[1].map(block => block.id).join(',') !== 'later-title,later-question') {
+  throw new Error(`heading pair that fits a later page was split: ${JSON.stringify(firstPageHeadingPages)}`);
+}
+"""
+    result = subprocess.run(
+        [node, "-e", script],
+        cwd=PROJECT_ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def test_paper_preview_preserves_images_at_authored_complex_content_positions():
@@ -564,24 +756,24 @@ def test_paper_and_editor_figure_layout_controls_keep_their_write_boundaries():
     assert "fetch(" not in editor_handler
 
     assert "let layoutChipRendered = false" in ocr_source
-    assert "const showLayoutChip = allowLayoutControls && !layoutChipRendered" in ocr_source
+    assert "const showLayoutChip = anchored || (allowLayoutControls && !layoutChipRendered)" in ocr_source
     assert ocr_source.count("showLayoutChip ?") == 1
     assert "window.showEditorFigureLayoutPopover(event)" in ocr_source
     assert "function hasDetachedEditorFigureGroup(sourceText)" in ocr_source
     assert "const allowLayoutControls = hasDetachedEditorFigureGroup" in ocr_source
-    assert "正文锚定插图保持原位置" in ocr_source
-    assert "? `<button type=\"button\" onclick=\"window.showEditorFigureLayoutPopover(event)\"" in ocr_source
-    assert ": `<span class=\"flex min-w-0 items-center gap-1.5\"" in ocr_source
+    assert "调整此图的对齐与尺寸，保持正文位置" in ocr_source
+    assert 'data-editor-image-key="${window.MathBankSafe.escapeAttribute(anchored ? imageKey' in ocr_source
+    assert "anchoredKeys.has(imageKey)" in ocr_source
 
     editor_popover_start = ocr_source.index("window.showEditorFigureLayoutPopover")
     editor_popover_end = ocr_source.index(
         "function renderIllustrationBadges()", editor_popover_start
     )
     editor_popover = ocr_source[editor_popover_start:editor_popover_end]
-    assert "['right', 'bottom_left', 'center', 'bottom_right'].map(align =>" in editor_popover
+    assert "Object.keys(alignLabels).map(align =>" in editor_popover
     assert 'class="grid grid-cols-2 gap-1"' in editor_popover
-    assert "${EDITOR_FIGURE_ALIGN_LABELS[align]}</button>" in editor_popover
-    assert "${layout.align === 'right' ? '中/大图自动改为下方居右' : '下方布局生效'}" in editor_popover
+    assert "${alignLabels[align]}</button>" in editor_popover
+    assert "imageKey ? '保持正文顺序'" in editor_popover
     assert ".replace('题干', '').replace('下方', '')" not in editor_popover
     for label in ('题干右侧', '下方居左', '下方居中', '下方居右'):
         assert label in ocr_source
@@ -608,6 +800,8 @@ def test_editor_detached_preview_click_edits_layout_and_preserves_original_view(
 
     node = shutil.which("node")
     assert node, "Node.js is required for the frontend executable regression"
+    api_source = _read(STATIC_JS_DIR / 'api.js')
+    shared = api_source[api_source.index('window.ImageLayoutTools = {'):api_source.index('const FigureLayoutState = {')]
     script = r'''
 const EDITOR_FIGURE_SIZE_LABELS = { auto: '自动', small: '小', medium: '中', large: '大' };
 const EDITOR_FIGURE_ALIGN_LABELS = { right: '题干右侧', bottom_left: '下方居左', center: '下方居中', bottom_right: '下方居右' };
@@ -663,7 +857,7 @@ function runGenericImageOpener(event) {
   const image = event.target.closest('img[data-safe-image-open]');
   if (image) window.open(image.getAttribute('src'), '_blank');
 }
-''' + helper_source + '\n' + click_source + r'''
+''' + shared + '\n' + helper_source + '\n' + click_source + r'''
 
 const detached = makeImage('/static/uploads/detached.png');
 applyEditorFigureLayoutPreview(
@@ -692,14 +886,14 @@ applyEditorFigureLayoutPreview(
   makeContainer(anchored),
   '![](/static/uploads/anchored.png)\n\n后续正文'
 );
-if (anchored.dataset.editorFigureLayout) {
-  throw new Error('anchored image incorrectly received whole-question layout controls');
+if (anchored.dataset.editorImageKey !== 'anchored.png') {
+  throw new Error('anchored image did not receive its own layout control');
 }
 const anchoredClick = clickEvent(anchored);
 handleEditorFigureLayoutPreviewClick(anchoredClick);
 runGenericImageOpener(anchoredClick);
-if (popoverCount !== 1 || openCount !== 2) {
-  throw new Error('anchored image no longer opens its original');
+if (popoverCount !== 2 || openCount !== 1) {
+  throw new Error('anchored image did not open its own menu');
 }
 '''
     result = subprocess.run(
@@ -998,7 +1192,6 @@ def test_static_dialogs_expose_modal_semantics_and_accessible_names():
         "settingsModal": "settingsModalTitle",
         "updateModal": "updateModalTitle",
         "statsModal": "statsModalTitle",
-        "latexImportModal": "latexImportModalTitle",
         "parsedDuplicateReviewModal": "parsedDuplicateReviewTitle",
         "pdfCropModal": "pdfCropModalTitle",
         "answerTikzWorkbenchModal": "answerTikzWorkbenchTitle",
@@ -1024,7 +1217,7 @@ def test_static_dialogs_expose_modal_semantics_and_accessible_names():
     assert workspace_button["aria-haspopup"] == "menu"
     assert workspace_button["aria-expanded"] == "false"
     assert workspace_button["aria-label"]
-    for button_id in ("toggleSidebarBtn", "themeDropdownBtn", "darkModeBtn", "statsOpenBtn"):
+    for button_id in ("themeDropdownBtn", "darkModeBtn", "statsOpenBtn"):
         assert elements[button_id]["aria-label"]
 
 
@@ -1140,7 +1333,7 @@ def test_mobile_layout_touch_targets_and_dialog_panes_have_regression_guards():
         "#bankWorkspaceSection",
         "#paperWorkspaceSection",
         "#previewSection",
-        "#latexImportModalContent",
+        ".import-workspace-content",
         "#pdfCropModalContent",
         "#pdfPagesThumbnailsContainer",
         '.question-card button[aria-label="删除题目"]',
@@ -1155,7 +1348,409 @@ def test_mobile_layout_touch_targets_and_dialog_panes_have_regression_guards():
         assert marker in css_source
 
     assert "html.init-ws-paper #paperWorkspaceSection { display: flex !important; }" in css_source
+    assert "#bankWorkspaceSection.bank-browser.hidden" in css_source
+    assert "#importWorkspaceSection.hidden" in css_source
+    assert "#recordsWorkspaceSection.hidden" in css_source
     assert "sidebar-pagination-controls" in _read(STATIC_JS_DIR / "editor.js")
+
+
+def test_application_shell_navigation_reuses_peer_workspaces():
+    elements = _index_elements()
+    index_source = _read(INDEX_PATH)
+    css_source = _read(CSS_PATH)
+    api_source = _read(STATIC_JS_DIR / "api.js")
+    import_source = _read(STATIC_JS_DIR / "import.js")
+    paper_source = _read(STATIC_JS_DIR / "paper.js")
+
+    assert elements["appNavigation"]["aria-label"] == "PhysicsBank 主导航"
+    assert elements["appNavPrimary"]["aria-label"] == "主要工作区"
+    assert elements["appNavDashboard"]["data-app-nav-target"] == "dashboard"
+    assert elements["appNavDashboard"]["aria-current"] == "page"
+    assert elements["appNavBank"]["data-app-nav-target"] == "bank"
+    assert elements["appNavImport"]["data-app-nav-target"] == "import"
+    assert elements["appNavPaper"]["data-app-nav-target"] == "paper"
+    assert elements["appNavRecords"]["data-app-nav-target"] == "records"
+
+    assert "selectWorkspace('dashboard', '工作台')" in index_source
+    assert "selectWorkspace('bank', '题库管理')" in index_source
+    assert "selectWorkspace('import', '导入中心')" in index_source
+    assert "selectWorkspace('paper', '智能组卷')" in index_source
+    assert "openSavedPapersModal()" in index_source
+    assert 'id="appContentShell"' in index_source
+
+    assert "window.setAppNavigationActive = function(targetId)" in api_source
+    assert "button.setAttribute('aria-current', 'page')" in api_source
+    assert "window.setAppNavigationActive(workspaceId)" in api_source
+    assert "function openImportModal()" in import_source
+    assert "window.selectWorkspace('import', '导入中心')" in import_source
+    assert "const importWorkspaceSection = document.getElementById('importWorkspaceSection')" in paper_source
+    assert "mainWorkspaceContainer.insertBefore(importWorkspaceSection, paperWorkspaceSection)" in paper_source
+    assert "workspaceId === 'import'" in paper_source
+    assert "importSec.classList.remove('hidden')" in paper_source
+    assert "workspaceId === 'records'" in paper_source
+    assert "recordsSec.classList.remove('hidden')" in paper_source
+    assert "workspaceId === 'dashboard'" in paper_source
+    assert "dashboardSec.classList.remove('hidden')" in paper_source
+
+    for marker in (
+        ".app-navigation",
+        ".app-content-shell",
+        '.app-nav-item[aria-current="page"]',
+        "grid-template-columns: repeat(5, minmax(0, 1fr))",
+        "padding-bottom: 64px",
+    ):
+        assert marker in css_source
+
+
+def test_dashboard_workspace_reuses_read_only_metrics_and_existing_workflows():
+    elements = _index_elements()
+    index_source = _read(INDEX_PATH)
+    css_source = _read(CSS_PATH)
+    dashboard_source = _read(STATIC_JS_DIR / "dashboard.js")
+    editor_source = _read(STATIC_JS_DIR / "editor.js")
+    paper_source = _read(STATIC_JS_DIR / "paper.js")
+
+    for element_id in (
+        "dashboardWorkspaceSection",
+        "dashboardTitle",
+        "dashboardQuestionTotal",
+        "dashboardReviewCount",
+        "dashboardPaperCount",
+        "dashboardMonthAdditions",
+        "dashboardTaskList",
+        "dashboardActivityList",
+    ):
+        assert element_id in elements
+
+    for marker in (
+        "fetch('/api/stats')",
+        "fetch('/api/papers')",
+        "window.loadDashboardData = loadDashboardData",
+        "selectWorkspace('import', '导入中心')",
+        "window.startManualQuestion = startManualQuestion",
+        "window.resumeSavedPaper = resumeSavedPaper",
+        "window.openNewQuestionEditor",
+        "window.loadSavedPaper",
+    ):
+        assert marker in dashboard_source or marker in index_source
+
+    assert 'id="appNavDashboard"' in index_source
+    assert 'onclick="startManualQuestion()"' in index_source
+    assert "onclick=\"resumeSavedPaper(" in dashboard_source
+    assert "html.init-ws-dashboard #dashboardWorkspaceSection" in css_source
+    assert ".dashboard-stat-grid" in css_source
+    assert ".dashboard-quick-actions" in css_source
+    assert ".dashboard-main-grid" in css_source
+    assert "align-items: stretch" in css_source
+    assert ".dashboard-task-panel" in css_source
+    assert "__preserveNewQuestionEditor" in editor_source
+    assert "classList.remove('init-ws-dashboard', 'init-ws-paper')" in paper_source
+
+
+def test_dashboard_monthly_counts_follow_backend_beijing_dates():
+    import os
+
+    node = shutil.which("node")
+    assert node, "Node.js is required for the frontend executable regression"
+    script = r'''
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
+const source = fs.readFileSync(process.argv[1], 'utf8');
+const dailyAdds = {
+  '2026-09-30': 9, '2026-10-01': 2,
+  '2026-12-31': 5, '2027-01-01': 3
+};
+const cases = [
+  ['2026-09-30T23:59:59+08:00', 9],
+  ['2026-10-01T00:00:00+08:00', 2],
+  ['2026-10-01T07:59:59+08:00', 2],
+  ['2026-10-01T08:00:00+08:00', 2],
+  ['2026-12-31T23:59:59+08:00', 5],
+  ['2027-01-01T00:00:00+08:00', 3]
+];
+(async () => {
+  for (const [instant, expected] of cases) {
+    const now = Date.parse(instant);
+    class FixedDate extends Date {
+      constructor(...args) { super(...(args.length ? args : [now])); }
+      static now() { return now; }
+    }
+    const nodes = new Map();
+    const document = {
+      getElementById(id) {
+        if (!nodes.has(id)) nodes.set(id, {
+          textContent: '', innerHTML: '', setAttribute() {}, removeAttribute() {}
+        });
+        return nodes.get(id);
+      },
+      addEventListener() {}
+    };
+    const context = vm.createContext({
+      window: {}, document, Date: FixedDate, Intl, console,
+      fetch: async url => ({
+        ok: true,
+        json: async () => url === '/api/stats'
+          ? {status:'success', total_count:19, daily_adds:dailyAdds}
+          : {status:'success', data:[]}
+      })
+    });
+    vm.runInContext(source, context);
+    await context.window.loadDashboardData();
+    assert.equal(nodes.get('dashboardMonthAdditions').textContent, String(expected), instant);
+    assert.ok(nodes.get('dashboardActivityList').innerHTML.includes(`本月新增题目 ${expected} 道`), instant);
+  }
+})().catch(error => { console.error(error); process.exitCode = 1; });
+'''
+    for timezone in ("UTC", "Asia/Shanghai", "America/Los_Angeles"):
+        result = subprocess.run(
+            [node, "-e", script, str(STATIC_JS_DIR / "dashboard.js")],
+            env=dict(os.environ, TZ=timezone), text=True, capture_output=True, timeout=10,
+        )
+        assert result.returncode == 0, f"{timezone}: {result.stderr}"
+
+
+def test_saved_paper_records_reuses_existing_actions_in_a_dedicated_workspace():
+    elements = _index_elements()
+    index_source = _read(INDEX_PATH)
+    css_source = _read(CSS_PATH)
+    paper_source = _read(STATIC_JS_DIR / "paper.js")
+
+    for element_id in (
+        "recordsWorkspaceSection",
+        "recordsWorkspaceTitle",
+        "savedPaperTotalCount",
+        "recordsListTitle",
+        "savedPapersListContainer",
+    ):
+        assert element_id in elements
+
+    assert elements["recordsWorkspaceSection"]["aria-labelledby"] == "recordsWorkspaceTitle"
+    for marker in (
+        "records-workspace-shell",
+        "records-workspace-header",
+        "records-overview",
+        "records-list-panel",
+        "records-list-container",
+        "records-paper-grid",
+        "saved-paper-card",
+        "saved-paper-card-actions",
+    ):
+        assert marker in index_source or marker in paper_source
+        assert f".{marker}" in css_source
+
+    for marker in (
+        "async function renderSavedPapersWorkspace()",
+        "fetch('/api/papers')",
+        "loadSavedPaper(${paperId})",
+        "quickExportPaperPdf(${paperId})",
+        "deleteSavedPaper(${paperId})",
+        "window.selectWorkspace('records', '试卷记录')",
+        "window.selectWorkspace('paper', '智能组卷')",
+    ):
+        assert marker in paper_source
+
+
+def test_import_center_reuses_existing_pipeline_in_a_dedicated_workspace():
+    elements = _index_elements()
+    index_source = _read(INDEX_PATH)
+    css_source = _read(CSS_PATH)
+    import_source = _read(STATIC_JS_DIR / "import.js")
+
+    for element_id in (
+        "importWorkspaceSection",
+        "importWorkspaceTitle",
+        "importWorkspaceContent",
+        "importInputPane",
+        "importPaperTitle",
+        "texDropzone",
+        "texFileInput",
+        "importLatexContent",
+        "texImagesSection",
+        "imagesDropzone",
+        "imagesFileInput",
+        "importGenerateAnswers",
+        "pdfPageRangeContainer",
+        "pdfPageRange",
+        "runParseBtn",
+        "resetAllImportBtn",
+        "importReviewPane",
+        "importPlaceholder",
+        "importLoadingState",
+        "importLogsConsole",
+        "btnCancelImport",
+        "parsedQuestionsWrapper",
+        "parsedCardsContainer",
+        "saveAllParsedBtn",
+    ):
+        assert element_id in elements
+
+    for marker in (
+        "import-workspace-section",
+        "import-workspace-shell",
+        "import-workspace-header",
+        "import-workspace-heading",
+        "import-workspace-steps",
+        "import-workspace-content",
+        "import-source-pane",
+        "import-result-pane",
+        "import-config-card",
+        "import-primary-actions",
+        "import-result-placeholder",
+    ):
+        assert marker in index_source
+
+    assert "PDF、Word 与 LaTeX 试卷的拆解、审查和批量入库" in index_source
+    assert "runAIPaperParse()" in index_source
+    assert "confirmClearAllParsed()" in index_source
+    assert "saveAllParsedQuestions()" in index_source
+    assert "function openImportModal()" in import_source
+    assert "function closeImportModal()" in import_source
+    assert "Import center workspace" in css_source
+    assert ".import-workspace-section" in css_source
+    assert "#importInputPane.import-source-pane" in css_source
+    assert "#importReviewPane.import-result-pane" in css_source
+
+    workspace = elements["importWorkspaceSection"]
+    assert "role" not in workspace
+    assert "aria-modal" not in workspace
+    assert workspace["aria-labelledby"] == "importWorkspaceTitle"
+
+
+def test_smart_paper_studio_uses_clear_peer_panels_without_replacing_workflows():
+    elements = _index_elements()
+    index_source = _read(INDEX_PATH)
+    css_source = _read(CSS_PATH)
+    paper_source = _read(STATIC_JS_DIR / "paper.js")
+
+    for element_id in (
+        "paperWorkspaceSection",
+        "paperFilterSection",
+        "paperQuestionStream",
+        "paperSplitResizer",
+        "paperCanvasSection",
+    ):
+        assert element_id in elements
+
+    for control_id in ("togglePaperFilterBtn", "paperFilterToggleIcon", "paperFilterToggleTxt", "togglePaperMetaBtn"):
+        assert f'id="{control_id}"' in paper_source
+
+    for marker in (
+        "paper-studio-frame",
+        "workspace-command-panel",
+        "paper-studio-body",
+        "paper-library-column",
+        "paper-config-panel",
+        "paper-question-panel",
+        "paper-preview-column",
+        "paper-filter-content",
+        "paper-panel-heading",
+        "paper-live-badge",
+        "paper-split-resizer",
+        "paper-split-resizer-grip",
+    ):
+        assert marker in index_source
+        assert f".{marker}" in css_source
+
+    assert 'aria-label="组卷配置与题目资源"' in index_source
+    assert 'aria-label="试卷预览与导出"' in index_source
+    assert 'aria-label="调整题目资源和试卷预览的宽度"' in index_source
+    assert 'aria-orientation="vertical"' in index_source
+    assert "window.togglePaperFilterBar = function ()" in paper_source
+    assert "function initPaperSplitResizer()" in paper_source
+    assert "function setPaperSplitRatio(value" in paper_source
+    assert "ratioFromPointer(event.clientX)" in paper_source
+    assert "window.setPaperSplitRatio = setPaperSplitRatio" in paper_source
+    assert "function renderPart2FilterSection()" in paper_source
+    assert "function renderPart3QuestionStream()" in paper_source
+    assert "window.renderPaperCanvas = function ()" in paper_source
+    assert "savePaperToDb()" in paper_source
+    assert "exportPaperPdf('paper')" in paper_source
+    assert "exportPaperWord()" in paper_source
+
+
+def test_bank_browser_uses_detail_first_layout_and_card_based_editor_dialog():
+    elements = _index_elements()
+    index_source = _read(INDEX_PATH)
+    css_source = _read(CSS_PATH)
+    editor_source = _read(STATIC_JS_DIR / "editor.js")
+    import_source = _read(STATIC_JS_DIR / "import.js")
+
+    for element_id in (
+        "bankWorkspaceSection",
+        "sidebarSection",
+        "sidebarTopPanel",
+        "searchInput",
+        "filterType",
+        "filterDifficulty",
+        "filterCompulsory",
+        "filterChapter",
+        "filterSource",
+        "filterSort",
+        "questionsList",
+        "sidebarPagination",
+        "resizer-1",
+        "editorSection",
+        "saveQuestionBtn",
+        "questionContentPanel",
+        "answerExplanationPanel",
+        "resizer-2",
+        "previewSection",
+        "editQuestionFromPreviewBtn",
+        "questionResultSummary",
+    ):
+        assert element_id in elements
+
+    for marker in (
+        "bank-browser",
+        "bank-management-header",
+        "bank-management-actions",
+        "bank-filter-toolbar",
+        "bank-library-panel",
+        "workspace-command-bar",
+        "bank-question-pane",
+        "bank-split-resizer",
+        "bank-list-toolbar",
+        "bank-sort-control",
+        "bank-question-list",
+        "bank-detail-panel",
+        "question-editor-dialog",
+        "question-editor-modal-surface",
+        "question-editor-steps",
+        'data-editor-panel="classification"',
+        'data-editor-panel="content"',
+        'data-editor-panel="answer"',
+    ):
+        assert marker in index_source
+
+    assert 'id="filterSource"' in index_source
+    assert '<option value="desc" selected>最近更新</option>' in index_source
+    assert 'onclick="openNewQuestionEditor()"' in index_source
+    assert 'onclick="selectWorkspace(\'import\', \'导入中心\')"' in index_source
+    assert 'role="separator"' in index_source
+    assert 'aria-orientation="vertical"' in index_source
+    assert "openQuestionEditorModal('classification')" in index_source
+    assert index_source.index('class="bank-management-header') < index_source.index('class="bank-filter-toolbar"')
+    assert index_source.index('class="bank-filter-toolbar"') < index_source.index('id="sidebarSection"')
+    assert "bank-question-card" in editor_source
+    assert "bank-question-excerpt" in editor_source
+    assert "bank-question-meta" in editor_source
+    assert "function switchQuestionEditorPanel(panelId)" in editor_source
+    assert "function openQuestionEditorModal(panelId = 'classification')" in editor_source
+    assert "function closeQuestionEditorModal()" in editor_source
+    assert "function openNewQuestionEditor()" in editor_source
+    assert "function setBankSplitRatio(value" in editor_source
+    assert "ratioFromPointer(event.clientX)" in editor_source
+    assert "window.setBankSplitRatio = setBankSplitRatio" in editor_source
+    assert "summary.textContent = `共 ${totalItems} 道题`" in editor_source
+    assert "shouldAutoSelectFirstQuestion" in editor_source
+    assert "setQuestionDetailEditAvailability(true)" in editor_source
+    assert "setQuestionDetailEditAvailability(true)" in import_source
+    assert "Bank browser and card-based editor dialog" in css_source
+    assert "--bank-list-track" in css_source
+    assert "#resizer-1.bank-split-resizer" in css_source
+    assert "#previewSection.bank-detail-panel" in css_source
+    assert "#editorSection.question-editor-dialog" in css_source
 
 
 def test_shared_tikz_workbench_is_multimodal_contextual_and_persistent():
@@ -1268,6 +1863,39 @@ def test_paper_question_answers_are_collapsible_and_loaded_on_demand():
         assert marker in paper_source
 
 
+def test_final_ui_polish_shares_rhythm_feedback_and_dark_surfaces():
+    css_source = _read(CSS_PATH)
+    index_source = _read(INDEX_PATH)
+    editor_source = _read(STATIC_JS_DIR / "editor.js")
+    paper_source = _read(STATIC_JS_DIR / "paper.js")
+    rendered_sources = "\n".join((index_source, editor_source, paper_source))
+
+    for token in (
+        "--workspace-padding",
+        "--workspace-gap",
+        "--workspace-radius",
+        "--workspace-card-radius",
+        "--workspace-border",
+        "--control-transition",
+    ):
+        assert token in css_source
+
+    for state_class in ("ui-state-loading", "ui-state-empty", "ui-state-error"):
+        assert state_class in rendered_sources
+
+    for state_class in ("ui-state-icon", "ui-state-title", "ui-state-description"):
+        assert state_class in rendered_sources
+        assert f".{state_class}" in css_source
+
+    assert ".ui-state.hidden" in css_source
+    assert ".dark #paperQuestionStream > .space-y-4" in css_source
+    assert ".dark .records-primary-action" in css_source
+    assert ".dark .saved-paper-pdf-action" in css_source
+    assert ".dark .import-workspace-heading h3" in css_source
+    assert "min-height: min(520px, calc(100dvh - 180px))" in css_source
+    assert 'role="status" aria-live="polite"' in index_source
+
+
 def test_reduced_motion_dark_contrast_and_busy_feedback_are_explicit():
     css_source = _read(CSS_PATH)
     index_source = _read(INDEX_PATH)
@@ -1307,6 +1935,7 @@ def test_reduced_motion_dark_contrast_and_busy_feedback_are_explicit():
 
 def test_sidebar_uses_server_pagination_and_latest_request_wins():
     editor_source = _read(STATIC_JS_DIR / "editor.js")
+    import_source = _read(STATIC_JS_DIR / "import.js")
     load_start = editor_source.index("function loadQuestions(retryCount = 0)")
     load_end = editor_source.index("//       SIDEBAR PAGINATION SYSTEM HELPERS", load_start)
     load_source = editor_source[load_start:load_end]
@@ -1330,6 +1959,10 @@ def test_sidebar_uses_server_pagination_and_latest_request_wins():
 
     assert "questions.sort(" not in load_source
     assert "questions.slice(" not in load_source
+    assert "selectQuestion(questions[0], { silent: true })" in load_source
+    assert "function selectQuestion(item, options = {})" in import_source
+    assert "if (!silent)" in import_source
+    assert "showToast(`题目 #${fullItem.seq_num} 载入成功`)" in import_source
 
 
 def test_paper_bank_stream_uses_server_pagination_and_latest_request_wins():
@@ -1638,6 +2271,38 @@ global.console = { ...console, error() {} };
         capture_output=True,
         check=False,
     )
+    assert result.returncode == 0, result.stderr
+
+
+def test_paper_pagination_scrolls_only_the_question_list():
+    source = _read(STATIC_JS_DIR / "paper.js")
+    start = source.index("    function scrollPaperQuestionStreamToTop()")
+    end = source.index("    window.retryPaperBankQuestions", start)
+    script = r'''
+const assert = require('assert');
+const root = { scrollTop: 0 };
+const preview = { scrollTop: 100 };
+const stream = { scrollTop: 2000 };
+const top = { scrollIntoView() { root.scrollTop = 367; } };
+let mounted = true;
+const document = { getElementById(id) {
+  if (id === 'paperQuestionStream') return mounted ? stream : null;
+  if (id === 'paperQuestionStreamTop') return top;
+  if (id === 'a4PaperPreviewSheet') return preview;
+  return null;
+}};
+''' + source[start:end] + r'''
+scrollPaperQuestionStreamToTop();
+assert.equal(stream.scrollTop, 0);
+assert.equal(root.scrollTop, 0, 'pagination must not shift the whole page');
+assert.equal(preview.scrollTop, 100, 'pagination must preserve the paper preview position');
+mounted = false;
+scrollPaperQuestionStreamToTop();
+assert.equal(root.scrollTop, 0);
+'''
+    node = shutil.which("node")
+    assert node, "Node.js is required for the frontend executable regression"
+    result = subprocess.run([node, "-e", script], text=True, capture_output=True, timeout=10)
     assert result.returncode == 0, result.stderr
 
 

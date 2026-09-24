@@ -90,7 +90,10 @@
                 window.invalidatePendingQuestionDetailLoad();
             }
             EditorState.reset();
-            document.getElementById('editorTitle').textContent = '录入新数学题';
+            if (typeof window.setQuestionDetailEditAvailability === 'function') {
+                window.setQuestionDetailEditAvailability(false);
+            }
+            document.getElementById('editorTitle').textContent = '录入新物理题';
             
             document.getElementById('editContent').value = '';
             document.getElementById('editSource').value = '';
@@ -172,7 +175,7 @@
                 }
                 cancelAllOcr(); // Cancel any active OCR requests!
                 EditorState.reset();
-                document.getElementById('editorTitle').textContent = '录入新数学题';
+                document.getElementById('editorTitle').textContent = '录入新物理题';
                 
                 document.getElementById('editContent').value = '';
                 document.getElementById('editSource').value = '';
@@ -225,7 +228,10 @@
                 window.invalidatePendingQuestionDetailLoad();
             }
             EditorState.reset();
-            document.getElementById('editorTitle').textContent = '录入新数学题';
+            if (typeof window.setQuestionDetailEditAvailability === 'function') {
+                window.setQuestionDetailEditAvailability(false);
+            }
+            document.getElementById('editorTitle').textContent = '录入新物理题';
 
             document.getElementById('editContent').value = '';
             document.getElementById('editSource').value = '';
@@ -281,20 +287,36 @@
             // Reload list styling selection
             loadQuestions();
             
-            showToast('开始录入新数学题！');
+            showToast('开始录入新物理题！');
 
             // Reset the original state directly from the DOM!
             backupEditorState(null, null);
         }
 
-        // Load all questions to populate the related question dropdown list
-        function refreshRelatedDropdown(selectedId = "") {
-            fetch('/api/questions')
-                .then(r => r.json())
+        let relatedListLoadSequence = 0;
+        let relatedDropdownLoadSequence = 0;
+
+        // Load all questions to populate the related question dropdown list.
+        // Preserve selections made while either association GET is pending.
+        function refreshRelatedDropdown(selectedId = "", options = {}) {
+            const session = options.session || EditorState.snapshot();
+            const sequence = ++relatedDropdownLoadSequence;
+            const initialValue = options.expectedValue !== undefined
+                ? options.expectedValue : document.getElementById('editRelatedQuestion').value;
+            return fetch('/api/questions')
+                .then(r => {
+                    if (!r.ok) throw new Error('无法加载关联题目选项');
+                    return r.json();
+                })
                 .then(questions => {
+                    if (!EditorState.isCurrent(session) || sequence !== relatedDropdownLoadSequence
+                            || (options.isCurrent && !options.isCurrent())) return false;
+                    if (!Array.isArray(questions)) throw new Error('关联题目选项格式错误');
                     const dropdown = document.getElementById('editRelatedQuestion');
                     const numInput = document.getElementById('editRelatedQuestionNum');
-                    if (!dropdown) return;
+                    if (!dropdown) return false;
+                    const selectionChanged = dropdown.value !== String(initialValue || '');
+                    const selection = selectionChanged ? dropdown.value : String(selectedId || '');
                     
                     dropdown.innerHTML = '<option value="">-- 选择要关联的题目 (可选) --</option>';
                     
@@ -318,7 +340,7 @@
                         option.setAttribute('data-seq-num', q.seq_num);
                         option.textContent = optionText;
                         
-                        if (String(q.id) === String(selectedId)) {
+                        if (String(q.id) === selection) {
                             option.selected = true;
                             foundSelectedSeq = q.seq_num;
                         }
@@ -328,9 +350,14 @@
                     if (numInput) {
                         numInput.value = foundSelectedSeq;
                     }
+                    if (options.commitBaseline) {
+                        commitEditorRelatedBaseline(session, selectedId);
+                    }
+                    return true;
                 })
                 .catch(err => {
                     console.error('Failed to load related questions list:', err);
+                    return false;
                 });
         }
 
@@ -353,11 +380,14 @@
                 return;
             }
 
+            const session = EditorState.snapshot();
+            const sequence = ++relatedListLoadSequence;
+            ++relatedDropdownLoadSequence;
             try {
                 const formData = new FormData();
                 formData.append('target_id', targetId);
 
-                const res = await fetch(`/api/questions/${EditorState.questionId}/associate`, {
+                const res = await fetch(`/api/questions/${session.questionId}/associate`, {
                     method: 'POST',
                     headers: {
                         'X-Local-Token': localStorage.getItem('local_token') || ''
@@ -366,14 +396,16 @@
                 });
 
                 const data = await res.json();
+                if (!EditorState.isCurrent(session) || sequence !== relatedListLoadSequence) return false;
                 if (res.ok && data.status === 'success') {
-                    const selectedOpt = targetSelect.options[targetSelect.selectedIndex];
+                    commitEditorRelatedBaseline(session, targetId);
+                    const selectedOpt = Array.from(targetSelect.options).find(option => option.value === targetId);
                     const seqNum = selectedOpt ? selectedOpt.getAttribute('data-seq-num') : '';
                     showToast(`成功与题目 #${seqNum || targetId} 建立关联绑定！`, 'success');
 
                     // 刷新右侧预览区的关联变式题目卡片及下拉框
                     if (typeof loadAssociatedQuestionsInList === 'function') {
-                        loadAssociatedQuestionsInList(EditorState.questionId);
+                        await loadAssociatedQuestionsInList(session.questionId, targetId);
                     }
                 } else {
                     showToast(data.detail || data.message || '关联建立失败', 'error');
@@ -396,15 +428,26 @@
                 return;
             }
 
-            fetch(`/api/questions/${EditorState.questionId}/associated`, { method: 'DELETE' })
-                .then(r => r.json())
+            const session = EditorState.snapshot();
+            const expectedValue = document.getElementById('editRelatedQuestion').value;
+            const sequence = ++relatedListLoadSequence;
+            ++relatedDropdownLoadSequence;
+            return fetch(`/api/questions/${session.questionId}/associated`, { method: 'DELETE' })
+                .then(r => {
+                    if (!r.ok) throw new Error('解除关联请求失败');
+                    return r.json();
+                })
                 .then(data => {
+                    if (!EditorState.isCurrent(session) || sequence !== relatedListLoadSequence) return false;
                     if (data.status === 'success') {
+                        commitEditorRelatedBaseline(session, '');
                         // Clear UI
                         const dropdown = document.getElementById('editRelatedQuestion');
                         const numInput = document.getElementById('editRelatedQuestionNum');
-                        if (dropdown) dropdown.value = '';
-                        if (numInput) numInput.value = '';
+                        if (dropdown && dropdown.value === expectedValue) {
+                            dropdown.value = '';
+                            if (numInput) numInput.value = '';
+                        }
 
                         // Hide associated list in preview
                         const wrapper = document.getElementById('paperAssociatedWrapper');
@@ -424,20 +467,31 @@
         }
 
         // Fetch associated questions under transitive group and populate live preview
-        function loadAssociatedQuestionsInList(questionId) {
+        function loadAssociatedQuestionsInList(questionId, expectedValue) {
+            const session = EditorState.snapshot();
+            const sequence = ++relatedListLoadSequence;
+            ++relatedDropdownLoadSequence;
+            const isCurrent = () => EditorState.isCurrent(session)
+                && sequence === relatedListLoadSequence;
+            const selectionAtRequest = expectedValue !== undefined
+                ? expectedValue : document.getElementById('editRelatedQuestion').value;
             const wrapper = document.getElementById('paperAssociatedWrapper');
             const container = document.getElementById('paperAssociatedList');
             if (wrapper) wrapper.classList.add('hidden');
             if (container) container.innerHTML = '';
             
             if (!questionId) {
-                refreshRelatedDropdown("");
-                return;
+                return refreshRelatedDropdown('', { session, isCurrent, expectedValue: selectionAtRequest });
             }
             
-            fetch(`/api/questions/${questionId}/associated`)
-                .then(r => r.json())
+            return fetch(`/api/questions/${questionId}/associated`)
+                .then(r => {
+                    if (!r.ok) throw new Error('无法加载已关联题目');
+                    return r.json();
+                })
                 .then(list => {
+                    if (!isCurrent()) return false;
+                    if (!Array.isArray(list)) throw new Error('已关联题目格式错误');
                     let associatedId = "";
                     if (list.length > 0) {
                         associatedId = list[0].id;
@@ -461,11 +515,13 @@
                             if (container) container.appendChild(item);
                         });
                     }
-                    refreshRelatedDropdown(associatedId);
+                    return refreshRelatedDropdown(associatedId, {
+                        session, isCurrent, expectedValue: selectionAtRequest, commitBaseline: true
+                    });
                 })
                 .catch(err => {
                     console.error('Failed to load associated questions list:', err);
-                    refreshRelatedDropdown("");
+                    return false;
                 });
         }
 
@@ -517,6 +573,7 @@
             } else {
                 button.innerHTML = '<i class="fa-solid fa-floppy-disk"></i><span>保存</span>';
             }
+            if (typeof refreshEditorFeedback === 'function') refreshEditorFeedback();
         }
 
         function invalidatePendingQuestionDetailLoad() {
@@ -528,7 +585,8 @@
 
         // Select a question to Edit & Preview. The editor identity is committed
         // only after the requested detail payload has arrived successfully.
-        function selectQuestion(item) {
+        function selectQuestion(item, options = {}) {
+            const silent = options && options.silent === true;
             if (blockEditorSessionChangeWhileSaving()) {
                 return;
             }
@@ -545,6 +603,9 @@
             const figureLayoutPendingAtRequest = typeof window.hasPendingFigureLayoutWrite === 'function'
                 && window.hasPendingFigureLayoutWrite(requestedQuestionId);
             questionDetailLoading = true;
+            if (typeof window.setQuestionDetailEditAvailability === 'function') {
+                window.setQuestionDetailEditAvailability(false);
+            }
             updateQuestionSaveButtonState();
 
             // Lazy-load details asynchronously
@@ -583,7 +644,7 @@
                         }
                     }
                     EditorState.useQuestion(fullItem);
-                    document.getElementById('editorTitle').textContent = '编辑数学题';
+                    document.getElementById('editorTitle').textContent = '编辑物理题';
 
                     // Clear previous OCR state only after the question switch commits.
                     clearContentOcrPreview();
@@ -629,8 +690,8 @@
                     }
                     
                     // Cascade bindings
-                    document.getElementById('editQType').value = fullItem.question_type;
-                    document.getElementById('editDifficulty').value = fullItem.difficulty;
+                    setEditorMetadataValue(document.getElementById('editQType'), fullItem.question_type);
+                    setEditorMetadataValue(document.getElementById('editDifficulty'), fullItem.difficulty);
                     if (document.getElementById('editTags')) {
                         document.getElementById('editTags').value = fullItem.tags || '';
                     }
@@ -670,21 +731,32 @@
                     renderEditorPaperMeta();
                     
                     // Load associated questions list and handle group selection
+                    document.getElementById('editRelatedQuestion').value = '';
+                    document.getElementById('editRelatedQuestionNum').value = '';
                     loadAssociatedQuestionsInList(fullItem.id);
                     
                     // Scroll editor
                     document.getElementById('editorSection').scrollTop = 0;
                     
                     // Scroll to card active or highlight in current view
-                    showToast(`题目 #${fullItem.seq_num} 载入成功`);
+                    if (!silent) {
+                        if (typeof window.showBankDetail === 'function') window.showBankDetail();
+                        showToast(`题目 #${fullItem.seq_num} 载入成功`);
+                    }
          
                     // Backup the original loaded question state directly from the DOM!
                     backupEditorState(fullItem.id, null);
+                    if (typeof window.setQuestionDetailEditAvailability === 'function') {
+                        window.setQuestionDetailEditAvailability(true);
+                    }
                 })
                 .catch(err => {
                     if (loadSequence !== questionDetailLoadSequence) return;
                     console.error('Failed to load full question details:', err);
                     showToast('获取题目详情失败: ' + err.message, 'error');
+                    if (typeof window.setQuestionDetailEditAvailability === 'function') {
+                        window.setQuestionDetailEditAvailability(false);
+                    }
                 })
                 .finally(() => {
                     if (loadSequence !== questionDetailLoadSequence) return;
@@ -749,7 +821,12 @@
                 const tags = rawTags.trim();
                 const figureLayout = FigureLayoutState.snapshot();
                 
+                const editorModal = document.getElementById('editorSection');
+                if (editorModal) editorModal.dataset.validationAttempted = 'true';
+                if (typeof refreshEditorFeedback === 'function') refreshEditorFeedback();
                 if (!content.trim()) {
+                    if (typeof switchQuestionEditorPanel === 'function') switchQuestionEditorPanel('content');
+                    document.getElementById('editContent').focus();
                     showToast('保存失败：题干内容不能为空！', 'error');
                     return false;
                 }
@@ -758,6 +835,7 @@
                 if (!skipCheck && (!compulsory || !chapter)) {
                     const choice = await showMissingCompulsoryModal();
                     if (choice === 'manual') {
+                        if (typeof switchQuestionEditorPanel === 'function') switchQuestionEditorPanel('classification');
                         if (!compulsory) {
                             const compSelect = document.getElementById('editCompulsory');
                             if (compSelect) {
@@ -826,6 +904,7 @@
                     answer_tikz_assets: JSON.stringify(TikzState.answerAssets),
                     figure_align: figureLayout.figure_align,
                     figure_size: figureLayout.figure_size,
+                    image_layouts: figureLayout.image_layouts || {},
                     figure_align_custom: figureLayout.figure_align_custom,
                     tags: rawTags
                 });
@@ -852,6 +931,7 @@
                 formData.append('answer_tikz_assets', JSON.stringify(TikzState.answerAssets));
                 formData.append('figure_align', figureLayout.figure_align);
                 formData.append('figure_size', figureLayout.figure_size);
+                formData.append('image_layouts', JSON.stringify(figureLayout.image_layouts || {}));
                 formData.append(
                     'figure_align_custom',
                     figureLayout.figure_align_custom ? 'true' : 'false'
@@ -963,7 +1043,6 @@
                         // Reload list, dropdown, and autocomplete selectors
                         loadQuestions();
                         loadCategories();
-                        refreshRelatedDropdown(relatedQuestionId);
 
                         if (!editorSession.questionId && editorSessionStillCurrent) {
                             // The POST response already contains the complete saved
@@ -972,12 +1051,23 @@
                             // input typed after the POST response arrived.
                             EditorState.useQuestion(data.question);
                             backupEditorState(data.question.id, null, requestBackupSnapshot);
-                            document.getElementById('editorTitle').textContent = '编辑数学题';
+                            document.getElementById('editorTitle').textContent = '编辑物理题';
                             if (!requestStillVisible) {
                                 showToast('题目已保存；保存后继续输入的内容仍待再次保存', 'info');
                             }
                         } else if (editorSessionStillCurrent) {
                             backupEditorState(data.question.id, null, requestBackupSnapshot);
+                        }
+                        if (editorSessionStillCurrent) {
+                            refreshRelatedDropdown(relatedQuestionId, { expectedValue: relatedQuestionId });
+                            if (typeof window.setQuestionDetailEditAvailability === 'function') {
+                                window.setQuestionDetailEditAvailability(true);
+                            }
+                            const editorDialog = document.getElementById('editorSection');
+                            if (editorDialog) {
+                                delete editorDialog.dataset.newQuestionMode;
+                                delete editorDialog.dataset.returnQuestionId;
+                            }
                         }
                         return true;
                     } else {
@@ -1278,20 +1368,25 @@
             return true;
         }
 
+
+        function updateImportSourceView(kind) {
+            const details = document.getElementById('importSourceDetails');
+            const summary = document.getElementById('importFileSummary');
+            const images = document.getElementById('texImagesSection');
+            if (!details || !summary || !images) return;
+            const binary = kind === 'pdf' || kind === 'docx';
+            details.hidden = binary;
+            details.open = kind === 'tex';
+            images.hidden = kind !== 'tex';
+            summary.classList.toggle('hidden', !binary);
+            summary.textContent = binary ? (kind === 'pdf' ? 'PDF 已选择。请设置页码范围与识别策略，然后开始解析。' : 'Word 已选择。将提取正文、公式和插图，结果可逐题校对。') : '';
+        }
+
+
         function openImportModal() {
-            const modal = document.getElementById('latexImportModal');
-            modal.classList.remove('hidden');
-            window.MathBankModal.open(modal, {
-                onEscape: () => {
-                    if (window.currentPdfTaskId) cancelCurrentImportTask();
-                    else closeImportModal();
-                }
-            });
-            setTimeout(() => {
-                modal.classList.remove('opacity-0');
-                modal.querySelector('div').classList.remove('scale-95');
-                modal.querySelector('div').classList.add('scale-100');
-            }, 50);
+            if (typeof window.selectWorkspace === 'function') {
+                window.selectWorkspace('import', '导入中心');
+            }
         }
 
         function closeImportModal() {
@@ -1301,15 +1396,26 @@
             if (typeof performOrphanedTempCropsCleanup === 'function') {
                 performOrphanedTempCropsCleanup();
             }
-            const modal = document.getElementById('latexImportModal');
-            window.MathBankModal.close(modal);
-            modal.classList.add('opacity-0');
-            modal.querySelector('div').classList.remove('scale-100');
-            modal.querySelector('div').classList.add('scale-95');
-            setTimeout(() => {
-                modal.classList.add('hidden');
-            }, 300);
+            const workspace = document.getElementById('importWorkspaceSection');
+            const returnNavTarget = workspace && workspace.dataset.returnNavTarget
+                ? workspace.dataset.returnNavTarget
+                : 'bank';
+            if (workspace) delete workspace.dataset.returnNavTarget;
+            if (typeof window.selectWorkspace === 'function') {
+                const workspaceName = returnNavTarget === 'paper'
+                    ? '智能组卷'
+                    : (returnNavTarget === 'dashboard' ? '工作台' : '题库管理');
+                window.selectWorkspace(returnNavTarget, workspaceName);
+            }
         }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const details = document.getElementById('importSourceDetails');
+            if (details) details.addEventListener('toggle', () => {
+                const images = document.getElementById('texImagesSection');
+                if (images && !window.currentPdfFile && !window.currentDocxFile) images.hidden = !details.open;
+            });
+        });
 
         // PDF & Crop Global States
         window.currentPdfFile = null;
@@ -1810,6 +1916,7 @@
                     texInput.value = '';
                     return;
                 }
+                updateImportSourceView(lowerFileName.endsWith('.pdf') ? 'pdf' : lowerFileName.endsWith('.docx') ? 'docx' : 'tex');
                 window.currentTexReadToken = null;
                 const texImagesSection = document.getElementById('texImagesSection');
                 
@@ -1836,7 +1943,7 @@
                     texFileName.textContent = file.name;
                     texFileName.className = "text-xs text-brand-600 font-bold";
                     texFileIcon.className = "fa-solid fa-file-pdf text-brand-500 text-xl mb-1.5 animate-bounce";
-                    latexTextarea.value = `[PDF 试卷已成功载入: ${file.name}]\n总页数、高清转换与插图定位将会在点击“一键 AI 智能拆解并关联”后于后台异步执行。`;
+                    latexTextarea.value = `[PDF 试卷已成功载入: ${file.name}]\n总页数、高清转换与插图定位将会在点击“开始解析”后于后台异步执行。`;
                     latexTextarea.disabled = true;
                     
                     const titleInput = document.getElementById('importPaperTitle');
@@ -1935,7 +2042,7 @@
                     .finally(() => {
                         if (runBtn) {
                             runBtn.disabled = false;
-                            runBtn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i><span>一键 AI 智能拆解并关联</span>';
+                            runBtn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i><span>开始解析</span>';
                         }
                     });
                 }
@@ -2086,7 +2193,7 @@
 
             // Handle Word (.docx) branch
             if (window.currentDocxFile) {
-                document.getElementById('importLoadingText').textContent = '正在上传 Word 试卷并安全提取数学公式与高清插图...';
+                document.getElementById('importLoadingText').textContent = '正在上传 Word 试卷并安全提取物理公式与高清插图...';
                 appendImportLog('开始上传 Word (.docx) 试卷文件...', 'current');
                 document.getElementById('importProgressBarContainer').classList.remove('hidden');
                 document.getElementById('importProgressBar').style.width = '0%';
@@ -2144,7 +2251,7 @@
                     }
                     resetBtn.classList.remove('hidden');
                     runBtn.disabled = false;
-                    runBtn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i> <span>一键 AI 智能拆解并关联</span>';
+                    runBtn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i> <span>开始解析</span>';
                 });
                 return;
             }
@@ -2219,7 +2326,7 @@
                     }
                     resetBtn.classList.remove('hidden');
                     runBtn.disabled = false;
-                    runBtn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i> <span>一键 AI 智能拆解并关联</span>';
+                    runBtn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i> <span>开始解析</span>';
                 });
                 return;
             }
@@ -2294,7 +2401,7 @@
                     if (!isCurrentDocumentImportTask(importTaskGeneration) || !data) return;
                     if (data.status === 'success') {
                         replaceParsedQuestions(data.questions);
-                        appendImportLog(`试卷成功拆解完成！共提取出 ${parsedQuestionsData.length} 道高定数学题。`, 'success');
+                        appendImportLog(`试卷成功拆解完成！共提取出 ${parsedQuestionsData.length} 道物理题。`, 'success');
                         const texDiagnostics = data.tex_diagnostics || {};
                         const estimatedCount = texDiagnostics.question_count_estimate || 0;
                         const actualCount = texDiagnostics.question_count_actual || parsedQuestionsData.length;
@@ -2351,7 +2458,7 @@
                 .finally(() => {
                     if (!isCurrentDocumentImportTask(importTaskGeneration)) return;
                     runBtn.disabled = false;
-                    runBtn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i> <span>一键 AI 智能拆解并关联</span>';
+                    runBtn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i> <span>开始解析</span>';
                 });
         }
 
@@ -2409,7 +2516,7 @@
             const runBtn = document.getElementById('runParseBtn');
             if (runBtn) {
                 runBtn.disabled = false;
-                runBtn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i> <span>一键 AI 智能拆解并关联</span>';
+                runBtn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i> <span>开始解析</span>';
             }
             
             if (typeof showToast === 'function') {
@@ -2477,7 +2584,7 @@
                         replaceParsedQuestions(task.data || []);
                         const isWordTask = task.document_type === 'docx';
                         const documentLabel = isWordTask ? 'Word' : 'PDF';
-                        appendImportLog(`${documentLabel} 试卷分析并拆解成功！共分析出 ${parsedQuestionsData.length} 道数学题。`, 'success');
+                        appendImportLog(`${documentLabel} 试卷分析并拆解成功！共分析出 ${parsedQuestionsData.length} 道物理题。`, 'success');
                         if (isWordTask && task.diagnostics) {
                             const report = task.diagnostics;
                             const converted = (report.omml_converted || 0) + (report.mtef_converted || 0);
@@ -2511,13 +2618,17 @@
                         document.getElementById('importLoadingState').classList.add('hidden');
                         document.getElementById('parsedQuestionsWrapper').classList.remove('hidden');
                         
+                        if (task.document_type === 'pdf' && task.generate_answers === true) {
+                            processAsyncAnswerGeneration(parsedQuestionsData, parsedQuestionsGeneration);
+                        }
+
                         runBtn.disabled = false;
-                        runBtn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i> <span>一键 AI 智能拆解并关联</span>';
+                        runBtn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i> <span>开始解析</span>';
                     } else if (task.status === 'cancelled') {
                         if (!finishDocumentPoll(identity)) return;
                         document.getElementById('importLoadingState').classList.add('hidden');
                         runBtn.disabled = false;
-                        runBtn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i> <span>一键 AI 智能拆解并关联</span>';
+                        runBtn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i> <span>开始解析</span>';
                     } else if (task.status === 'error') {
                         if (!finishDocumentPoll(identity)) return;
                         appendImportLog(`分析失败: ${task.error || '未知错误'}`, 'error');
@@ -2543,7 +2654,7 @@
                         resetBtn.classList.remove('hidden');
                         
                         runBtn.disabled = false;
-                        runBtn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i> <span>一键 AI 智能拆解并关联</span>';
+                        runBtn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i> <span>开始解析</span>';
                         showToast(`${documentLabel} 拆解分析失败: ${task.error || '未知错误'}`, 'error');
                     }
                 })
@@ -2603,6 +2714,7 @@
             if (blockImportResetWhileSaving()) {
                 return false;
             }
+            updateImportSourceView('empty');
             // 清空左侧输入栏
             const titleInput = document.getElementById('importPaperTitle');
             if (titleInput) titleInput.value = '';
@@ -2687,7 +2799,7 @@
             // 重置按钮状态
             const runBtn = document.getElementById('runParseBtn');
             runBtn.disabled = false;
-            runBtn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i> <span>一键 AI 智能拆解并关联</span>';
+            runBtn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i> <span>开始解析</span>';
 
             // 清空解析结果数据
             replaceParsedQuestions([]);
@@ -3190,7 +3302,7 @@
                 EXACT_TEXT: '题干规范化后完全一致',
                 SAFE_NORMALIZATION_ONLY: '差异仅来自空格或排版写法',
                 HIGH_TEXT_SIMILARITY: '题干文本高度相似',
-                SAME_MATH_STRUCTURE: '数学结构高度相似',
+                SAME_MATH_STRUCTURE: '题目结构高度相似',
                 SAME_IMAGES: '可见配图一致',
                 IMAGE_REVIEW_REQUIRED: '配图仍需人工核对',
                 VISUAL_SIGNATURE_PENDING: '配图指纹尚未完整，需人工核对',
@@ -3199,14 +3311,14 @@
                 TIKZ_DIFF: '题干相似，但 TikZ 图形不同',
                 TYPE_DIFF: '题型不同',
                 OPTION_ORDER_CHANGED: '选项顺序已变化',
-                CRITICAL_MATH_DIFF: '数字、符号或数学条件不同',
-                CRITICAL_MATH_MATCH: '关键数学条件一致',
+                CRITICAL_MATH_DIFF: '数字、符号或物理条件不同',
+                CRITICAL_MATH_MATCH: '关键物理条件一致',
                 NUMBER_CHANGED: '数字或区间端点不同，可能是变式题',
                 RELATION_CHANGED: '等号或不等号等关系符不同',
                 QUANTIFIER_CHANGED: '任意、存在等量词条件不同',
-                VARIABLE_CHANGED: '变量或几何对象名称不同',
+                VARIABLE_CHANGED: '物理量或对象名称不同',
                 OPERATOR_CHANGED: '运算符或幂、下标结构不同',
-                MATH_STRUCTURE_CHANGED: '关键数学结构不同',
+                MATH_STRUCTURE_CHANGED: '关键题目结构不同',
                 OPTION_COUNT_DIFF: '选项数量不同',
                 FIGURE_MISSING: '其中一题缺少可见配图',
                 FIGURE_COUNT_DIFF: '可见配图数量不同',
@@ -3857,6 +3969,9 @@
                     }
                     
                     contentPrev.innerHTML = window.MathBankSafe.sanitizeRichHtml(html);
+                    contentPrev.parentElement.classList.toggle(
+                        'card-image-options-preview', !!contentPrev.querySelector('.choices-has-images')
+                    );
                     renderMathInElement(contentPrev, {
                         delimiters: [
                             {left: '$$', right: '$$', display: true},
@@ -5099,14 +5214,14 @@
                     ? `修改当前${targetLabel}绘图；预览通过后只更新这一幅图。`
                     : `创建一幅新的${targetLabel}绘图；不会覆盖已有绘图。`;
                 document.getElementById('tikzWorkbenchContextHint').textContent = normalizedTarget === 'content'
-                    ? '向 AI 提供当前题干，用于校正点名和几何关系。'
-                    : '向 AI 提供题干与已输入解答，用于校正点名和几何关系。';
+                    ? '向 AI 提供当前题干，用于校正物理量、方向和连接关系。'
+                    : '向 AI 提供题干与已输入解答，用于校正物理量、方向和连接关系。';
                 document.getElementById('tikzWorkbenchInsertHint').textContent = asset
                     ? `预览通过后只更新当前${targetLabel}绘图，不会新增副本。`
                     : `预览通过后新增到${targetLabel}当前光标位置，不会覆盖已有绘图。`;
                 document.getElementById('tikzWorkbenchReferenceHint').textContent = normalizedTarget === 'content'
                     ? '如果该图由 OCR 自动生成，此处会直接载入当时的原题图。'
-                    : '建议只截取几何插图区域，AI 将参考其拓扑、标注与实虚线。';
+                    : '建议只截取物理示意图区域，AI 将参考其连接、标注与方向。';
 
                 if (asset && asset.reference_image_path) {
                     setTikzReferencePath(
@@ -5215,7 +5330,7 @@
                     showToast('请输入绘图要求、添加参考图或填入 TikZ 源码。', 'error');
                     return;
                 }
-                setTikzWorkbenchBusy(true, 'AI 正在构造几何关系…');
+                setTikzWorkbenchBusy(true, 'AI 正在构造物理示意图…');
                 try {
                     const formData = new FormData();
                     formData.append('instruction', instruction);
@@ -5320,11 +5435,11 @@
                         if (oldPath && contentInput.value.includes(oldPath)) {
                             contentInput.value = contentInput.value.split(oldPath).join(imagePath);
                         } else if (!contentInput.value.includes(imagePath)) {
-                            insertMarkdownAtSavedCursor(contentInput, `![TikZ 几何图](${imagePath})`);
+                            insertMarkdownAtSavedCursor(contentInput, `![TikZ 物理示意图](${imagePath})`);
                         }
                         TikzState.contentAssets.splice(editingIndex, 1, nextAsset);
                     } else {
-                        insertMarkdownAtSavedCursor(contentInput, `![TikZ 几何图](${imagePath})`);
+                        insertMarkdownAtSavedCursor(contentInput, `![TikZ 物理示意图](${imagePath})`);
                         TikzState.contentAssets.push(nextAsset);
                     }
                     if (!uploadedImages.includes(imagePath)) uploadedImages.push(imagePath);
@@ -5362,11 +5477,11 @@
                     if (answerInput.value.includes(oldPath)) {
                         answerInput.value = answerInput.value.split(oldPath).join(imagePath);
                     } else {
-                        insertMarkdownAtSavedCursor(answerInput, `![TikZ 几何图](${imagePath})`);
+                        insertMarkdownAtSavedCursor(answerInput, `![TikZ 物理示意图](${imagePath})`);
                     }
                     TikzState.answerAssets.splice(editingIndex, 1, nextAsset);
                 } else {
-                    insertMarkdownAtSavedCursor(answerInput, `![TikZ 几何图](${imagePath})`);
+                    insertMarkdownAtSavedCursor(answerInput, `![TikZ 物理示意图](${imagePath})`);
                     TikzState.answerAssets.push(nextAsset);
                 }
 
@@ -5546,6 +5661,11 @@
                 formData.append('content', q.content || '');
                 formData.append('question_type', q.question_type || 'detailed_answer');
                 formData.append('stream', 'false');
+                if (typeof systemPreferSolveModel !== 'undefined') {
+                    formData.append('model', systemPreferSolveModel);
+                }
+                const thinkingToggle = document.getElementById('aiThinkingToggle');
+                formData.append('thinking', thinkingToggle && thinkingToggle.checked ? 'enabled' : 'disabled');
 
                 const res = await fetch('/api/ai/solve', {
                     method: 'POST',
@@ -5596,8 +5716,8 @@
             const needAnswersIndices = [];
             questions.forEach((q, idx) => {
                 const ans = (q.answer_markdown || '').trim();
-                // 仅对未包含解答且未被打上原版提取标记的题目自动推导
-                if (!ans || (!ans.includes('[EXTRACTED_ORIGINAL]') && ans.length < 5)) {
+                // 保留所有已有答案，包括 A、2 等简短原版答案。
+                if (!ans) {
                     needAnswersIndices.push(idx);
                 }
             });
@@ -5623,6 +5743,7 @@
             // 控制并发池 (Concurrency Limit: 3)
             const MAX_CONCURRENCY = 3;
             let finishedCount = 0;
+            let failedCount = 0;
             let currentPointer = 0;
 
             async function worker() {
@@ -5645,6 +5766,11 @@
                         formData.append('content', q.content || '');
                         formData.append('question_type', q.question_type || 'detailed_answer');
                         formData.append('stream', 'false');
+                        if (typeof systemPreferSolveModel !== 'undefined') {
+                            formData.append('model', systemPreferSolveModel);
+                        }
+                        const thinkingToggle = document.getElementById('aiThinkingToggle');
+                        formData.append('thinking', thinkingToggle && thinkingToggle.checked ? 'enabled' : 'disabled');
 
                         const res = await fetch('/api/ai/solve', {
                             method: 'POST',
@@ -5655,6 +5781,7 @@
                         });
                         if (!requestIsCurrent()) return;
 
+                        if (!res.ok) throw new Error(`HTTP ${res.status}`);
                         if (res.ok) {
                             const data = await res.json();
                             if (!requestIsCurrent()) return;
@@ -5670,10 +5797,14 @@
                                     const btn = card.querySelector('.card-solve-btn');
                                     if (btn) btn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles text-indigo-500"></i><span>重生成解析</span>';
                                 }
+                            } else {
+                                throw new Error(data.message || '生成解答失败');
                             }
                         }
                     } catch (e) {
                         if (!requestIsCurrent()) return;
+                        failedCount++;
+                        appendImportLog(`第 ${taskIdx + 1} 题解析生成失败：${e.message}，可在题目卡片中重试。`, 'warning');
                         console.error(`第 ${taskIdx + 1} 题推导解答失败:`, e);
                         if (card) {
                             renderParsedCardPreview(card, q.content || '', q.answer_markdown || '');
@@ -5688,7 +5819,7 @@
             }
             await Promise.all(workers);
             if (!requestIsCurrent()) return;
-            appendImportLog(`🎉 试卷所有空缺题目（共 ${needAnswersIndices.length} 题）的 AI 解答推导全部完成！`, 'success');
+            appendImportLog(`AI 解答生成结束：成功 ${finishedCount} 题，失败 ${failedCount} 题。`, failedCount ? 'warning' : 'success');
         }
 
         window.generateSingleAnswer = generateSingleAnswer;

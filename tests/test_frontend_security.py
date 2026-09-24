@@ -40,7 +40,7 @@ def test_untrusted_html_uses_dompurify_and_local_image_allowlist():
     assert "decodedPath.startsWith('/static/uploads/')" in api_source
     assert "url.origin !== window.location.origin" in api_source
 
-    assert "sanitizeRichHtml(preprocessFormulaForKaTeX(text))" in editor_source
+    assert "sanitizeRichHtml(preprocessFormulaForKaTeX(text, imageLayouts))" in editor_source
     assert "MathBankSafe.safeImageUrl(src)" in editor_source
     assert "MathBankSafe.safeImageUrl(m[1])" in paper_source
     assert "window.parseMarkdownWithMath(html)" in paper_source
@@ -516,16 +516,20 @@ const window = {{}};
 let parsedQuestionsData = [];
 let parsedQuestionsGeneration = 0;
 const pendingFetches = [];
-function fetch() {{
+const requests = [];
+const systemPreferSolveModel = "ZHONGZHAN_GPT/gpt-5:high";
+function fetch(url, options) {{
+  requests.push(options.body.values);
   return new Promise(resolve => pendingFetches.push(resolve));
 }}
-class FormData {{ append() {{}} }}
+class FormData {{ constructor() {{ this.values = {{}}; }} append(k, v) {{ this.values[k] = v; }} }}
 const localStorage = {{ getItem() {{ return ''; }} }};
 const logs = [];
 const toasts = [];
 function appendImportLog(message) {{ logs.push(message); }}
 function showToast(message) {{ toasts.push(message); }}
 function renderParsedCardPreview() {{}}
+function invalidateParsedDuplicateCheck() {{}}
 function makeCard() {{
   const button = {{ disabled: false, innerHTML: '' }};
   const answer = {{ value: '' }};
@@ -592,6 +596,31 @@ const document = {{ getElementById() {{ return activeCard; }} }};
   }}
   if (logs.some(message => message.includes('全部完成'))) {{
     throw new Error('stale answer queue announced completion in the new session');
+  }}
+  replaceParsedQuestions([
+    {{ content: 'original', answer_markdown: 'A' }},
+    {{ content: 'numeric', answer_markdown: '2' }},
+    {{ content: 'missing', answer_markdown: '' }}
+  ]);
+  const batch = processAsyncAnswerGeneration(parsedQuestionsData);
+  if (pendingFetches.length !== 1) throw new Error('original short answers were regenerated');
+  pendingFetches.shift()({{ ok: false, status: 502 }});
+  await batch;
+  if (!logs.some(message => message.includes('成功 0 题，失败 1 题'))) {{
+    throw new Error('failed batch was reported as successful');
+  }}
+  replaceParsedQuestions(Array.from({{ length: 4 }}, (_, i) => ({{ content: `q${{i}}`, answer_markdown: '' }})));
+  const successfulBatch = processAsyncAnswerGeneration(parsedQuestionsData);
+  if (pendingFetches.length !== 3) throw new Error('answer queue exceeded concurrency limit');
+  for (let i = 0; i < 4; i++) {{
+    pendingFetches.shift()({{ ok: true, json: async () => ({{ status: 'success', solution: 'solved' }}) }});
+    await new Promise(resolve => setImmediate(resolve));
+  }}
+  await successfulBatch;
+  if (parsedQuestionsData.some(q => q.answer_markdown !== 'solved')) throw new Error('queue did not solve all missing answers');
+  if (!logs.some(message => message.includes('成功 4 题，失败 0 题'))) throw new Error('incorrect successful batch summary');
+  if (requests.some(request => request.model !== systemPreferSolveModel || request.thinking !== 'disabled')) {{
+    throw new Error('import requests ignored configured solve settings');
   }}
 }})().catch(error => {{ console.error(error); process.exitCode = 1; }});
 """
@@ -697,7 +726,7 @@ def test_fetch_token_is_limited_to_same_origin_api_writes_and_supports_request()
 def test_question_selection_and_save_are_transactional():
     import_source = _read(STATIC_JS_DIR / "import.js")
     editor_source = _read(STATIC_JS_DIR / "editor.js")
-    select_start = import_source.index("function selectQuestion(item)")
+    select_start = import_source.index("function selectQuestion(item, options = {})")
     select_end = import_source.index("window.reloadCurrentQuestionSilently", select_start)
     select_source = import_source[select_start:select_end]
     save_start = import_source.index("function saveQuestion(skipCheck = false)")
@@ -1063,7 +1092,7 @@ def test_shared_question_preview_pipeline_is_used_by_editor_and_duplicate_review
         helper_start,
     )
     helper_source = editor_source[helper_start:helper_end]
-    parse_position = helper_source.index("preparedHtml = parseMarkdownWithMath(source)")
+    parse_position = helper_source.index("preparedHtml = parseMarkdownWithMath(source, settings.imageLayouts || {})")
     katex_position = helper_source.index("renderMathInElement(container")
     choices_position = helper_source.index("adaptChoicesGridLayout(container)")
     assert parse_position < katex_position < choices_position
@@ -1074,15 +1103,15 @@ def test_shared_question_preview_pipeline_is_used_by_editor_and_duplicate_review
     assert ".replace(/<img\\b[^>]*>/gi, '')" in helper_source
     assert "window.renderQuestionPreviewContent = renderQuestionPreviewContent;" in editor_source
 
-    parse_start = editor_source.index("function parseMarkdownWithMath(text)")
+    parse_start = editor_source.index("function parseMarkdownWithMath(text,")
     parse_end = editor_source.index("window.parseMarkdownWithMath = parseMarkdownWithMath;", parse_start)
     parse_source = editor_source[parse_start:parse_end]
-    assert "sanitizeRichHtml(preprocessFormulaForKaTeX(text))" in parse_source
+    assert "sanitizeRichHtml(preprocessFormulaForKaTeX(text, imageLayouts))" in parse_source
 
     update_start = editor_source.index("const updateContentPreview = () =>")
     update_end = editor_source.index("const updateAnswerPreview = () =>", update_start)
     update_source = editor_source[update_start:update_end]
-    assert "const preparedHtml = renderQuestionPreviewContent(previewContainer, text)" in update_source
+    assert "const preparedHtml = renderQuestionPreviewContent(previewContainer, text, { imageLayouts: FigureLayoutState.imageLayouts })" in update_source
     assert "renderQuestionPreviewContent(paperContainer, text, { preparedHtml: preparedHtml })" in update_source
     assert "renderMathInElement(" not in update_source
 
