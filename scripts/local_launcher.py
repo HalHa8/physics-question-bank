@@ -15,10 +15,12 @@ import urllib.request
 import uuid
 from pathlib import Path
 
+from mathbank import GITHUB_REPO
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PORT = 8000
 BASE_URL = f"http://127.0.0.1:{PORT}"
-REPOSITORY = "JudgePeach/math-question-bank"
+REPOSITORY = GITHUB_REPO
 IMPORT_CHECK = (
     "import fastapi,uvicorn,sqlalchemy,greenlet,colorama,multipart,dotenv,"
     "requests,PIL,docx,lxml,defusedxml,olefile,exceptiongroup,sniffio;"

@@ -10,6 +10,7 @@ from types import SimpleNamespace
 import pytest
 
 from scripts import local_launcher as launcher
+from mathbank import GITHUB_REPO
 
 
 def test_windows_entry_uses_shared_launcher():
@@ -58,13 +59,26 @@ def test_foreign_port_reports_conflict_without_starting_or_stopping(tmp_path, mo
 
 
 @pytest.mark.parametrize("ready,repo,expected", [
-    (True, launcher.REPOSITORY, True), (False, launcher.REPOSITORY, False),
+    (True, GITHUB_REPO, True), (False, GITHUB_REPO, False),
     (True, "other/app", False),
 ])
-def test_existing_service_requires_usable_mathbank_page(monkeypatch, ready, repo, expected):
+def test_existing_service_requires_usable_physicsbank_page(monkeypatch, ready, repo, expected):
     monkeypatch.setattr(launcher, "read_json", lambda route:
                         {"repo": repo} if route == "/api/version" else {"ready": ready})
     assert launcher.existing_service_ready() is expected
+
+
+def test_second_launch_reuses_running_physicsbank_service(tmp_path, monkeypatch):
+    monkeypatch.setattr(launcher, "read_json", lambda route:
+                        {"repo": GITHUB_REPO} if route == "/api/version" else {"ready": True})
+    monkeypatch.setattr(launcher, "port_in_use", lambda: True)
+    monkeypatch.setattr(launcher, "prepare_python", lambda *_: pytest.fail("environment touched"))
+    opened = []
+    monkeypatch.setattr(launcher, "open_browser", lambda: opened.append(True))
+
+    launcher.run_launcher(tmp_path)
+
+    assert opened == [True]
 
 
 def test_new_service_readiness_does_not_depend_on_launcher_pid(monkeypatch):
