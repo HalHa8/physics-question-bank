@@ -3,13 +3,18 @@
 PhysicsBank is a local-first question bank, AI-assisted solution, import, search,
 and paper-layout workbench for high-school physics. It is based on
 [JudgePeach/math-question-bank](https://github.com/JudgePeach/math-question-bank)
-and includes upstream functionality through MathBank 2.3.1, including the
-responsive workspaces, saved-paper records, formula-preserving import, image
-layout, and measured-height paper pagination.
+and includes upstream functionality through MathBank 2.4.0 and its subsequent
+main-branch commit, including PDF extraction and source-image review, Word
+import review, and school-level symbol support. Physics-specific source review
+checks units, vector directions, circuit connections, and experimental apparatus.
 
 The physics adaptation adds a 2019 PEP high-school physics curriculum, six
 physics-oriented question types, physics-specific OCR and solution prompts,
 and regular-exam defaults. Data and API keys remain local by default.
+
+For each new PhysicsBank work session, first check the upstream MathBank `main`
+branch and review any changes before integrating them. This is an interactive
+project workflow, not an unattended background updater or an automatic GitHub push.
 
 ## Run from source
 

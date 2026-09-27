@@ -1,10 +1,18 @@
 from pathlib import Path
 
+import pytest
+
+from mathbank.content_locks import _question_metadata_layout
 from mathbank.curriculums import build_default_metadata, get_curriculum_preset
+from mathbank.pdf_inspector_helper import _has_multiple_inline_formula_images
+from mathbank.pdf_source_verify import _local_block_reason
 from mathbank.prompts import (
     COMMON_OCR_PROMPT,
     build_ai_solve_prompts,
+    build_docx_source_verification_prompt,
+    build_pdf_layout_prompt,
     build_pdf_parse_system_prompt,
+    build_pdf_source_verification_prompt,
     build_tikz_draw_prompt,
 )
 
@@ -94,3 +102,63 @@ def test_upstream_workspaces_keep_physics_brand_and_defaults():
     assert 'payload.get("paper_type", "exam_19")' not in backend
     assert "'电磁感应'" in backend
     assert "'experiment'" in backend
+
+
+def test_upstream_source_review_prompts_check_physics_evidence():
+    pdf_prompt = build_pdf_source_verification_prompt([{"id": "item_001"}])
+    layout_prompt = build_pdf_layout_prompt("1. 物体沿斜面运动。", {"page_index": 0})
+    docx_prompt = build_docx_source_verification_prompt([{"id": "word_001"}])
+
+    for critical in ("单位大小写", "矢量方向", "有效数字", "电路连接", "实验装置"):
+        assert critical in pdf_prompt
+        assert critical in docx_prompt
+    assert "物理试卷" in layout_prompt
+    assert "受力图、电路图" in layout_prompt
+    assert "坐标轴物理量与单位" in layout_prompt
+
+
+@pytest.mark.parametrize("source,changed", [
+    ("1. 电阻串联，电流为2 A。", "1. 电阻并联，电流为2 A。"),
+    ("1. 电池正极接A。", "1. 电池负极接A。"),
+    ("1. 物体匀速运动。", "1. 物体加速运动。"),
+    ("1. 电压为2 V。", "1. 电压为2 mV。"),
+    ("1. 磁场方向向左。", "1. 磁场方向向右。"),
+])
+def test_pdf_review_does_not_clear_changed_physics_conditions(source, changed):
+    assert _local_block_reason(source, changed) == "condition_difference"
+
+
+@pytest.mark.parametrize("label,question_type", [
+    ("实验题", "experiment"),
+    ("计算题", "detailed_answer"),
+    ("简答题", "short_answer"),
+])
+def test_physics_question_type_prefix_is_metadata_only_when_verified(label, question_type):
+    source = f"1. （{label}）测量小车加速度。"
+    output = "1. 测量小车加速度。"
+    assert label not in _question_metadata_layout(source, {
+        "content": output,
+        "question_type": question_type,
+    })
+    assert label in _question_metadata_layout(source, {
+        "content": output,
+        "question_type": "single_choice",
+    })
+
+
+def test_inline_formula_loss_detection_uses_physics_context():
+    from types import SimpleNamespace
+
+    items = []
+    for index in range(3):
+        y = 80 + index * 40
+        items.extend([
+            SimpleNamespace(item_type="text", x=30, y=y, width=50, height=10, text="已知加速度"),
+            SimpleNamespace(item_type="image", x=84, y=y - 1, width=28, height=12, text=""),
+            SimpleNamespace(item_type="text", x=116, y=y, width=70, height=10, text="，求位移。"),
+        ])
+    assert _has_multiple_inline_formula_images(items)
+    for item in items:
+        if item.item_type == "text":
+            item.text = "图示" if item.x < 80 else "，说明现象。"
+    assert not _has_multiple_inline_formula_images(items)
