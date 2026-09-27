@@ -1,10 +1,19 @@
 # PhysicsBank：本地高中物理题库与组卷工作台
 
-[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
+[English](README_EN.md) · [AGPL-3.0 许可证](LICENSE) · [修改说明](NOTICE.md)
 
-PhysicsBank 是一个面向高中物理教师和学习者的本地题库、试题导入、AI 辅助解析与组卷排版工具。数据默认保存在自己的电脑中，支持图片 OCR、PDF/Word/LaTeX 试卷拆题、知识点分类、题目检索、Word/PDF 导出和物理示意图辅助重绘。
+PhysicsBank 基于 [JudgePeach/MathBank](https://github.com/JudgePeach/math-question-bank) 改造，面向高中物理教师和学习者。它在本机管理题目、导入试卷、辅助解析和组卷；网页界面无需前端编译，题库默认存于本地 SQLite 数据库。
 
-> 当前版本为早期物理适配版。AI 功能需要自行配置兼容 OpenAI API 格式的文本或多模态模型；PDF 编译和 TikZ 绘图需要本机安装 XeLaTeX。
+> 本项目是物理适配版，不附带可自由转载的试题库。导入的试卷、题目和图片仍受其各自的版权或使用许可约束。
+
+## 主要功能
+
+| 场景 | 能力 |
+| --- | --- |
+| 题库管理 | 录入、检索和分类图文混排题目；网页实时预览公式、图片和解析 |
+| 试卷导入 | 图片 OCR，以及 PDF、Word、LaTeX 试卷的拆题与来源核对；不确定内容保留人工复核 |
+| AI 辅助 | 按需配置模型进行解题、知识点分类、智能选题和物理示意图辅助重绘 |
+| 组卷导出 | 常规试卷的题型顺序与版式配置；导出 Word、LaTeX 源码包，以及在装有 XeLaTeX 时编译 PDF |
 
 ## 物理版优化
 
@@ -16,36 +25,37 @@ PhysicsBank 是一个面向高中物理教师和学习者的本地题库、试�
 - TikZ 提示词面向受力图、电路图、光路图、运动图像和场线图。
 - 已合入上游 2.4.0 及其后续提交的 PDF 提取、原卷图文核对、Word 导入复核和中学符号支持；原文核对增加物理量、单位、方向、极性、电路连接、实验装置等检查，物理课程与题型仍为默认配置。
 
-项目维护约定：每次继续处理 PhysicsBank 时，先检查 MathBank 上游 `main` 的新提交；若有更新，先审查并在不覆盖本地工作与题库数据的前提下合入，再处理本轮需求。这个检查发生在项目对话开始时，不代表后台自动更新，也不会自动推送到 GitHub。
+数学 A/B/S/H 课程预设和原 `exam_19` 模板仅保留旧数据兼容，不作为物理版默认入口。
 
-## 快速开始
+## 安装与启动
 
-推荐 Python 3.10 或更高版本，并使用独立虚拟环境：
+需要 Python 3.10 或更新版本。推荐先创建独立 Conda 环境，避免与 MathBank 共用依赖或数据库：
 
-```bash
+```powershell
+git clone https://github.com/HalHa8/physics-question-bank.git
+cd physics-question-bank
 conda create -n physicsbank-py310 python=3.10 -y
 conda activate physicsbank-py310
-python -m pip install -r requirements-dev.txt
+python -m pip install -r requirements.txt
 python -m uvicorn main:app --host 127.0.0.1 --port 8001
 ```
 
-浏览器访问 `http://127.0.0.1:8001`。Windows 用户也可以双击 `启动题库系统.bat`，但请确保它使用的是独立的物理版目录。
+然后打开 <http://127.0.0.1:8001/>。基础录题、检索和网页公式预览不需要 AI 密钥、LaTeX 或 Node.js。开发和运行测试时再安装 `requirements-dev.txt`。
 
-首次启动会在项目目录创建独立数据库及本地配置。以下内容已被 Git 忽略，不应上传到 GitHub：
+Windows 也可双击 `启动题库系统.bat`，它会准备项目内的 `venv` 并打开浏览器；**该启动器目前固定使用 8000 端口**。若同一台电脑上的 MathBank 已占用 8000，请按上面的命令在 8001 启动物理版，或先正常关闭占用端口的服务。不要让两个项目指向同一个目录或数据库。
 
-- `.env` 与 API 密钥
-- `*.db` 数据库
-- `data_backup/` 中的个人题库导出和备份
-- `static/uploads/` 中的题目图片
+### 可选的 AI 配置
 
-## 可选的排版软件
+需要 OCR、AI 解答或智能选题时，可在应用的 API 设置中配置服务商和模型，也可参考 `.env.example` 创建本机 `.env`。不要把真实密钥写入示例文件或提交到 Git。调用外部 AI 服务时，相应题目内容或图片会发送给所选服务商；含学生隐私或无传播许可的材料请先核对使用条件。
 
-LaTeX 不是 Python 包，因此不会随 `pip install -r requirements-dev.txt` 安装。PhysicsBank 把它设计成可选的系统级工具：
+### 可选的排版工具
+
+LaTeX 是系统级软件，不会随 Python 依赖安装：
 
 | 功能 | XeLaTeX | Pandoc |
 |---|---:|---:|
 | 题目录入、检索、分类与网页公式预览 | 不需要 | 不需要 |
-| 图片 OCR、PDF/Word/LaTeX 试卷导入 | 不需要 | 不需要 |
+| 图片 OCR、试卷导入 | 不需要 | 不需要 |
 | 导出 LaTeX 源码包 | 不需要 | 不需要 |
 | 编译 PDF 试卷和 TikZ 物理示意图 | **需要** | 不需要 |
 | 导出含可编辑公式的 Word 文档 | 仅降级路径需要 | **建议安装** |
@@ -57,27 +67,35 @@ where.exe xelatex
 xelatex --version
 ```
 
-本项目不会静默安装 TeX 发行版，因为它体积较大、属于系统级软件，并涉及安装位置、镜像源和自动补包策略等用户选择。启动诊断会显示 `latex=missing` 或检测到的实际路径。
+本项目不会静默安装 TeX 发行版。具体导出效果取决于本机工具链、字体及源题内容，尤其应人工核对电路连接、箭头方向、图像刻度和公式。
 
-## 当前限制
+## 数据与隐私
 
-- 原项目的 `exam_19` 数学模板仍作为兼容代码保留，但物理版界面不再将它作为默认模板；建议使用“常规试卷”并自定义题型顺序。
-- 课程树目前提供人教版 2019 物理大纲，其他教材版本可在设置中通过 JSON 自定义。
-- 电路图等复杂图形仍依赖 AI 输出和本地 LaTeX 环境，导出前应人工核对方向、连接与数值。
+首次启动会在**本项目目录**创建独立数据库和本地配置。下列个人数据已被 Git 忽略，公开仓库不应包含它们：
 
-## 测试
+- `.env` 与 API 密钥
+- `*.db` 题库数据库
+- `data_backup/` 中的个人备份与导出
+- `static/uploads/` 中的题目图片
 
-```bash
+升级前建议自行备份数据库与上传图片；不要把 MathBank 的数据目录直接覆盖到 PhysicsBank。软件的 AGPL 许可证适用于程序代码，不会让你导入的题目、讲义、学生数据或密钥自动变成 AGPL 内容。
+
+## 验证与开发
+
+```powershell
+python -m pip install -r requirements-dev.txt
 python -m pytest -q
 python -m pip check
 ```
 
+服务启动后可访问 `/healthz` 查看就绪状态，访问 `/api/version` 查看当前物理版版本。每次继续开发 PhysicsBank 时，先检查 MathBank 上游 `main`，审查新提交并安全适配物理默认值；这是一项会话内工作约定，不是后台自动更新，也不意味着自动推送或发布。
+
 ## 来源、修改与许可证
 
-本项目基于 [JudgePeach/math-question-bank](https://github.com/JudgePeach/math-question-bank) 修改。原项目及本修改版均依据 [GNU Affero General Public License v3.0](LICENSE) 发布。
+本项目基于 [JudgePeach/math-question-bank](https://github.com/JudgePeach/math-question-bank) 修改，保留原项目历史与版权声明，并依据 [GNU Affero General Public License v3.0](LICENSE) 发布。
 
 本修改版源代码主页：<https://github.com/HalHa8/physics-question-bank>
 
-主要修改包括高中物理课程树、物理题型、物理 AI 提示词、界面文案和试卷导出默认值，详见 [NOTICE.md](NOTICE.md)。如果把修改后的程序部署为供他人访问的网络服务，应按 AGPL-3.0 第 13 条在界面中明显提供与运行版本对应的完整源代码。
+主要修改包括高中物理课程树、物理题型、物理 AI 提示词、原卷校验、界面文案和试卷导出默认值，详见 [NOTICE.md](NOTICE.md)。若向他人提供本修改版的网络服务，须按 AGPL 要求提供**与实际运行版本对应**的完整源代码。
 
-题目、讲义、学生数据和 API 密钥不因使用本程序而自动采用 AGPL；这些内容仍受其各自来源、版权和隐私规则约束。
+题目及图片的再使用权需要另行向其来源确认。
