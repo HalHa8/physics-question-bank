@@ -570,6 +570,45 @@ def test_import_source_review_is_optional_and_retains_evidence(browser, tmp_path
     assert browser.evaluate("!document.getElementById('parsedSourceIntegrityReport')")
 
 
+def test_formula_choices_keep_each_option_on_one_line(browser):
+    result = browser.evaluate(r"""
+    (() => {
+        const previous = document.getElementById('formulaChoiceNoWrapFixture');
+        if (previous) previous.remove();
+        const host = document.createElement('section');
+        host.id = 'formulaChoiceNoWrapFixture';
+        host.style.cssText = 'position:fixed;left:0;top:0;width:520px;padding:8px;background:white;z-index:99999';
+        document.body.appendChild(host);
+        const source = String.raw`选择正确答案。\begin{choices}
+\item $y=(x-888888)^2-600000$
+\item $y=(x-888888)^2+200000$
+\item $y=(x+222222)^2-600000$
+\item $y=(x+222222)^2+200000$
+\end{choices}`;
+        renderQuestionPreviewContent(host, source);
+        adaptChoicesGridLayout(host);
+        const grid = host.querySelector('.choices-grid');
+        const items = [...grid.querySelectorAll('.choices-content')].map(content => {
+            const renderedParts = [...content.querySelectorAll('.katex .base')];
+            const lineTops = [...new Set(renderedParts.map(part => Math.round(part.getBoundingClientRect().top)))];
+            return {
+                whiteSpace: getComputedStyle(content).whiteSpace,
+                renderedParts: renderedParts.length,
+                lineCount: lineTops.length,
+                overflow: content.scrollWidth > content.clientWidth + 1,
+            };
+        });
+        const response = {columns: grid.dataset.choiceColumns, items};
+        host.remove();
+        return response;
+    })()
+    """)
+    assert result['columns'] in ('1', '2'), result
+    assert all(item['whiteSpace'] == 'nowrap' for item in result['items']), result
+    assert all(item['renderedParts'] > 0 and item['lineCount'] == 1 for item in result['items']), result
+    assert not any(item['overflow'] for item in result['items']), result
+
+
 def test_image_options_stay_in_labeled_import_editor_and_paper_cells(browser):
     paths = browser.evaluate(r"""
     (async () => {

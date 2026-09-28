@@ -102,6 +102,12 @@ if (similarlyNamed !== String.raw`\parent`) {
     assert ".exam-zh-paren-preview" in css_source
     assert "float: right;" in css_source
     assert re.search(r"\.choices-grid\s*\{[^}]*clear:\s*both;", css_source, re.DOTALL)
+    assert re.search(
+        r"\.choices-grid\s+\.choices-content\s*\{[^}]*white-space:\s*nowrap;",
+        css_source,
+        re.DOTALL,
+    )
+    assert ".choices-grid .choices-content .katex" in css_source
 
 
 def test_editor_preview_repairs_naked_math_without_touching_existing_blocks():

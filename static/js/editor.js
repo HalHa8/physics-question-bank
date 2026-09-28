@@ -2767,7 +2767,9 @@ window.normalizeEditorFractions = normalizeEditorFractions;
             const paragraphBreak = '<span class="mb-preview-paragraph-break" aria-hidden="true"></span>';
             // Keep subquestions on distinct paragraphs without adding a second
             // gap when the source already has a blank line or a hard break.
-            tempText = tempText.replace(/(?:\r?\n|\s+|[。；;!！\.]\s*)([(（]?(?:[1-9]|10|[ivxIVX]+|[①②③④⑤⑥⑦⑧⑨⑩])[)）\.]|\([1-9]\)|（[1-9]）|\([ivxIVX]+\)|（[ivxIVX]+）)(?=\s*[\u4e00-\u9fa5a-zA-Z\$])/g, paragraphBreak + '$1 ');
+            tempText = tempText.replace(/(?:\r?\n|\s+|([。；;!！\.])\s*)([(（]?(?:[1-9]|10|[ivxIVX]+|[①②③④⑤⑥⑦⑧⑨⑩])[)）\.]|\([1-9]\)|（[1-9]）|\([ivxIVX]+\)|（[ivxIVX]+）)(?=\s*[\u4e00-\u9fa5a-zA-Z\$])/g, function(match, punctuation, marker) {
+                return (punctuation || '') + paragraphBreak + marker + ' ';
+            });
 
             // 双回车起新段落；单回车仅视为空格；显式 \\\\ 保留为硬换行。
             tempText = tempText.replace(/\r\n/g, '\n')

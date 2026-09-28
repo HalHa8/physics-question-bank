@@ -21,6 +21,21 @@ const subquestions=preprocessFormulaForKaTeX('解题过程\r\n\r\n(1) 求 $x$。
 assert.equal(paragraphs(subquestions),2);
 assert.equal((subquestions.match(/<br>/g)||[]).length,0);
 assert.deepEqual(parsedFormulas(subquestions),['x']);
+for (const [source, punctuation] of [
+  ['句子.\n(1) 求值。', '.'],
+  ['句子。\n(1) 求值。', '。'],
+  ['句子；\n(1) 求值。', '；'],
+  ['句子!\n(1) 求值。', '!'],
+]) {
+  const html=preprocessFormulaForKaTeX(source);
+  assert.equal(paragraphs(html),1,html);
+  assert.ok(html.includes('句子'+punctuation+'<span'),html);
+}
+const subquestionWithoutPunctuation=preprocessFormulaForKaTeX('句子\n(1) 求值。');
+assert.equal(paragraphs(subquestionWithoutPunctuation),1);
+assert.ok(subquestionWithoutPunctuation.includes('句子<span'));
+const doubledPeriod=preprocessFormulaForKaTeX('句子..\n(1) 求值。');
+assert.ok(doubledPeriod.includes('句子..<span'),doubledPeriod);
 const mixedBreak=preprocessFormulaForKaTeX(String.raw`甲\\`+'\n\n乙');
 assert.equal(paragraphs(mixedBreak),1); assert.equal(mixedBreak.includes('<br>'),false);
 for(const math of ['$$x=1$$',String.raw`\[x=1\]`,String.raw`\begin{equation}x=1\end{equation}`]) {

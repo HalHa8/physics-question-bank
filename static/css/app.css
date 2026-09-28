@@ -1471,8 +1471,9 @@ header, main {
     overflow-x: auto;
     overflow-y: hidden;
     scrollbar-width: thin;
+    white-space: nowrap;
 }
-.choices-grid .choices-content > .katex {
+.choices-grid .choices-content .katex {
     white-space: nowrap;
 }
 .choices-grid.choices-has-images,
