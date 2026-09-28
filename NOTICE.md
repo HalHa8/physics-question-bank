@@ -11,5 +11,5 @@ defaults.
 
 PhysicsBank is distributed under the same GNU AGPL-3.0 license. See `LICENSE`.
 The codebase also incorporates upstream MathBank changes through commit
-`2b9df40` (MathBank 2.4.0 plus a later main-branch commit), while retaining
+`adbc2df` (MathBank 2.4.0 plus later main-branch commits), while retaining
 the original repository history.
