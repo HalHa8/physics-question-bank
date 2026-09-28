@@ -7,9 +7,10 @@ from types import SimpleNamespace
 import pytest
 from PIL import Image
 import requests
+from urllib3.exceptions import ReadTimeoutError as Urllib3ReadTimeoutError
 
 from mathbank import pdf_page_vision as vision
-from mathbank.ai_providers import resolve_ocr_provider
+from mathbank.ai_providers import OCRConfigurationError, OCRResponseTimeoutError, resolve_ocr_provider
 from mathbank.pdf_figures import _validate_layout, describe_figure_slots
 from mathbank.task_manager import TaskCancelled
 
@@ -48,7 +49,14 @@ def setup(tmp_path, monkeypatch):
     }
     def post(config, payload, **kwargs):
         calls.append((config, deepcopy(payload), kwargs))
-        return SimpleNamespace(status_code=200, json=lambda: deepcopy(response))
+        def lines():
+            event = {"choices": [{"delta": {"content": response["choices"][0]["message"]["content"]},
+                                  "finish_reason": response["choices"][0]["finish_reason"]}]}
+            if "usage" in response:
+                event["usage"] = response["usage"]
+            yield ("data: " + json.dumps(event)).encode("utf-8")
+            yield b"data: [DONE]"
+        return SimpleNamespace(status_code=200, iter_lines=lines, close=lambda: None)
     monkeypatch.setattr(vision, "post_chat_completion", post)
     info = {"page_index": 2, "width": 600, "height": 800,
             "candidates": [{"id": "p3_raster_001", "bbox": [100, 200, 400, 500], "type": "raster"}],
@@ -63,10 +71,21 @@ def call(setup, result=None, **kwargs):
     return vision.request_pdf_page(setup.image, setup.info, **kwargs)
 
 
+def test_wide_table_page_uses_compact_request_image_only():
+    assert vision.choose_pdf_page_vision_dpi({
+        "quality_reasons": ["原生正文被错排为宽表，出现题号跨列错序或小问片段混排。"],
+    }) == 110
+    assert vision.choose_pdf_page_vision_dpi({"quality_reasons": ["公式丢失"]}) == 150
+    assert vision.choose_pdf_page_vision_dpi(None) == 150
+
+
 def test_joint_page_uses_one_configured_call_and_server_owned_slot(setup):
     original = page_result()
     result = call(setup, original)
     assert len(setup.calls) == 1
+    assert setup.calls[0][2]["timeout"] == (10, 300)
+    assert setup.calls[0][2]["stream"] is True
+    assert setup.calls[0][2]["retry_connection"] is False
     assert result["markdown"] == original["markdown"]
     assert result["model"] == setup.provider.model_name
     assert result["usage"] == setup.response["usage"]
@@ -76,6 +95,7 @@ def test_joint_page_uses_one_configured_call_and_server_owned_slot(setup):
     assert "image_path" not in figure
     sent = setup.calls[0][1]
     assert sent["max_tokens"] == vision.MAX_OUTPUT_TOKENS
+    assert sent["stream"] is True
     assert sent["messages"][0]["content"][1]["image_url"]["url"].startswith("data:image/png;base64,")
     assert "enable_thinking" not in sent
     assert set(setup.prompt_inputs[0]) == {"page_index", "width", "height", "candidates"}
@@ -380,17 +400,36 @@ def test_transport_failure_is_not_retried_or_echoed(setup, monkeypatch, failure)
     assert "secret" not in str(caught.value)
     assert "未自动重试" in str(caught.value)
     assert attempts == [1]
+    if failure is requests.ReadTimeout:
+        assert isinstance(caught.value, OCRResponseTimeoutError)
+        assert "300 秒" in str(caught.value) and "可能已计费" in str(caught.value)
 
 
 def test_http_failure_does_not_read_or_echo_body_and_never_retries(setup, monkeypatch):
     calls = []
     def post(*args, **kwargs):
         calls.append(1)
-        return SimpleNamespace(status_code=503, json=lambda: pytest.fail("failed HTTP body must not be read"))
+        return SimpleNamespace(status_code=503, close=lambda: None,
+                               iter_lines=lambda: pytest.fail("failed HTTP body must not be read"))
     monkeypatch.setattr(vision, "post_chat_completion", post)
     with pytest.raises(ValueError, match="HTTP 503"):
         call(setup)
     assert calls == [1]
+
+
+def test_streamed_idle_timeout_keeps_specific_task_error_and_no_retry(setup, monkeypatch):
+    attempts = []
+    def post(*args, **kwargs):
+        attempts.append(1)
+        def lines():
+            yield b'data: {"choices":[{"delta":{"content":"partial"}}]}'
+            raise requests.exceptions.ConnectionError(
+                Urllib3ReadTimeoutError(None, "https://private.example", "timed out"))
+        return SimpleNamespace(status_code=200, iter_lines=lines, close=lambda: None)
+    monkeypatch.setattr(vision, "post_chat_completion", post)
+    with pytest.raises(OCRResponseTimeoutError) as caught:
+        call(setup)
+    assert "private" not in str(caught.value) and attempts == [1]
 
 
 @pytest.mark.parametrize("changes", [{"api_key": ""}, {"chat_completions_url": ""}, {"supports_image_input": False}])
@@ -398,7 +437,7 @@ def test_missing_or_nonvision_provider_is_rejected_before_post(setup, monkeypatc
     provider = SimpleNamespace(api_key="unused", chat_completions_url="https://example.test", supports_image_input=True)
     provider.__dict__.update(changes)
     monkeypatch.setattr(vision, "resolve_ocr_provider", lambda engine: provider)
-    with pytest.raises(ValueError):
+    with pytest.raises(OCRConfigurationError, match="设置"):
         call(setup)
     assert setup.calls == []
 

@@ -15,15 +15,22 @@ import re
 from typing import Callable
 
 from PIL import Image
+import requests
 
 from mathbank import prompts
-from mathbank.ai_http import post_chat_completion
+from mathbank.ai_http import (
+    AIStreamResponseError, collect_streamed_completion, is_stream_read_timeout,
+    post_chat_completion,
+)
 from mathbank.ai_json import parse_ai_json
-from mathbank.ai_providers import apply_model_thinking_policy, resolve_ocr_provider
+from mathbank.ai_providers import (
+    OCRConfigurationError, OCRResponseTimeoutError, apply_model_thinking_policy,
+    resolve_ocr_provider,
+)
 from mathbank.pdf_figures import MAX_FIGURES_PER_PAGE, MAX_SOURCE_CHARS, describe_figure_slots
 from mathbank.pdf_layout import normalize_model_bbox
 from mathbank.pdf_page_vision import (
-    MAX_OUTPUT_TOKENS, MAX_RESPONSE_CHARS, _PAGE_FIELDS, _SLOT_LABEL, _finite_number,
+    MAX_OUTPUT_TOKENS, MAX_RESPONSE_CHARS, PDF_VISION_TIMEOUT, _PAGE_FIELDS, _SLOT_LABEL, _finite_number,
     _no_cancel, _prompt_page_info, _require_fields, _validated_page,
 )
 from mathbank.task_manager import TaskCancelled
@@ -266,28 +273,51 @@ def request_pdf_regions(
     regions, pieces = _validated_plan(page_info, plan)
     provider = resolve_ocr_provider(os.getenv("OCR_PREFER_ENGINE", "siliconflow"))
     if not provider.api_key or not provider.chat_completions_url:
-        raise ValueError("PDF 局部识别所用的识图服务未配置。")
+        label = getattr(provider, "credential_label", "所选识图平台的 API Key")
+        raise OCRConfigurationError(
+            f"所选识图服务 {label} 未配置可用的密钥或接口地址。"
+            "请在系统设置的 API 配置中填写并保存后重试。"
+        )
     if not provider.supports_image_input:
-        raise ValueError("当前识图模型不支持 PDF 局部图片输入。")
+        raise OCRConfigurationError("当前所选识图模型不支持 PDF 图片输入，请在系统设置中改选支持图片的模型。")
     content = [{"type": "text", "text": prompts.build_pdf_region_vision_prompt(regions, include_figures=include_figures)}]
     content.extend(_crop_messages(image_path, regions, check_cancelled))
     payload = {"model": provider.model_name, "messages": [{"role": "user", "content": content}],
-               "max_tokens": MAX_OUTPUT_TOKENS, "stream": False}
+               "max_tokens": MAX_OUTPUT_TOKENS, "stream": True}
     payload = apply_model_thinking_policy(payload, provider=provider, task="ocr")
     check_cancelled()
     try:
-        response = post_chat_completion(provider, payload, timeout=120, check_status=False)
+        response = post_chat_completion(
+            provider, payload, timeout=PDF_VISION_TIMEOUT,
+            stream=True, check_status=False, retry_connection=False,
+        )
+        try:
+            check_cancelled()
+        except TaskCancelled:
+            response.close()
+            raise
+        if response.status_code != 200:
+            response.close()
+            raise ValueError(f"PDF 局部识别请求失败（HTTP {response.status_code}），未自动重试。")
+        body = collect_streamed_completion(
+            response, max_content_chars=MAX_RESPONSE_CHARS,
+            check_cancelled=check_cancelled,
+        )
     except TaskCancelled:
+        raise
+    except (requests.exceptions.ReadTimeout, requests.exceptions.ConnectionError) as exc:
+        if is_stream_read_timeout(exc):
+            raise OCRResponseTimeoutError(
+                "PDF 局部识别服务连续 300 秒未返回流式数据；请求可能已计费，未自动重试。"
+            ) from exc
+        raise ValueError(f"PDF 局部识别请求失败（{type(exc).__name__}），未自动重试。") from exc
+    except AIStreamResponseError as exc:
+        raise ValueError(f"PDF 局部识别{exc}，未自动重试。") from exc
+    except ValueError:
         raise
     except Exception as exc:
         raise ValueError(f"PDF 局部识别请求失败（{type(exc).__name__}），未自动重试。") from exc
     check_cancelled()
-    if response.status_code != 200:
-        raise ValueError(f"PDF 局部识别请求失败（HTTP {response.status_code}），未自动重试。")
-    try:
-        body = response.json()
-    except Exception as exc:
-        raise ValueError("PDF 局部识别服务未返回有效 JSON。") from exc
     choices = body.get("choices") if isinstance(body, dict) else None
     if (not isinstance(choices, list) or not choices or not isinstance(choices[0], dict)
             or choices[0].get("finish_reason") != "stop"):

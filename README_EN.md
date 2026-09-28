@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/images/physicsbank-avatar-b.png" alt="PhysicsBank book and pendulum avatar" width="112">
+</p>
+
 # PhysicsBank: Local High-School Physics Question Bank
 
 [简体中文](README.md) · [AGPL-3.0 license](LICENSE) · [Notices](NOTICE.md)
@@ -43,6 +47,9 @@ installation, or Node.js. Configure a provider in the app's API settings or
 create a local `.env` from `.env.example` for AI features. External AI requests
 send the selected question content or images to that provider; review privacy
 and reuse rights first.
+Automatic PDF/Word question splitting needs a configured parsing model. Pages
+whose text cannot be extracted reliably also need an image-capable OCR model;
+the app will not silently accept incomplete native text as a complete page.
 
 XeLaTeX is required for PDF compilation and TikZ previews, but not for question
 entry, import, search, or LaTeX source export. Pandoc is recommended for editable
@@ -51,7 +58,15 @@ Word formulas. Neither tool is installed silently. For development, install
 
 Never commit `.env`, API keys, local databases, personal backups, uploaded
 question images, or student data. See the [Chinese README](README.md) for the
-full feature and dependency matrix.
+simple Windows setup guide.
+
+## QQ user group
+
+Group number: **904544454**.
+
+<p align="center">
+  <img src="docs/images/physicsbank-qq-group.png" alt="PhysicsBank QQ user group QR code" width="272">
+</p>
 
 ## License
 

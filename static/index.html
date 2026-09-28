@@ -4,10 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>PhysicsBank · 高中物理题库</title>
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
-    <link rel="shortcut icon" href="/favicon.ico">
+    <link rel="icon" type="image/png" sizes="256x256" href="/static/favicon.png">
+    <link rel="shortcut icon" type="image/x-icon" href="/favicon.ico">
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
-    <link rel="mask-icon" href="/favicon.svg" color="#F59E0B">
     
     <!-- Tailwind CSS -->
     <script src="/static/lib/tailwind/tailwind.min.js"></script>
@@ -73,7 +72,7 @@
     <aside id="appNavigation" class="app-navigation" aria-label="PhysicsBank 主导航">
         <div class="app-nav-brand">
             <span class="app-nav-logo" aria-hidden="true">
-                <img src="/static/favicon.svg" alt="">
+                <img src="/static/favicon.png" alt="">
             </span>
             <span class="app-nav-brand-copy">
                 <strong>PhysicsBank</strong>
@@ -135,7 +134,7 @@
         <div class="flex items-center space-x-3">
             <!-- 1. Absolute Top-Left Anchor: Logo & Title -->
             <div id="appLogoMark" class="h-10 w-10 rounded-xl overflow-hidden shadow-sm shrink-0 flex items-center justify-center">
-                <img src="/static/favicon.svg" alt="PhysicsBank Logo" class="w-full h-full object-cover">
+                <img src="/static/favicon.png" alt="PhysicsBank Logo" class="w-full h-full object-cover">
             </div>
             <div class="relative" id="workspaceDropdownContainer">
                 <div onclick="toggleWorkspaceDropdown(event)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleWorkspaceDropdown(event)}" id="workspaceDropdownBtn" role="button" tabindex="0" aria-label="切换工作台" aria-haspopup="menu" aria-expanded="false" class="group cursor-pointer rounded-xl px-2 py-1 -mx-2 hover:bg-slate-200/50 dark:hover:bg-slate-800/60 active:scale-95 transition-all" title="点击切换工作台">
@@ -2049,6 +2048,10 @@
                         <!-- Beautiful interactive logs console -->
                         <div class="w-full max-w-md bg-slate-50 rounded-xl p-3 text-left font-mono text-[10px] text-slate-600 overflow-y-auto h-24 select-none shadow-inner border border-slate-200" id="importLogsConsole" role="log" aria-live="polite" aria-label="试卷拆解进度日志">
                             <div>[SYSTEM] 准备就绪，等待上传图片...</div>
+                        </div>
+                        <div id="importConfigHelp" class="hidden w-full max-w-md rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-left text-xs text-amber-900" role="alert">
+                            <p id="importConfigHelpText" class="leading-5"></p>
+                            <button id="importConfigHelpButton" type="button" onclick="openSettingsModal()" class="mt-2 min-h-11 rounded-lg bg-brand-600 px-4 py-2 font-semibold text-white hover:bg-brand-700">打开 API 设置</button>
                         </div>
                         <!-- Cancel action button -->
                         <div class="flex items-center space-x-2 pt-1" id="cancelImportActionContainer">

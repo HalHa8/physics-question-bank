@@ -127,6 +127,9 @@ def test_pdf_strategy_markup_defaults_to_layout_aware():
     assert parser.answer_generation is not None and "checked" not in parser.answer_generation
     assert parser.docx_container is not None and "hidden" in parser.docx_container
     assert all(r.get("onchange") == "updatePdfVerificationOption()" for r in parser.radios)
+    markup = (ROOT / "static/index.html").read_text(encoding="utf-8")
+    assert 'id="importConfigHelp"' in markup
+    assert 'id="importConfigHelpButton" type="button" onclick="openSettingsModal()"' in markup
 
 
 @pytest.fixture(scope="module")
@@ -155,10 +158,20 @@ const clearInterval = id => intervals.delete(id);
 const flush = () => new Promise(resolve => setImmediate(resolve));
 for (const id of ['importPaperTitle', 'importLatexContent', 'importPlaceholder', 'importLoadingState',
   'importLogsConsole', 'runParseBtn', 'importLoadingText', 'importSubLoadingText', 'importProgressBarContainer',
+  'importConfigHelp', 'importConfigHelpText', 'cancelImportActionContainer',
   'importProgressBar', 'importGenerateAnswers', 'pdfPageRange', 'pdfCropActiveImage', 'pdfCropImageContainer',
   'pdfCropConfirmBtn', 'pdfCropPageIndicator', 'pdfPagesThumbnailsContainer', 'pdfVerifySuspicions', 'pdfVerifySuspicionsNote',
   'docxVerifySuspicions', 'docxVerificationContainer', 'importSourceDetails', 'importFileSummary', 'texImagesSection']) {
   const el = create(id); el.style = {};
+}
+for (const id of ['importConfigHelp', 'cancelImportActionContainer']) {
+  const classes = new Set(id === 'importConfigHelp' ? ['hidden'] : []);
+  document.getElementById(id).classList = {
+    add(...names) { names.forEach(name => classes.add(name)); },
+    remove(...names) { names.forEach(name => classes.delete(name)); },
+    toggle(name, force) { if (force === undefined ? !classes.has(name) : force) classes.add(name); else classes.delete(name); },
+    contains(name) { return classes.has(name); }
+  };
 }
 document.getElementById('importPaperTitle').value = '测试卷';
 document.getElementById('pdfCropImageContainer').getBoundingClientRect = () => ({width:100, height:100});
@@ -174,6 +187,37 @@ const clearPdfCropSelection = () => {};
     ])
     checks = r"""
 const pdfScenarios = {
+  async missing_ocr_configuration_offers_settings() {
+    const generation=beginDocumentImportTask();
+    pollPdfTaskStatus('missing-ocr',generation);
+    [...intervals.values()][0]();
+    requests.at(-1).resolve({ok:true,json:async()=>({status:'error',document_type:'pdf',
+      error_code:'ocr_configuration_required',error:'PDF 智能拆解解析失败: 第 2 页需要识图：硅基流动 API Key 未配置。'})});
+    await flush();
+    assert.equal(document.getElementById('importLoadingText').textContent,'需要先配置模型服务');
+    assert.ok(document.getElementById('importSubLoadingText').textContent.includes('填写并保存'));
+    assert.equal(document.getElementById('importConfigHelp').classList.contains('hidden'),false);
+    assert.ok(document.getElementById('importConfigHelpText').textContent.includes('识图平台'));
+    assert.equal(document.getElementById('cancelImportActionContainer').classList.contains('hidden'),true);
+    assert.ok(logs.some(line=>line.includes('第 2 页需要识图')));
+    window.currentPdfFile=new Blob(['pdf']);
+    runAIPaperParse();
+    assert.equal(document.getElementById('importConfigHelp').classList.contains('hidden'),true);
+  },
+  async vision_timeout_explains_manual_retry_and_cost() {
+    const generation=beginDocumentImportTask();
+    pollPdfTaskStatus('slow-vision',generation);
+    [...intervals.values()][0]();
+    requests.at(-1).resolve({ok:true,json:async()=>({status:'error',document_type:'pdf',
+      error_code:'ocr_response_timeout',error:'PDF 智能拆解解析失败: 第 5 页识图超时。'})});
+    await flush();
+    assert.equal(document.getElementById('importLoadingText').textContent,'识图服务响应超时');
+    assert.ok(document.getElementById('importSubLoadingText').textContent.includes('可能已经计费'));
+    assert.equal(document.getElementById('importConfigHelp').classList.contains('hidden'),false);
+    assert.ok(document.getElementById('importConfigHelpText').textContent.includes('手动重试'));
+    assert.equal(document.getElementById('cancelImportActionContainer').classList.contains('hidden'),true);
+    assert.ok(logs.some(line=>line.includes('第 5 页识图超时')));
+  },
   async completion_respects_explicit_answer_generation_choice() {
     for (const requested of [false,true]) {
       show([]);
@@ -726,6 +770,7 @@ pdfScenarios[process.argv[1]]().catch(error=>{console.error(error);process.exitC
 
 
 @pytest.mark.parametrize("scenario", [
+    "missing_ocr_configuration_offers_settings",
     "completion_respects_explicit_answer_generation_choice",
     "docx_verification_controls_and_request", "docx_verification_confirmation_report_and_revocation",
     "docx_verification_polling_and_completion",

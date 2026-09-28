@@ -11,6 +11,7 @@ import re
 import signal
 import datetime
 import threading
+import tempfile
 import requests
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -98,6 +99,9 @@ from mathbank.ai_http import (
 )
 from mathbank.ai_providers import (
     MultimodalProviderConfig,
+    OCRConfigurationError,
+    OCRResponseTimeoutError,
+    ParseConfigurationError,
     apply_model_thinking_policy,
     resolve_draw_provider,
     resolve_ocr_fallbacks,
@@ -672,9 +676,9 @@ def read_index():
         css_mtime = int(os.path.getmtime(css_path)) if os.path.exists(css_path) else 0
         html_content = html_content.replace('/static/css/app.css', f'/static/css/app.css?v={css_mtime}')
 
-        fav_path = str(STATIC_DIR / "favicon.svg")
+        fav_path = str(STATIC_DIR / "favicon.png")
         fav_mtime = int(os.path.getmtime(fav_path)) if os.path.exists(fav_path) else 0
-        html_content = html_content.replace('/static/favicon.svg', f'/static/favicon.svg?v={fav_mtime}')
+        html_content = html_content.replace('/static/favicon.png', f'/static/favicon.png?v={fav_mtime}')
             
         # Inject the token and server_instance_id directly into index.html to bypass any cookie blocking policies
         token_script = f'<script>window.__localToken = "{LOCAL_TOKEN}"; window.__serverInstanceId = "{SERVER_INSTANCE_ID}";</script>'
@@ -4043,7 +4047,7 @@ def parse_paper_text_internal(
     provider_name = provider.provider_label
 
     if not api_key:
-        raise ValueError(f"未配置对应的 API Key ({provider.credential_label})，无法智能拆解试卷！请在工作台右上角设置面板进行配置。")
+        raise ParseConfigurationError(f"未配置对应的 API Key ({provider.credential_label})，无法智能拆解试卷！请在工作台右上角设置面板进行配置。")
 
     system_instructions = build_pdf_parse_system_prompt(
         get_current_curriculum(), generate_answers_bool
@@ -4671,7 +4675,7 @@ def ocr_pdf_page_image(image_path: str) -> str:
     providers_to_try = resolve_ocr_fallbacks(prefer_engine)
 
     if not providers_to_try:
-        raise ValueError("未配置任何识图 Key，请在系统设置中配置所选识图平台的 DeepSeek、硅基流动、阿里百炼或中转站 API 密钥。")
+        raise OCRConfigurationError("未配置任何识图 Key，请在系统设置中配置所选识图平台的 DeepSeek、硅基流动、阿里百炼或中转站 API 密钥。")
 
     for ocr_provider in providers_to_try:
         label = ocr_provider.provider_label
@@ -5321,11 +5325,32 @@ def run_pdf_parsing_task(
                         )
                         raw_text = joint["markdown"]
                     elif pdf_strategy == "layout_aware":
-                        from mathbank.pdf_page_vision import request_pdf_page
-                        joint = request_pdf_page(
-                            image_path, page_layout_infos[real_page_num - 1],
-                            check_cancelled=lambda: DOCUMENT_TASKS.check_cancelled(task_id),
+                        from mathbank.pdf_page_vision import (
+                            choose_pdf_page_vision_dpi, request_pdf_page,
+                            DEFAULT_PAGE_VISION_DPI,
                         )
+                        render_dpi = choose_pdf_page_vision_dpi(
+                            inspector_pages.get(real_page_num - 1)
+                        )
+                        if render_dpi == DEFAULT_PAGE_VISION_DPI:
+                            joint = request_pdf_page(
+                                image_path, page_layout_infos[real_page_num - 1],
+                                check_cancelled=lambda: DOCUMENT_TASKS.check_cancelled(task_id),
+                            )
+                        else:
+                            # Re-render from vectors instead of resampling the
+                            # 150-DPI preview. The compact image is request-only.
+                            with tempfile.TemporaryDirectory(prefix="physicsbank-vision-") as temp_dir:
+                                compact_path = Path(temp_dir) / "page.png"
+                                with fitz.open(stream=file_bytes, filetype="pdf") as source_pdf:
+                                    source_pdf[real_page_num - 1].get_pixmap(
+                                        dpi=render_dpi, alpha=False,
+                                    ).save(compact_path)
+                                DOCUMENT_TASKS.check_cancelled(task_id)
+                                joint = request_pdf_page(
+                                    str(compact_path), page_layout_infos[real_page_num - 1],
+                                    check_cancelled=lambda: DOCUMENT_TASKS.check_cancelled(task_id),
+                                )
                         raw_text = joint["markdown"]
                     else:
                         raw_text = ocr_pdf_page_image(image_path)
@@ -5337,7 +5362,7 @@ def run_pdf_parsing_task(
                 except TaskCancelled:
                     raise
                 except Exception as ocr_error:
-                    return local_idx, "", str(ocr_error), None
+                    return local_idx, "", ocr_error, None
                 finally:
                     if acquired:
                         PDF_OCR_SEMAPHORE.release()
@@ -5360,6 +5385,10 @@ def run_pdf_parsing_task(
                     local_idx, text, error, joint = future.result()
                     if error:
                         real_page_num = target_page_indices[local_idx] + 1
+                        if isinstance(error, OCRConfigurationError):
+                            raise OCRConfigurationError(f"第 {real_page_num} 页需要识图：{error}") from error
+                        if isinstance(error, OCRResponseTimeoutError):
+                            raise OCRResponseTimeoutError(f"第 {real_page_num} 页识图超时：{error}") from error
                         raise RuntimeError(f"解析第 {real_page_num} 页出错: {error}")
                     processed_text = process_ocr_illustrations(text)
                     real_page_num = target_page_indices[local_idx] + 1
@@ -5558,10 +5587,17 @@ def run_pdf_parsing_task(
         _delete_task_temp_assets(temp_assets)
     except Exception as ex:
         _delete_task_temp_assets(temp_assets)
+        error_code = (
+            "ocr_configuration_required" if isinstance(ex, OCRConfigurationError)
+            else "parse_configuration_required" if isinstance(ex, ParseConfigurationError)
+            else "ocr_response_timeout" if isinstance(ex, OCRResponseTimeoutError)
+            else None
+        )
         DOCUMENT_TASKS.fail(
             task_id,
             f"PDF 智能拆解解析失败: {str(ex)}",
             document_type="pdf",
+            **({"error_code": error_code} if error_code else {}),
         )
     finally:
         tmp_pdf_path.unlink(missing_ok=True)

@@ -2703,6 +2703,12 @@
             document.getElementById('parsedQuestionsWrapper').classList.add('hidden');
             const loadingState = document.getElementById('importLoadingState');
             loadingState.classList.remove('hidden');
+            const configHelp = document.getElementById('importConfigHelp');
+            if (configHelp) configHelp.classList.add('hidden');
+            const cancelAction = document.getElementById('cancelImportActionContainer');
+            if (cancelAction) cancelAction.classList.remove('hidden');
+            const subLoadingText = document.getElementById('importSubLoadingText');
+            if (subLoadingText) subLoadingText.textContent = '正在准备试卷解析...';
 
             const loadingIcon = loadingState.querySelector('.fa-circle-notch, .fa-spinner, .fa-circle-exclamation');
             if (loadingIcon) {
@@ -3167,15 +3173,36 @@
                         runBtn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i> <span>开始解析</span>';
                     } else if (task.status === 'error') {
                         if (!finishDocumentPoll(identity)) return;
-                        appendImportLog(`分析失败: ${task.error || '未知错误'}`, 'error');
+                        const configError = ['ocr_configuration_required', 'parse_configuration_required'].includes(task.error_code);
+                        const ocrTimeout = task.error_code === 'ocr_response_timeout';
+                        appendImportLog(`${configError ? '需要配置模型' : ocrTimeout ? '识图响应超时' : '分析失败'}: ${task.error || '未知错误'}`, 'error');
                         
-                        const loadingIcon = document.querySelector('#importLoadingState .fa-spinner');
+                        const loadingIcon = document.querySelector('#importLoadingState .fa-spinner, #importLoadingState .fa-circle-notch');
                         if (loadingIcon) {
-                            loadingIcon.classList.remove('fa-spinner', 'animate-spin');
-                            loadingIcon.classList.add('fa-circle-exclamation', 'text-red-500');
+                            loadingIcon.className = 'fa-solid fa-circle-exclamation text-red-500 text-3xl inline-block';
                         }
                         const documentLabel = task.document_type === 'docx' ? 'Word' : 'PDF';
-                        document.getElementById('importLoadingText').textContent = `${documentLabel} 试卷分析中断！`;
+                        document.getElementById('importLoadingText').textContent = configError
+                            ? '需要先配置模型服务'
+                            : ocrTimeout ? '识图服务响应超时'
+                            : `${documentLabel} 试卷分析中断！`;
+                        const subLoadingText = document.getElementById('importSubLoadingText');
+                        if (subLoadingText) subLoadingText.textContent = configError
+                            ? '请在设置中填写并保存所选模型的密钥，然后重新解析。'
+                            : ocrTimeout ? '请求可能已经计费，系统没有自动重试；请查看下方日志中的页码。'
+                            : '请查看下方日志中的具体原因。';
+                        const configHelp = document.getElementById('importConfigHelp');
+                        if (configHelp) configHelp.classList.toggle('hidden', !(configError || ocrTimeout));
+                        const configHelpText = document.getElementById('importConfigHelpText');
+                        if (configHelpText && (configError || ocrTimeout)) {
+                            configHelpText.textContent = ocrTimeout
+                                ? '识图服务长时间未返回。请先检查服务商状态和可能产生的费用；可缩小页码范围，或在设置中改选识图模型，再由您手动重试。'
+                                : task.error_code === 'ocr_configuration_required'
+                                ? '该页需要识图。请填写当前识图平台的 API Key；自动拆题还需要试卷拆解模型的 Key。保存后返回这里重试。'
+                                : '自动拆题需要当前试卷拆解模型的 API Key。请在设置中填写并保存后重试。';
+                        }
+                        const cancelAction = document.getElementById('cancelImportActionContainer');
+                        if (cancelAction) cancelAction.classList.add('hidden');
 
                         const loadingState = document.getElementById('importLoadingState');
                         let resetBtn = document.getElementById('resetImportBtn');
@@ -3191,7 +3218,9 @@
                         
                         runBtn.disabled = false;
                         runBtn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i> <span>开始解析</span>';
-                        showToast(`${documentLabel} 拆解分析失败: ${task.error || '未知错误'}`, 'error');
+                        showToast(configError ? '请先配置模型服务，再重新解析试卷。'
+                            : ocrTimeout ? '识图服务响应超时；未自动重复请求。请查看日志中的页码。'
+                            : `${documentLabel} 拆解分析失败: ${task.error || '未知错误'}`, 'error');
                     }
                 })
                 .catch(err => {
@@ -3322,6 +3351,10 @@
 
             // 重置加载文本
             document.getElementById('importLoadingText').textContent = '正在整理插图映射并预备上传...';
+            const configHelp = document.getElementById('importConfigHelp');
+            if (configHelp) configHelp.classList.add('hidden');
+            const cancelAction = document.getElementById('cancelImportActionContainer');
+            if (cancelAction) cancelAction.classList.remove('hidden');
 
             // 隐藏重置按钮
             const resetBtn = document.getElementById('resetImportBtn');

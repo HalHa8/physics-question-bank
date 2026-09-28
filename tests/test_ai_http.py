@@ -1,10 +1,16 @@
+import json
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
+from urllib3.exceptions import ReadTimeoutError as Urllib3ReadTimeoutError
 
 from mathbank.ai_http import (
     AIProviderHTTPError,
+    AIStreamResponseError,
+    collect_streamed_completion,
+    is_stream_read_timeout,
     post_chat_completion,
     robust_request_get,
     robust_request_post,
@@ -131,3 +137,64 @@ def test_explicit_single_attempt_skips_even_connection_retry(error):
                                  retry_connection=False)
     post.assert_called_once()
     assert "retry_connection" not in post.call_args.kwargs
+
+
+def _sse_response(*events):
+    closed = []
+    response = SimpleNamespace(
+        iter_lines=lambda: iter(events), close=lambda: closed.append(True),
+    )
+    return response, closed
+
+
+def test_streamed_completion_collects_chunks_and_real_usage_only():
+    first = {"choices": [{"delta": {"content": '{"markdown":"测'}, "finish_reason": None}]}
+    second = {"choices": [{"delta": {"content": '试"}'}, "finish_reason": "stop"}]}
+    usage = {"choices": [], "usage": {"prompt_tokens": 20, "completion_tokens": 5}}
+    response, closed = _sse_response(
+        b': heartbeat',
+        ("data: " + json.dumps(first, ensure_ascii=False)).encode(),
+        ("data: " + json.dumps(second, ensure_ascii=False)).encode(),
+        ("data: " + json.dumps(usage)).encode(),
+        b'data: [DONE]',
+    )
+    body = collect_streamed_completion(response, max_content_chars=100, check_cancelled=lambda: None)
+    assert body["choices"][0]["message"]["content"] == '{"markdown":"测试"}'
+    assert body["usage"] == usage["usage"]
+    assert closed == [True]
+
+
+@pytest.mark.parametrize("events", [
+    [b'data: {"choices":[{"delta":{"content":"partial"},"finish_reason":"stop"}]}'],
+    [b'data: {"choices":[{"delta":{"content":"partial"},"finish_reason":"length"}]}', b'data: [DONE]'],
+    [b'data: {"error":"secret provider details"}', b'data: [DONE]'],
+    [b'data: not-json secret provider details', b'data: [DONE]'],
+])
+def test_streamed_completion_rejects_partial_or_bad_events_without_leak(events):
+    response, closed = _sse_response(*events)
+    with pytest.raises(AIStreamResponseError) as caught:
+        collect_streamed_completion(response, max_content_chars=100, check_cancelled=lambda: None)
+    assert "secret" not in str(caught.value)
+    assert closed == [True]
+
+
+def test_streamed_completion_bounds_output_and_closes_on_cancel():
+    event = b'data: {"choices":[{"delta":{"content":"12345"},"finish_reason":"stop"}]}'
+    response, closed = _sse_response(event, b'data: [DONE]')
+    with pytest.raises(AIStreamResponseError, match="过长"):
+        collect_streamed_completion(response, max_content_chars=4, check_cancelled=lambda: None)
+    assert closed == [True]
+
+    response, closed = _sse_response(event)
+    with pytest.raises(RuntimeError, match="cancelled"):
+        collect_streamed_completion(response, max_content_chars=100,
+                                    check_cancelled=lambda: (_ for _ in ()).throw(RuntimeError("cancelled")))
+    assert closed == [True]
+
+
+def test_streamed_body_read_timeout_wrapped_by_requests_is_identified():
+    wrapped = requests.exceptions.ConnectionError(
+        Urllib3ReadTimeoutError(None, "https://private.example", "timed out"))
+    assert is_stream_read_timeout(wrapped)
+    assert is_stream_read_timeout(requests.exceptions.ReadTimeout("timed out"))
+    assert not is_stream_read_timeout(requests.exceptions.ConnectionError("connection broken"))

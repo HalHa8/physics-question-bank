@@ -1,8 +1,11 @@
 """Shared HTTP transport helpers for AI provider requests."""
 
-from typing import Any, Dict, Optional, Protocol
+import json
+import time
+from typing import Any, Callable, Dict, Optional, Protocol
 
 import requests
+from urllib3.exceptions import ReadTimeoutError as Urllib3ReadTimeoutError
 
 
 class ChatProviderConfig(Protocol):
@@ -14,6 +17,98 @@ class ChatProviderConfig(Protocol):
 
 class AIProviderHTTPError(RuntimeError):
     """Raised when an AI provider returns a non-success HTTP response."""
+
+
+class AIStreamResponseError(ValueError):
+    """A streamed completion ended without one complete, bounded answer."""
+
+
+def is_stream_read_timeout(exc: BaseException) -> bool:
+    """requests wraps an idle streamed-body timeout in ConnectionError."""
+    if isinstance(exc, requests.exceptions.ReadTimeout):
+        return True
+    return isinstance(exc, requests.exceptions.ConnectionError) and any(
+        isinstance(arg, Urllib3ReadTimeoutError) for arg in exc.args
+    )
+
+
+def collect_streamed_completion(
+    response, *, max_content_chars: int, check_cancelled: Callable[[], None],
+    max_duration_seconds: float = 600,
+) -> Dict[str, Any]:
+    """Collect one OpenAI-compatible SSE answer without accepting partial output.
+
+    Provider event bodies are intentionally never included in exceptions.
+    """
+    parts: list[str] = []
+    content_chars = 0
+    finish_reason = None
+    done = False
+    usage: dict = {}
+    started = time.monotonic()
+    try:
+        for line in response.iter_lines():
+            check_cancelled()
+            if time.monotonic() - started > max_duration_seconds:
+                raise AIStreamResponseError("流式识别超过总时限，未接受不完整结果。")
+            if not line:
+                continue
+            if isinstance(line, bytes):
+                try:
+                    line = line.decode("utf-8")
+                except UnicodeDecodeError as exc:
+                    raise AIStreamResponseError("流式识别返回了无效编码。") from exc
+            if not isinstance(line, str) or len(line) > 1_000_000:
+                raise AIStreamResponseError("流式识别事件过大或格式无效。")
+            if not line.startswith("data:"):
+                continue
+            data = line[5:].strip()
+            if data == "[DONE]":
+                done = True
+                break
+            try:
+                event = json.loads(data)
+            except (TypeError, ValueError) as exc:
+                raise AIStreamResponseError("流式识别事件不是有效 JSON。") from exc
+            if not isinstance(event, dict) or "error" in event:
+                raise AIStreamResponseError("识图服务返回了流式错误。")
+            if isinstance(event.get("usage"), dict):
+                usage = event["usage"]
+            choices = event.get("choices", [])
+            if not isinstance(choices, list) or len(choices) > 1:
+                raise AIStreamResponseError("流式识别候选格式无效。")
+            if not choices:
+                continue  # A final usage-only event is permitted.
+            choice = choices[0]
+            if not isinstance(choice, dict):
+                raise AIStreamResponseError("流式识别候选格式无效。")
+            reason = choice.get("finish_reason")
+            if reason is not None:
+                if finish_reason is not None and reason != finish_reason:
+                    raise AIStreamResponseError("流式识别结束标记冲突。")
+                finish_reason = reason
+            delta = choice.get("delta") or {}
+            if not isinstance(delta, dict):
+                raise AIStreamResponseError("流式识别内容格式无效。")
+            piece = delta.get("content")
+            if piece is not None:
+                if not isinstance(piece, str):
+                    raise AIStreamResponseError("流式识别内容格式无效。")
+                content_chars += len(piece)
+                if content_chars > max_content_chars:
+                    raise AIStreamResponseError("流式识别内容过长。")
+                parts.append(piece)
+        check_cancelled()
+    finally:
+        close = getattr(response, "close", None)
+        if callable(close):
+            close()
+    if not done or finish_reason != "stop" or not any(parts):
+        raise AIStreamResponseError("流式识别未正常结束或输出被截断，未接受不完整结果。")
+    return {
+        "choices": [{"finish_reason": "stop", "message": {"content": "".join(parts)}}],
+        "usage": usage,
+    }
 
 
 def robust_request_post(url: str, *, retry_connection: bool = True, **kwargs):
@@ -83,7 +178,7 @@ def post_chat_completion(
     provider: ChatProviderConfig,
     payload: Dict[str, Any],
     *,
-    timeout: float,
+    timeout: float | tuple[float, float],
     stream: bool = False,
     check_status: bool = True,
     provider_name: Optional[str] = None,

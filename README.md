@@ -1,35 +1,34 @@
-# PhysicsBank：本地高中物理题库与组卷工作台
+<p align="center">
+  <img src="docs/images/physicsbank-avatar-b.png" alt="PhysicsBank 头像：书页与摆锤" width="112">
+</p>
 
-[English](README_EN.md) · [AGPL-3.0 许可证](LICENSE) · [修改说明](NOTICE.md)
+# PhysicsBank：给物理老师用的本地题库
 
-PhysicsBank 基于 [JudgePeach/MathBank](https://github.com/JudgePeach/math-question-bank) 改造，面向高中物理教师和学习者。它在本机管理题目、导入试卷、辅助解析和组卷；网页界面无需前端编译，题库默认存于本地 SQLite 数据库。
+PhysicsBank 是一个运行在自己电脑上的高中物理备课工具。您可以收集题目、按教材章节整理、导入试卷、查看公式和插图，再挑题组成新试卷。题库默认保存在本机，不会因为打开网页就自动上传。
 
-> 本项目是物理适配版，不附带可自由转载的试题库。导入的试卷、题目和图片仍受其各自的版权或使用许可约束。
+它是在 [MathBank](https://github.com/JudgePeach/math-question-bank) 的基础上改造的物理版本，内置人教版高中物理课程目录，支持单选、多选、填空、实验、计算和简答题。
 
-## 主要功能
+## 可以用它做什么？
 
-| 场景 | 能力 |
-| --- | --- |
-| 题库管理 | 录入、检索和分类图文混排题目；网页实时预览公式、图片和解析 |
-| 试卷导入 | 图片 OCR，以及 PDF、Word、LaTeX 试卷的拆题与来源核对；不确定内容保留人工复核 |
-| AI 辅助 | 按需配置模型进行解题、知识点分类、智能选题和物理示意图辅助重绘 |
-| 组卷导出 | 常规试卷的题型顺序与版式配置；导出 Word、LaTeX 源码包，以及在装有 XeLaTeX 时编译 PDF |
+- **存题、找题**：把题干、图片和解析放在一起，按章节和题型查找。
+- **整理旧试卷**：导入图片、PDF 或 Word 试卷，辅助识别和拆题；公式、单位、电路图等重要内容请在保存前人工核对。
+- **组卷、导出**：选题组成试卷，可导出 Word、LaTeX 源码；电脑装有 XeLaTeX 后还可编译 PDF。
+- **按需使用 AI**：配置自己的模型服务后，可辅助识题、解题和选题；不用 AI 也能录题、检索和组卷。
 
-## 物理版优化
+PDF、Word 等试卷的**自动拆题需要配置试卷拆解模型的 API Key**；如果某页文字或公式无法可靠提取，还需要配置支持图片输入的识图模型。系统不会把识别不可靠的页面当作正确原文直接导入。
 
-- 内置人教版普通高中物理 2019 课程树，覆盖三册必修和三册选择性必修。
-- 默认题型调整为单选题、多选题、填空题、实验题、计算题和简答题。
-- OCR 强调物理量、矢量方向、单位、有效数字、实验表格及图像坐标。
-- AI 解答遵循“研究对象—物理过程—正方向—规律—方程—单位—合理性检查”。
-- 试卷导出默认使用物理学科名称，组卷默认采用可配置的常规试卷，而不是数学 19 题模板。
-- TikZ 提示词面向受力图、电路图、光路图、运动图像和场线图。
-- 已合入上游 2.4.0 及其后续提交的 PDF 提取、原卷图文核对、Word 导入复核和中学符号支持；原文核对增加物理量、单位、方向、极性、电路连接、实验装置等检查，物理课程与题型仍为默认配置。
+## Windows 用户：如何开始？
 
-数学 A/B/S/H 课程预设和原 `exam_19` 模板仅保留旧数据兼容，不作为物理版默认入口。
+目前本仓库提供源码，**尚无现成的 PhysicsBank 便携包**。第一次使用需要电脑已安装 [Python 3.10 或更新版本](https://www.python.org/downloads/)并能联网安装依赖。
 
-## 安装与启动
+1. 点击本页面上方的 **Code → Download ZIP**，将压缩包完整解压到一个文件夹。
+2. 双击文件夹中的 **`启动题库系统.bat`**。首次启动会自动为 PhysicsBank 准备独立的 Python 环境，可能需要等待几分钟。
+3. 浏览器打开后即可使用；如果没有自动打开，请访问 <http://127.0.0.1:8000/>。
 
-需要 Python 3.10 或更新版本。推荐先创建独立 Conda 环境，避免与 MathBank 共用依赖或数据库：
+如果电脑上的 MathBank 已经占用 8000 端口，请先在 MathBank 网页中正常关闭它，再启动 PhysicsBank。两个项目应放在不同文件夹，不要共用数据库。熟悉命令行的用户也可以参阅下面的源码启动方式，改用 8001 端口同时运行。
+
+<details>
+<summary>源码启动（已有 Python / Conda 的用户）</summary>
 
 ```powershell
 git clone https://github.com/HalHa8/physics-question-bank.git
@@ -40,62 +39,28 @@ python -m pip install -r requirements.txt
 python -m uvicorn main:app --host 127.0.0.1 --port 8001
 ```
 
-然后打开 <http://127.0.0.1:8001/>。基础录题、检索和网页公式预览不需要 AI 密钥、LaTeX 或 Node.js。开发和运行测试时再安装 `requirements-dev.txt`。
+然后访问 <http://127.0.0.1:8001/>。Conda 不是必需的，只是隔离环境的一种方式。
 
-Windows 也可双击 `启动题库系统.bat`，它会准备项目内的 `venv` 并打开浏览器；**该启动器目前固定使用 8000 端口**。若同一台电脑上的 MathBank 已占用 8000，请按上面的命令在 8001 启动物理版，或先正常关闭占用端口的服务。不要让两个项目指向同一个目录或数据库。
+</details>
 
-### 可选的 AI 配置
+## AI 和排版软件需要安装吗？
 
-需要 OCR、AI 解答或智能选题时，可在应用的 API 设置中配置服务商和模型，也可参考 `.env.example` 创建本机 `.env`。不要把真实密钥写入示例文件或提交到 Git。调用外部 AI 服务时，相应题目内容或图片会发送给所选服务商；含学生隐私或无传播许可的材料请先核对使用条件。
+**基本录题、查题和网页公式预览不需要 AI 密钥，也不需要安装 LaTeX。** 想用 AI 识图、解题或选题时，在网页设置中填写您自己的服务商信息。题目或图片会发送给该服务商，请先确认材料的隐私和使用许可。
 
-### 可选的排版工具
+只有在电脑上直接编译 **PDF 试卷或 TikZ 示意图**时才需要 XeLaTeX（如 TeX Live 或 MiKTeX）；导出可编辑公式的 Word 文件时建议安装 Pandoc。缺少这些软件不影响日常题库使用。
 
-LaTeX 是系统级软件，不会随 Python 依赖安装：
+## 数据、题目版权与开源说明
 
-| 功能 | XeLaTeX | Pandoc |
-|---|---:|---:|
-| 题目录入、检索、分类与网页公式预览 | 不需要 | 不需要 |
-| 图片 OCR、试卷导入 | 不需要 | 不需要 |
-| 导出 LaTeX 源码包 | 不需要 | 不需要 |
-| 编译 PDF 试卷和 TikZ 物理示意图 | **需要** | 不需要 |
-| 导出含可编辑公式的 Word 文档 | 仅降级路径需要 | **建议安装** |
+题库数据库、上传图片、备份和 API 密钥留在本机；更新或换电脑前，请自行备份这些数据，勿将其上传到公开仓库。**本项目不附带可自由转载的题库**：自行导入的题目、试卷和图片仍受各自的版权或使用条件约束。
 
-Windows 上如需完整 PDF 与 TikZ 功能，推荐安装完整 TeX Live，也可以使用 MiKTeX。安装后重新打开终端并确认：
+本项目保留了 MathBank 的历史与声明，按 [AGPL-3.0](LICENSE) 开源；物理版修改见 [NOTICE.md](NOTICE.md)。若您修改程序并通过网络提供给其他人使用，需要按 AGPL 要求提供对应版本的源代码。软件许可证不会自动改变您个人题目或学生资料的归属。
 
-```powershell
-where.exe xelatex
-xelatex --version
-```
+## QQ 交流群
 
-本项目不会静默安装 TeX 发行版。具体导出效果取决于本机工具链、字体及源题内容，尤其应人工核对电路连接、箭头方向、图像刻度和公式。
+欢迎交流使用体验与问题。群号：**904544454**。
 
-## 数据与隐私
+<p align="center">
+  <img src="docs/images/physicsbank-qq-group.png" alt="PhysicsBank QQ 交流群二维码，群号 904544454" width="272">
+</p>
 
-首次启动会在**本项目目录**创建独立数据库和本地配置。下列个人数据已被 Git 忽略，公开仓库不应包含它们：
-
-- `.env` 与 API 密钥
-- `*.db` 题库数据库
-- `data_backup/` 中的个人备份与导出
-- `static/uploads/` 中的题目图片
-
-升级前建议自行备份数据库与上传图片；不要把 MathBank 的数据目录直接覆盖到 PhysicsBank。软件的 AGPL 许可证适用于程序代码，不会让你导入的题目、讲义、学生数据或密钥自动变成 AGPL 内容。
-
-## 验证与开发
-
-```powershell
-python -m pip install -r requirements-dev.txt
-python -m pytest -q
-python -m pip check
-```
-
-服务启动后可访问 `/healthz` 查看就绪状态，访问 `/api/version` 查看当前物理版版本。每次继续开发 PhysicsBank 时，先检查 MathBank 上游 `main`，审查新提交并安全适配物理默认值；这是一项会话内工作约定，不是后台自动更新，也不意味着自动推送或发布。
-
-## 来源、修改与许可证
-
-本项目基于 [JudgePeach/math-question-bank](https://github.com/JudgePeach/math-question-bank) 修改，保留原项目历史与版权声明，并依据 [GNU Affero General Public License v3.0](LICENSE) 发布。
-
-本修改版源代码主页：<https://github.com/HalHa8/physics-question-bank>
-
-主要修改包括高中物理课程树、物理题型、物理 AI 提示词、原卷校验、界面文案和试卷导出默认值，详见 [NOTICE.md](NOTICE.md)。若向他人提供本修改版的网络服务，须按 AGPL 要求提供**与实际运行版本对应**的完整源代码。
-
-题目及图片的再使用权需要另行向其来源确认。
+[English](README_EN.md)

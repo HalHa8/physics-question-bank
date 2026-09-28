@@ -12,6 +12,18 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple, Union
 from urllib.parse import urlsplit
 
 
+class OCRConfigurationError(ValueError):
+    """The selected image-capable provider is not ready for OCR."""
+
+
+class OCRResponseTimeoutError(ValueError):
+    """A PDF vision request may have reached the provider but did not finish in time."""
+
+
+class ParseConfigurationError(ValueError):
+    """The selected paper-splitting provider has no usable credentials."""
+
+
 _VALID_REASONING_EFFORTS = frozenset(
     {"high", "medium", "low", "xhigh", "max", "default"}
 )

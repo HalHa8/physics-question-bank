@@ -1,6 +1,8 @@
+from io import BytesIO
 from pathlib import Path
 
 import pytest
+from PIL import Image, ImageChops
 
 from mathbank.content_locks import _question_metadata_layout
 from mathbank.curriculums import build_default_metadata, get_curriculum_preset
@@ -90,7 +92,7 @@ def test_upstream_workspaces_keep_physics_brand_and_defaults():
 
     assert 'aria-label="PhysicsBank 主导航"' in index
     assert '<strong>PhysicsBank</strong>' in index
-    assert 'src="/static/favicon.svg"' in index
+    assert 'src="/static/favicon.png"' in index
     assert 'id="editorTitle">录入新物理题' in index
     assert '<option value="exam_19"' not in index
     assert '<option value="exam_19"' not in paper
@@ -102,6 +104,46 @@ def test_upstream_workspaces_keep_physics_brand_and_defaults():
     assert 'payload.get("paper_type", "exam_19")' not in backend
     assert "'电磁感应'" in backend
     assert "'experiment'" in backend
+
+
+def test_physicsbank_avatar_and_readme_assets_share_the_selected_design():
+    root = Path(__file__).resolve().parents[1]
+    source = Image.open(root / "docs/images/physicsbank-avatar-b.png").convert("RGB")
+
+    for name, size in (("favicon.png", 256), ("apple-touch-icon.png", 180)):
+        with Image.open(root / "static" / name) as icon:
+            assert icon.size == (size, size)
+            expected = source.resize((size, size), Image.Resampling.LANCZOS)
+            assert ImageChops.difference(icon.convert("RGB"), expected).getbbox() is None
+
+    with Image.open(root / "static/favicon.ico") as icon:
+        assert icon.size == (256, 256)
+
+    index = (root / "static/index.html").read_text(encoding="utf-8")
+    readme = (root / "README.md").read_text(encoding="utf-8")
+    assert 'href="/static/favicon.png"' in index
+    assert index.count('src="/static/favicon.png"') == 2
+    assert "docs/images/physicsbank-avatar-b.png" in readme
+    assert "docs/images/physicsbank-qq-group.png" in readme
+    assert "904544454" in readme
+    with Image.open(root / "docs/images/physicsbank-qq-group.png") as qr:
+        assert qr.size == (313, 313)  # Preserve the code's white scan margin.
+
+
+def test_physicsbank_avatar_is_served_in_the_page_and_icon_routes(client):
+    page = client.get("/")
+    assert page.status_code == 200
+    assert page.text.count('/static/favicon.png?v=') == 3
+
+    for route, size in (
+        ("/static/favicon.png", 256),
+        ("/favicon.ico", 256),
+        ("/apple-touch-icon.png", 180),
+    ):
+        response = client.get(route)
+        assert response.status_code == 200
+        with Image.open(BytesIO(response.content)) as icon:
+            assert icon.size == (size, size)
 
 
 def test_upstream_source_review_prompts_check_physics_evidence():

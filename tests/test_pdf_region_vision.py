@@ -11,7 +11,7 @@ import pytest
 import requests
 
 from mathbank import pdf_region_vision as vision
-from mathbank.ai_providers import resolve_ocr_provider
+from mathbank.ai_providers import OCRResponseTimeoutError, resolve_ocr_provider
 from mathbank.pdf_figures import _validate_layout, describe_figure_slots
 from mathbank.task_manager import TaskCancelled
 
@@ -54,7 +54,14 @@ def setup(tmp_path, monkeypatch):
     calls = []
     def post(config, payload, **kwargs):
         calls.append((config, deepcopy(payload), kwargs))
-        return SimpleNamespace(status_code=200, json=lambda: deepcopy(response))
+        def lines():
+            event = {"choices": [{"delta": {"content": response["choices"][0]["message"]["content"]},
+                                  "finish_reason": response["choices"][0]["finish_reason"]}]}
+            if "usage" in response:
+                event["usage"] = response["usage"]
+            yield ("data: " + json.dumps(event)).encode("utf-8")
+            yield b"data: [DONE]"
+        return SimpleNamespace(status_code=200, iter_lines=lines, close=lambda: None)
     monkeypatch.setattr(vision, "post_chat_completion", post)
     return SimpleNamespace(image=str(image), info=info, plan=plan, data=data, response=response,
                            calls=calls, provider=provider, root=tmp_path)
@@ -69,6 +76,9 @@ def call(setup, data=None, **kwargs):
 def test_two_regions_one_request_preserves_native_text_and_remaps_geometry_slots(setup):
     result = call(setup)
     assert len(setup.calls) == 1
+    assert setup.calls[0][2]["timeout"] == (10, 300)
+    assert setup.calls[0][2]["stream"] is True
+    assert setup.calls[0][2]["retry_connection"] is False
     assert result["markdown"] == "\n\n".join([setup.plan["pieces"][0]["text"], "A. [插图待补: 图1]",
                                               "可靠原生中段", "A. [插图待补: 图1]", "原生尾段"])
     figures = result["layout"]["figures"]
@@ -293,6 +303,9 @@ def test_network_error_never_retried_or_echoed(setup, monkeypatch, failure):
     with pytest.raises(ValueError, match="未自动重试") as caught:
         call(setup)
     assert "secret" not in str(caught.value) and calls == [1]
+    if failure is requests.ReadTimeout:
+        assert isinstance(caught.value, OCRResponseTimeoutError)
+        assert "300 秒" in str(caught.value) and "可能已计费" in str(caught.value)
 
 
 def test_invalid_json_and_http_error_are_not_retried(setup, monkeypatch):
@@ -301,7 +314,8 @@ def test_invalid_json_and_http_error_are_not_retried(setup, monkeypatch):
         call(setup)
     assert "secret" not in str(caught.value) and len(setup.calls) == 1
     monkeypatch.setattr(vision, "post_chat_completion", lambda *a, **kw: SimpleNamespace(
-        status_code=503, json=lambda: pytest.fail("Must not read failed HTTP response")))
+        status_code=503, close=lambda: None,
+        iter_lines=lambda: pytest.fail("Must not read failed HTTP response")))
     with pytest.raises(ValueError, match="HTTP 503"):
         call(setup)
 

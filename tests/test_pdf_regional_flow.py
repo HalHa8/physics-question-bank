@@ -1,9 +1,13 @@
 """Regional PDF routing with mocked paid boundaries and the real task lifecycle."""
 
 import uuid
+from pathlib import Path
 
 import pymupdf as fitz
 import pytest
+from PIL import Image
+
+from mathbank.ai_providers import OCRConfigurationError, OCRResponseTimeoutError, ParseConfigurationError
 
 
 @pytest.fixture(autouse=True)
@@ -127,6 +131,124 @@ def test_failed_regional_call_never_retries_full_page_or_splits(monkeypatch):
         task = main.DOCUMENT_TASKS.snapshot(task_id)
         assert task["status"] == "error" and "局部识别缺少区域" in task["error"]
         assert calls == [True]
+    finally:
+        main.DOCUMENT_TASKS.remove(task_id)
+
+
+def test_missing_ocr_configuration_marks_task_for_settings_without_second_call(monkeypatch):
+    import main
+    from mathbank import pdf_native_regions, pdf_page_vision
+
+    monkeypatch.setattr(main, "inspect_and_extract_pdf", lambda *a, **k: {
+        "pdf_type": "mixed", "pages": [
+            {"page_index": 0, "markdown": "原生正文", "needs_ocr": False},
+            {"page_index": 1, "markdown": "不可靠", "needs_ocr": True},
+        ],
+    })
+    monkeypatch.setattr(pdf_native_regions, "plan_pdf_regions", lambda *a: None)
+    calls = []
+
+    def missing(*args, **kwargs):
+        calls.append(1)
+        raise OCRConfigurationError("硅基流动 API Key 未配置，请在系统设置中填写。")
+
+    monkeypatch.setattr(pdf_page_vision, "request_pdf_page", missing)
+    monkeypatch.setattr(main, "parse_paper_text_internal", lambda *a, **k: pytest.fail("No incomplete split"))
+    task_id = "regional-missing-ocr-" + uuid.uuid4().hex
+    main.DOCUMENT_TASKS.create(task_id, document_type="pdf", temp_assets=[])
+    try:
+        main.run_pdf_parsing_task(task_id, pdf_bytes(2), "needs-ocr.pdf", pdf_strategy="layout_aware")
+        task = main.DOCUMENT_TASKS.snapshot(task_id)
+        assert task["status"] == "error"
+        assert task["error_code"] == "ocr_configuration_required"
+        assert "第 2 页需要识图" in task["error"]
+        assert calls == [1]
+    finally:
+        main.DOCUMENT_TASKS.remove(task_id)
+
+
+def test_full_page_timeout_identifies_page_and_never_retries_or_splits(monkeypatch):
+    import main
+    from mathbank import pdf_native_regions, pdf_page_vision
+
+    monkeypatch.setattr(main, "inspect_and_extract_pdf", lambda *a, **k: {
+        "pdf_type": "mixed", "pages": [
+            {"page_index": 0, "markdown": "原生正文", "needs_ocr": False},
+            {"page_index": 1, "markdown": "不可靠", "needs_ocr": True},
+        ],
+    })
+    monkeypatch.setattr(pdf_native_regions, "plan_pdf_regions", lambda *a: None)
+    calls = []
+
+    def timeout(*args, **kwargs):
+        calls.append(1)
+        raise OCRResponseTimeoutError("识图服务在 300 秒内未返回结果；可能已计费，未自动重试。")
+
+    monkeypatch.setattr(pdf_page_vision, "request_pdf_page", timeout)
+    monkeypatch.setattr(main, "parse_paper_text_internal", lambda *a, **k: pytest.fail("No incomplete split"))
+    task_id = "regional-ocr-timeout-" + uuid.uuid4().hex
+    main.DOCUMENT_TASKS.create(task_id, document_type="pdf", temp_assets=[])
+    try:
+        main.run_pdf_parsing_task(task_id, pdf_bytes(2), "timeout.pdf", pdf_strategy="layout_aware")
+        task = main.DOCUMENT_TASKS.snapshot(task_id)
+        assert task["status"] == "error"
+        assert task["error_code"] == "ocr_response_timeout"
+        assert "第 2 页识图超时" in task["error"]
+        assert calls == [1]
+    finally:
+        main.DOCUMENT_TASKS.remove(task_id)
+
+
+def test_wide_table_full_page_uses_compact_vector_render_and_cleans_it(monkeypatch):
+    import main
+    from mathbank import pdf_native_regions, pdf_page_vision
+
+    monkeypatch.setattr(main, "inspect_and_extract_pdf", lambda *a, **k: {
+        "pdf_type": "scanned", "pages": [{"page_index": 0, "markdown": "原生错排文字" * 30,
+            "needs_ocr": True, "quality_reasons": ["原生正文被错排为宽表。"]}],
+    })
+    monkeypatch.setattr(pdf_native_regions, "plan_pdf_regions", lambda *a: None)
+    received = []
+
+    def capture(image_path, info, **kwargs):
+        with Image.open(image_path) as image:
+            received.append((str(image_path), image.size))
+        return joint("1. 识别后的完整题文。")
+
+    monkeypatch.setattr(pdf_page_vision, "request_pdf_page", capture)
+    monkeypatch.setattr(main, "parse_paper_text_internal", lambda *a, **k: [
+        {"content": "识别后的完整题文。", "answer_markdown": ""},
+    ])
+    task_id = "regional-compact-" + uuid.uuid4().hex
+    main.DOCUMENT_TASKS.create(task_id, document_type="pdf", temp_assets=[])
+    try:
+        main.run_pdf_parsing_task(task_id, pdf_bytes(1), "wide-table.pdf", pdf_strategy="layout_aware")
+        task = main.DOCUMENT_TASKS.snapshot(task_id)
+        assert task["status"] == "completed", task.get("error")
+        assert len(received) == 1 and received[0][1][0] < 1000
+        assert received[0][1][1] < 1400
+        assert not Path(received[0][0]).exists()
+    finally:
+        main.DOCUMENT_TASKS.remove(task_id)
+
+
+def test_missing_split_model_configuration_marks_task_for_settings(monkeypatch):
+    import main
+
+    monkeypatch.setattr(main, "inspect_and_extract_pdf", lambda *a, **k: {
+        "pdf_type": "text_based", "pages": [
+            {"page_index": 0, "markdown": "1. 原生试题", "needs_ocr": False},
+        ],
+    })
+    monkeypatch.setattr(main, "parse_paper_text_internal", lambda *a, **k: (_ for _ in ()).throw(
+        ParseConfigurationError("试卷拆解模型 API Key 未配置。")))
+    task_id = "regional-missing-parse-" + uuid.uuid4().hex
+    main.DOCUMENT_TASKS.create(task_id, document_type="pdf", temp_assets=[])
+    try:
+        main.run_pdf_parsing_task(task_id, pdf_bytes(1), "no-model.pdf", pdf_strategy="native_preferred")
+        task = main.DOCUMENT_TASKS.snapshot(task_id)
+        assert task["status"] == "error"
+        assert task["error_code"] == "parse_configuration_required"
     finally:
         main.DOCUMENT_TASKS.remove(task_id)
 
