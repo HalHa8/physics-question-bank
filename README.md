@@ -19,16 +19,20 @@ PDF、Word 等试卷的**自动拆题需要配置试卷拆解模型的 API Key**
 
 ## Windows 用户：如何开始？
 
-目前本仓库提供源码，**尚无现成的 PhysicsBank 便携包**。第一次使用需要电脑已安装 [Python 3.10 或更新版本](https://www.python.org/downloads/)并能联网安装依赖。
+推荐使用 **PhysicsBank Windows 便携包**，适用于 Windows 10/11 的 64 位电脑，内含 Python 和运行所需组件；普通使用无需自行安装 Python。
 
-1. 点击本页面上方的 **Code → Download ZIP**，将压缩包完整解压到一个文件夹。
-2. 双击文件夹中的 **`启动题库系统.bat`**。首次启动会自动为 PhysicsBank 准备独立的 Python 环境，可能需要等待几分钟。
-3. 浏览器打开后即可使用；如果没有自动打开，请访问 <http://127.0.0.1:8000/>。
+1. 打开 [Windows 便携包下载页](https://github.com/HalHa8/physics-question-bank/actions/workflows/ci.yml?query=branch%3Amain)，点开最近一次带绿色对勾的 **CI** 记录，在页面下方的 **Artifacts** 下载 `PhysicsBank-Windows-x64`。下载可能需要登录 GitHub。
+2. 将下载的压缩包解压，找到其中的 `PhysicsBank-Windows-x64.zip`，再把这个 ZIP **完整解压到一个独立文件夹**。不要只把启动文件单独拖出来运行。旁边的 `.sha256` 文件供校验下载完整性使用。
+3. 双击解压目录里的 **`启动题库系统.bat`**。浏览器通常会自动打开；否则访问 <http://127.0.0.1:8000/>。
+
+便携包是 GitHub Actions 的构建附件，会定期过期；若页面没有附件，可按下面的源码方式运行或联系维护者重新构建。仓库上方 **Code → Download ZIP** 下载的是源码，**不是**便携包。题库数据库与个人设置保存在解压目录；更换电脑或覆盖升级前请先备份，升级步骤见包内的 `覆盖升级说明.txt`。
 
 如果电脑上的 MathBank 已经占用 8000 端口，请先在 MathBank 网页中正常关闭它，再启动 PhysicsBank。两个项目应放在不同文件夹，不要共用数据库。熟悉命令行的用户也可以参阅下面的源码启动方式，改用 8001 端口同时运行。
 
 <details>
-<summary>源码启动（已有 Python / Conda 的用户）</summary>
+<summary>源码启动（不使用便携包的用户）</summary>
+
+需要电脑已安装 [Python 3.10 或更新版本](https://www.python.org/downloads/)；以下示例使用 Conda 隔离环境。
 
 ```powershell
 git clone https://github.com/HalHa8/physics-question-bank.git

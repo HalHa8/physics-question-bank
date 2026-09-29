@@ -1,4 +1,4 @@
-"""Build verified Windows and macOS release archives for MathBank.
+"""Build verified Windows and macOS portable archives for PhysicsBank.
 
 The release builder deliberately fails closed: downloaded runtimes must match
 their pinned SHA-256 values, cached downloads are rechecked on every build, and
@@ -26,13 +26,13 @@ from mathbank.paths import BUILD_CACHE_DIR, DIST_DIR as PROJECT_DIST_DIR, PROJEC
 # Paths
 BASE_DIR = str(PROJECT_ROOT)
 DIST_DIR = str(PROJECT_DIST_DIR)
-BUILD_DIR = os.path.join(DIST_DIR, "mathbank-windows")
+BUILD_DIR = os.path.join(DIST_DIR, "physicsbank-windows")
 PYTHON_DIR = os.path.join(BUILD_DIR, "python")
 WHEELS_DIR = os.path.join(DIST_DIR, "wheels")
 SITE_PACKAGES = os.path.join(PYTHON_DIR, "site-packages")
 CACHE_DIR = str(BUILD_CACHE_DIR)
 CACHE_WHEELS_DIR = os.path.join(CACHE_DIR, "wheels")
-MACOS_BUILD_DIR = os.path.join(DIST_DIR, "mathbank-macos")
+MACOS_BUILD_DIR = os.path.join(DIST_DIR, "physicsbank-macos")
 
 PYTHON_ZIP_URL = (
     "https://www.python.org/ftp/python/3.10.11/"
@@ -86,7 +86,7 @@ Package: {MSVC_REDIST_PACKAGE_ID} {MSVC_REDIST_PACKAGE_VERSION}
 Source: {MSVC_REDIST_VSIX_URL}
 Archive SHA-256: {MSVC_REDIST_VSIX_SHA256}
 Files: {', '.join(MSVC_RUNTIME_DLLS)}
-Supported MathBank target: Windows 10/11 x64
+Supported PhysicsBank target: Windows 10/11 x64
 
 The DLLs are copied unmodified from the production VC\\Redist directory.
 Redistribution is subject to the Microsoft Visual Studio license terms:
@@ -101,6 +101,11 @@ ROOT_FILE_ALLOWLIST = (
     "README.md",
     "README_EN.md",
     "LICENSE",
+    "NOTICE.md",
+)
+DOCS_IMAGE_ALLOWLIST = (
+    "physicsbank-avatar-b.png",
+    "physicsbank-qq-group.png",
 )
 STATIC_ALLOWLIST = (
     "index.html",
@@ -136,11 +141,13 @@ FORBIDDEN_RELEASE_SUFFIXES = {
     ".sqlite3",
 }
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+WINDOWS_ARCHIVE_STEM = "PhysicsBank-Windows-x64"
+MACOS_ARCHIVE_STEM = "PhysicsBank-macOS"
 RELEASE_OUTPUT_NAMES = (
-    "MathBank-Windows-x64.zip",
-    "MathBank-Windows-x64.zip.sha256",
-    "MathBank-macOS.zip",
-    "MathBank-macOS.zip.sha256",
+    f"{WINDOWS_ARCHIVE_STEM}.zip",
+    f"{WINDOWS_ARCHIVE_STEM}.zip.sha256",
+    f"{MACOS_ARCHIVE_STEM}.zip",
+    f"{MACOS_ARCHIVE_STEM}.zip.sha256",
 )
 # These directories are shipped by pinned wheels but are not needed at runtime.
 # Keep the list explicit so a newly introduced package payload still fails the
@@ -169,6 +176,8 @@ OVERLAY_MANAGED_ROOTS = (
     "README.md",
     "README_EN.md",
     "LICENSE",
+    "NOTICE.md",
+    "docs",
     "mathbank",
     "scripts",
     "static",
@@ -246,7 +255,7 @@ def download_verified(url, cache_path, expected_sha256, label):
     try:
         request = urllib.request.Request(
             url,
-            headers={"User-Agent": f"MathBank-release-builder/{__version__}"},
+            headers={"User-Agent": f"PhysicsBank-release-builder/{__version__}"},
         )
         with urllib.request.urlopen(request, timeout=60) as response, open(
             temporary_path, "wb"
@@ -622,6 +631,13 @@ def copy_app_files(destination, launcher_name):
     _copy_allowlisted_entry(Path(BASE_DIR, "mathbank"), destination / "mathbank")
     _copy_allowlisted_entry(Path(BASE_DIR, "scripts"), destination / "scripts")
 
+    docs_images_destination = destination / "docs" / "images"
+    for image_name in DOCS_IMAGE_ALLOWLIST:
+        _copy_allowlisted_entry(
+            Path(BASE_DIR, "docs", "images", image_name),
+            docs_images_destination / image_name,
+        )
+
     static_destination = destination / "static"
     static_destination.mkdir(exist_ok=True)
     for relative_name in STATIC_ALLOWLIST:
@@ -693,6 +709,8 @@ def assert_release_tree_clean(root, platform_name):
         "main.py",
         "requirements.txt",
         "覆盖升级说明.txt",
+        "NOTICE.md",
+        *(f"docs/images/{name}" for name in DOCS_IMAGE_ALLOWLIST),
         "mathbank/__init__.py",
         "scripts/release_overlay.py",
         "scripts/local_launcher.py",
@@ -1110,7 +1128,7 @@ def zip_release():
     validate_windows_runtime(BUILD_DIR)
     return _build_archive(
         BUILD_DIR,
-        os.path.join(DIST_DIR, "MathBank-Windows-x64"),
+        os.path.join(DIST_DIR, WINDOWS_ARCHIVE_STEM),
         "windows-x64",
         WINDOWS_LAUNCHER_NAME,
     )
@@ -1125,7 +1143,7 @@ def zip_macos_release():
     try:
         return _build_archive(
             macos_build_dir,
-            os.path.join(DIST_DIR, "MathBank-macOS"),
+            os.path.join(DIST_DIR, MACOS_ARCHIVE_STEM),
             "macos",
             "启动题库系统.command",
         )

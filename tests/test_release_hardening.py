@@ -16,6 +16,33 @@ from scripts import build_release, release_overlay
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_physicsbank_portable_names_and_ci_download_contract():
+    assert build_release.WINDOWS_ARCHIVE_STEM == "PhysicsBank-Windows-x64"
+    assert build_release.MACOS_ARCHIVE_STEM == "PhysicsBank-macOS"
+    assert all(name.startswith("PhysicsBank-") for name in build_release.RELEASE_OUTPUT_NAMES)
+    workflow = (PROJECT_ROOT / ".github" / "workflows" / "ci.yml").read_text(
+        encoding="utf-8"
+    )
+    assert "actions/upload-artifact@v4" in workflow
+    assert "dist/PhysicsBank-Windows-x64.zip" in workflow
+    assert "dist/PhysicsBank-Windows-x64.zip.sha256" in workflow
+    assert "github.ref == 'refs/heads/main'" in workflow
+    readme = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
+    assert "PhysicsBank-Windows-x64" in readme
+    assert "actions/workflows/ci.yml" in readme
+
+
+def test_release_bundle_copies_readme_assets_and_notice(tmp_path):
+    destination = tmp_path / "bundle"
+    build_release.copy_app_files(destination, build_release.WINDOWS_LAUNCHER_NAME)
+    assert (destination / "NOTICE.md").is_file()
+    for image_name in build_release.DOCS_IMAGE_ALLOWLIST:
+        bundled = destination / "docs" / "images" / image_name
+        assert bundled.read_bytes() == (PROJECT_ROOT / "docs" / "images" / image_name).read_bytes()
+    assert not (destination / ".env").exists()
+    assert not list(destination.rglob("*.db"))
+
+
 def _zip_bytes(name="payload.txt", content=b"verified"):
     output = io.BytesIO()
     with zipfile.ZipFile(output, "w") as archive:
@@ -513,6 +540,8 @@ def _make_minimal_windows_tree(root, *, include_launcher_helper=True):
         "main.py",
         "requirements.txt",
         "覆盖升级说明.txt",
+        "NOTICE.md",
+        *(f"docs/images/{name}" for name in build_release.DOCS_IMAGE_ALLOWLIST),
         "mathbank/__init__.py",
         "scripts/release_overlay.py",
         "scripts/local_launcher.py",
@@ -539,7 +568,7 @@ def test_finished_windows_archive_revalidates_crlf_launcher(tmp_path):
 
     archive_path = build_release._build_archive(
         staging,
-        str(tmp_path / "MathBank-Windows-x64"),
+        str(tmp_path / "PhysicsBank-Windows-x64"),
         "windows-x64",
         build_release.WINDOWS_LAUNCHER_NAME,
     )
@@ -574,6 +603,8 @@ def _make_minimal_macos_tree(root):
         "main.py",
         "requirements.txt",
         "覆盖升级说明.txt",
+        "NOTICE.md",
+        *(f"docs/images/{name}" for name in build_release.DOCS_IMAGE_ALLOWLIST),
         "mathbank/__init__.py",
         "scripts/release_overlay.py",
         "scripts/local_launcher.py",
@@ -689,7 +720,7 @@ def test_finished_archive_crc_manifest_and_sidecar(tmp_path):
     _make_minimal_macos_tree(staging)
     archive_path = build_release._build_archive(
         staging,
-        str(tmp_path / "MathBank-macOS"),
+        str(tmp_path / "PhysicsBank-macOS"),
         "macos",
         "启动题库系统.command",
     )
@@ -702,7 +733,7 @@ def test_finished_archive_crc_manifest_and_sidecar(tmp_path):
         names = {info.filename.rstrip("/") for info in archive.infolist()}
         launcher = archive.getinfo("启动题库系统.command")
     assert {"main.py", "覆盖升级说明.txt", "RELEASE-MANIFEST.json"}.issubset(names)
-    assert not any(name.startswith("MathBank-") for name in names)
+    assert not any(name.startswith("PhysicsBank-") for name in names)
     if launcher.create_system == 3:
         assert launcher.external_attr >> 16 & 0o111
 
@@ -712,8 +743,8 @@ def test_failed_final_verification_removes_archive_and_checksum(
 ):
     staging = tmp_path / "staging"
     _make_minimal_macos_tree(staging)
-    archive_stem = tmp_path / "MathBank-macOS"
-    checksum = tmp_path / "MathBank-macOS.zip.sha256"
+    archive_stem = tmp_path / "PhysicsBank-macOS"
+    checksum = tmp_path / "PhysicsBank-macOS.zip.sha256"
     checksum.write_text("stale\n", encoding="utf-8")
     monkeypatch.setattr(
         build_release,
@@ -736,9 +767,9 @@ def test_failed_final_verification_removes_archive_and_checksum(
 def test_failed_release_preflight_also_removes_stale_outputs(tmp_path):
     staging = tmp_path / "invalid-staging"
     staging.mkdir()
-    archive_stem = tmp_path / "MathBank-macOS"
+    archive_stem = tmp_path / "PhysicsBank-macOS"
     archive = archive_stem.with_suffix(".zip")
-    checksum = tmp_path / "MathBank-macOS.zip.sha256"
+    checksum = tmp_path / "PhysicsBank-macOS.zip.sha256"
     archive.write_bytes(b"stale")
     checksum.write_text("stale\n", encoding="utf-8")
 
@@ -764,8 +795,8 @@ def test_main_failure_removes_stale_and_partial_cross_platform_outputs(
     monkeypatch.setattr(build_release, "DIST_DIR", str(dist))
 
     def write_windows_output():
-        (dist / "MathBank-Windows-x64.zip").write_bytes(b"partial")
-        (dist / "MathBank-Windows-x64.zip.sha256").write_text(
+        (dist / "PhysicsBank-Windows-x64.zip").write_bytes(b"partial")
+        (dist / "PhysicsBank-Windows-x64.zip.sha256").write_text(
             "partial\n", encoding="utf-8"
         )
 
@@ -813,13 +844,13 @@ def test_clean_directories_preserves_unrelated_dist_artifacts(tmp_path, monkeypa
     unrelated = dist / "teacher-notes.txt"
     unrelated.parent.mkdir()
     unrelated.write_text("keep", encoding="utf-8")
-    build_dir = dist / "mathbank-windows"
+    build_dir = dist / "physicsbank-windows"
     wheels_dir = dist / "wheels"
-    macos_dir = dist / "mathbank-macos"
+    macos_dir = dist / "physicsbank-macos"
     for directory in (build_dir, wheels_dir, macos_dir):
         directory.mkdir()
         (directory / "old").write_text("remove", encoding="utf-8")
-    (dist / "MathBank-macOS.zip").write_bytes(b"old")
+    (dist / "PhysicsBank-macOS.zip").write_bytes(b"old")
 
     monkeypatch.setattr(build_release, "DIST_DIR", str(dist))
     monkeypatch.setattr(build_release, "BUILD_DIR", str(build_dir))
@@ -835,7 +866,7 @@ def test_clean_directories_preserves_unrelated_dist_artifacts(tmp_path, monkeypa
     build_release.clean_directories()
 
     assert unrelated.read_text(encoding="utf-8") == "keep"
-    assert not (dist / "MathBank-macOS.zip").exists()
+    assert not (dist / "PhysicsBank-macOS.zip").exists()
     assert (build_dir / "python" / "site-packages").is_dir()
 
 
@@ -845,7 +876,7 @@ def test_finished_archive_rejects_crc_valid_member_tampering(tmp_path):
     archive_path = Path(
         build_release._build_archive(
             staging,
-            str(tmp_path / "MathBank-macOS"),
+            str(tmp_path / "PhysicsBank-macOS"),
             "macos",
             "启动题库系统.command",
         )
@@ -877,7 +908,7 @@ def test_finished_macos_archive_rejects_non_executable_launcher(tmp_path):
     archive_path = Path(
         build_release._build_archive(
             staging,
-            str(tmp_path / "MathBank-macOS"),
+            str(tmp_path / "PhysicsBank-macOS"),
             "macos",
             "启动题库系统.command",
         )

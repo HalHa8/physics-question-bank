@@ -90,9 +90,9 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $archive = Join-Path $PWD 'dist\MathBank-Windows-x64.zip'
+          $archive = Join-Path $PWD 'dist\PhysicsBank-Windows-x64.zip'
           $testRoot = Join-Path $env:RUNNER_TEMP (
-            'MathBank 中文 空格 启动-' + [Guid]::NewGuid().ToString('N')
+            'PhysicsBank 中文 空格 启动-' + [Guid]::NewGuid().ToString('N')
           )
           New-Item -ItemType Directory -Path $testRoot | Out-Null
           Expand-Archive -LiteralPath $archive -DestinationPath $testRoot
@@ -211,3 +211,14 @@ jobs:
         if: runner.os == 'macOS'
         shell: bash
         run: bash -n '启动题库系统.command'
+      - name: Upload verified PhysicsBank Windows portable package
+        if: runner.os == 'Windows' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: PhysicsBank-Windows-x64
+          path: |
+            dist/PhysicsBank-Windows-x64.zip
+            dist/PhysicsBank-Windows-x64.zip.sha256
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 0

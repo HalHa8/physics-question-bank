@@ -26,6 +26,19 @@ For each new PhysicsBank work session, first check the upstream MathBank `main`
 branch and review any changes before integrating them. This is an interactive
 project workflow, not an unattended background updater or an automatic GitHub push.
 
+## Windows portable package
+
+On Windows 10/11 x64, download the `PhysicsBank-Windows-x64` artifact from the
+[latest successful CI run on `main`](https://github.com/HalHa8/physics-question-bank/actions/workflows/ci.yml?query=branch%3Amain).
+GitHub may require you to sign in. Unzip the downloaded artifact, then fully
+extract the `PhysicsBank-Windows-x64.zip` inside it into a separate folder.
+Double-click `启动题库系统.bat` there and open <http://127.0.0.1:8000/> if your
+browser does not open automatically. Python and the required runtime are
+included. `Code → Download ZIP` is source code, not the portable package.
+CI artifacts expire; if none is available, use the source instructions below.
+Back up your database before moving or updating the extracted folder; see
+`覆盖升级说明.txt` inside the package.
+
 ## Run from source
 
 ```bash
