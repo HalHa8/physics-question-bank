@@ -103,6 +103,10 @@
                 <i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i>
                 <span>试卷记录</span>
             </button>
+            <button type="button" id="appNavQa" class="app-nav-item" data-app-nav-target="qa" onclick="selectWorkspace('qa', 'QA · 常见问题')">
+                <i class="fa-regular fa-circle-question" aria-hidden="true"></i>
+                <span>QA</span>
+            </button>
         </nav>
 
         <div class="app-nav-spacer"></div>
@@ -157,6 +161,10 @@
                     <button onclick="selectWorkspace('paper', '组卷排版工作台')" class="glass-dropdown-item w-full px-3.5 py-2.5 text-xs text-left flex items-center justify-between rounded-xl" id="ws-btn-paper">
                         <span>组卷排版工作台</span>
                         <i class="fa-solid fa-check text-[10px] text-brand-600 dark:text-brand-500 hidden" id="ws-check-paper"></i>
+                    </button>
+                    <button type="button" onclick="selectWorkspace('qa', 'QA · 常见问题')" class="glass-dropdown-item w-full px-3.5 py-2.5 text-xs text-left flex items-center justify-between rounded-xl" id="ws-btn-qa">
+                        <span>QA · 常见问题</span>
+                        <i class="fa-solid fa-check text-[10px] text-brand-600 dark:text-brand-500 hidden" id="ws-check-qa"></i>
                     </button>
                 </div>
             </div>
@@ -1192,6 +1200,52 @@
         </section>
         <!-- End of Saved Paper Records Workspace -->
 
+        <section id="qaWorkspaceSection" class="qa-workspace hidden w-full h-full" aria-labelledby="qaWorkspaceTitle">
+            <div class="qa-workspace-content">
+                <div class="qa-heading">
+                    <h2 id="qaWorkspaceTitle">QA · 常见问题</h2>
+                    <p>PhysicsBank 使用问答</p>
+                    <p id="qaSourceNote" class="qa-source-note"></p>
+                </div>
+                <div class="qa-search-row">
+                    <label for="qaSearchInput" class="sr-only">搜索常见问题</label>
+                    <div class="qa-search-box">
+                        <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+                        <input type="search" id="qaSearchInput" placeholder="搜索问题、关键词，例如：API、导入、备份" autocomplete="off">
+                    </div>
+                    <button type="button" id="qaResetFilters" class="qa-reset">重置</button>
+                </div>
+                <div id="qaCategories" class="qa-categories" role="group" aria-label="按主题筛选问答"></div>
+                <p id="qaResultCount" class="qa-result-count" role="status" aria-live="polite"></p>
+                <div id="qaQuestionList" class="qa-question-list"></div>
+                <div id="qaEmptyState" class="qa-empty-state" hidden>
+                    <span class="qa-empty-icon" aria-hidden="true"><i class="fa-regular fa-circle-question"></i></span>
+                    <h3>没有匹配的问题</h3>
+                    <p>试试更短的关键词，或重置筛选查看全部问答。</p>
+                </div>
+                <noscript><p>请启用 JavaScript 以查看常见问题。</p></noscript>
+                <section id="qaSafeSharing" class="qa-guide" aria-labelledby="qaSafeSharingTitle">
+                    <h3 id="qaSafeSharingTitle"><i class="fa-solid fa-shield-halved" aria-hidden="true"></i> 安全分享题目</h3>
+                    <p class="qa-guide-notice">不要把整个程序文件夹打包发到群里。里面可能有 API 密钥、个人题库、学生信息和运行记录。</p>
+                    <ol>
+                        <li>在「组卷」中只选需要交流的题目，按需选择是否附解析。</li>
+                        <li>导出 Word 或 PDF，打开文件逐页检查题干、公式、配图和答案是否完整。</li>
+                        <li>确认可以分享这些材料，并去掉姓名、班级、评语等私人信息后，只发送检查过的导出文件。</li>
+                    </ol>
+                    <details>
+                        <summary>备份和分享有什么不同？</summary>
+                        <p>完整备份用于恢复自己的题库。系统备份会排除 API 密钥，但仍可能包含全部题目、解析、来源和图片，不等于适合公开发送的共享包。</p>
+                        <p>专门的「题目共享包」尚未提供。当前请使用上面的选题导出流程，不要把程序、配置或完整备份当作题包发送。</p>
+                    </details>
+                    <details>
+                        <summary>如果已经把程序文件夹发出去了怎么办？</summary>
+                        <p>尽快撤回或删除分享文件，并到模型服务商后台作废、重建可能泄露的密钥，检查调用记录和费用。仅删除文件或在本机改名，不能让已泄露的密钥失效。</p>
+                        <p>反馈问题时可发送隐藏私人信息后的错误提示和操作步骤。不要发送 <code>.env</code>、本地控制令牌、整份数据库或未检查的日志；原题和原文件也请先确认再发送。</p>
+                    </details>
+                </section>
+            </div>
+        </section>
+
     </main>
     </div>
 
@@ -2198,6 +2252,8 @@
     <script src="/static/js/import.js"></script>
     <script src="/static/js/paper.js"></script>
     <script src="/static/js/dashboard.js"></script>
+    <script src="/static/js/qa-data.js"></script>
+    <script src="/static/js/qa.js"></script>
 
     <!-- On-demand multimodal TikZ workbench -->
     <div id="answerTikzWorkbenchModal" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="answerTikzWorkbenchTitle" class="fixed inset-0 z-[80] hidden items-center justify-center bg-slate-950/65 p-2 opacity-0 backdrop-blur-sm transition-opacity duration-200 sm:p-4">

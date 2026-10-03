@@ -245,6 +245,7 @@
 - **依赖与目标平台**：`requirements.txt` 与 `requirements-dev.txt` 使用精确版本；Windows 交叉构建额外读取 `requirements-windows.txt`，目标平台依赖必须在共享运行时锁或 Windows 锁中显式固定，禁止依赖构建主机的 `sys_platform` marker。构建下载 wheel 必须使用 `sys.executable -m pip`。
 
 ## 6. 界面设计与交互规范
+- **QA 页面**：`qaWorkspaceSection` 是并列的离线工作区，复用 MathBank 社区问答及搜索/分类实现，内容唯一来源为 `static/js/qa-data.js` 的 `PhysicsBankQaData`，适配范围与来源见 `docs/community-qa.md`。`qa.js` 用 `textContent` 和原生 details/summary 展示纯文本，多关键词交集、分类叠加、全半角/大小写归一化；不渲染聊天 HTML，不调用 AI 或外部接口，不修改题库、草稿和组卷状态。桌面侧栏、移动底栏和菜单复用 `selectWorkspace`，退出导入恢复 QA；资源按 qa-data.js→qa.js 加载并纳入版本戳。保留安全分享指引，区分备份与共享包、说明密钥泄露处理，不把尚未实现的功能写成已有能力。涉及下载、课程、题型、模型和版本的答复必须核对物理版，保留来源但明确适配说明。专项为 `tests/test_qa_workspace.py`，桌面/375px 与明暗模式须实测。
 - **导入题卡操作区**：文件徽标与按钮采用独立网格行，文件名限宽省略、悬停可看全名，徽标区域最高 64px 并可滚动；初次渲染与手动截图追加配图共用该约束。手动截图/AI 生成解析/导入按钮文字不拆行、同排等高；常用桌面及 375px 布局保持同排，极窄屏按整个按钮换排，不压缩成多行文字或溢出题卡。
 - **视觉与色彩**：极简教研卡片风格，支持 6 套主题（默认曜石黑 `.theme-obsidian`）。图标采用平面极简设计（Flat Minimalist）。
 - **暗色模式规范**：高通透玻璃底 + 10% 品牌色透光微光与高对比文字；下拉菜单统一使用 `.glass-dropdown`；深色编辑器采用高对比选中样式（`selection:bg-indigo-600`）。
