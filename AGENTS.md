@@ -223,6 +223,13 @@
 - 后端接口 `GET /api/version/check-update` 异步拉取 GitHub Releases，比对语义化版本号。
 - 前端启动 1 秒静默检测，有新版本时设置齿轮亮起红点；提供专属【版本更新】控制台与版本忽略功能。
 
+### 3.14 后端功能边界与渐进式解耦
+- `main.py` 是应用装配和 HTTP 兼容入口，不是所有功能的唯一实现文件。保留 `uvicorn main:app`、原有路由、函数名及调用参数；启动生命周期、安全中间件、设置、题库 CRUD、AI 接口和导出入口尚在此文件，继续拆分时须按领域逐步迁移，不能一次重写。
+- `mathbank.pdf_import_service` 与 `mathbank.docx_import_service` 分别负责 PDF / Word 导入任务编排。`main.build_document_import_dependencies()` 在每次任务开始时提供不可变的 `DocumentImportDependencies`，显式传入现有任务管理器、并发信号量、路径及识图/拆题/原卷核对回调。服务不得反向导入 `main`，不得自行创建第二套任务管理器、供应商逻辑或全局配置。
+- `mathbank.document_text` 提供标题提取、页码范围解析、填空宏清洗、OCR 插图处理及原页匹配等纯文本能力；`mathbank.document_postprocess` 提供共用拆题后处理，资源路径与兼容回调显式注入。`main.py` 中旧函数名继续重导出或作为薄包装，避免破坏已有调用和测试。
+- `mathbank.web_assets` 负责首页、图标、离线脚本版本戳与缓存响应；本地令牌和服务实例 ID 由应用传入。`mathbank.version_updates` 负责版本比较和 Release 查询，仓库、当前版本、项目路径和 HTTP 请求函数由应用传入，不在导入模块时发起网络访问。
+- 专项验收为 `tests/test_backend_decoupling.py`：检查完整路由清单、独立模块导入与无副作用、运行时依赖共享、PDF/Word 独立运行和页面/版本响应契约。`tests/fixtures/backend_refactor_contract.json` 固定本次拆分前提交的算法 AST 指纹，验证仅迁移实现而未改变原有算法；后续有意修改算法时须核对并更新对应基线，不能为绕过失败而自动重录。仍须运行全量测试及真实浏览器回归，不以静态指纹替代功能验收。
+
 ## 4. 外部 API 接入规范
 - **密钥与鉴权**：读取 `.env` 密钥，修改类接口必须携带 `X-Local-Token` 头部。
 - **私有配置提交边界**：`.env`、`.env.*`（包括 `.env.bak`、`.env.production` 等副本）与 `.system_generated/` 必须由 Git 忽略，仅允许根目录不含真实密钥的 `.env.example` 配置模板入库。控制令牌泄露后须在服务停止时更换本地文件，再启动服务、刷新页面；添加忽略规则不能撤回历史提交中的凭据。

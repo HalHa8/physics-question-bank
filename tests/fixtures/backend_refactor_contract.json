@@ -1,0 +1,317 @@
+{
+  "baseline_commit": "2d3740dfb7b035a23cc5b98635a499c596557689",
+  "baseline_main_lines": 6620,
+  "body_sha256": {
+    "parse_version_tuple": "117aaa651d284295e0560baf0fa5ee9b776e6098bea7f32314b59fefd5103d58",
+    "normalize_fillin_macro": "5da5509aa6e3cf37a58970e8738e301d29feeab03e023588eed3d1894150557c",
+    "extract_title_from_latex": "f254a072d395069aa1732af4d049a83ccea7deb23af8f8a90545f9bf0b408575",
+    "process_ocr_illustrations": "1c5b80bbe2c872ce149de74cbf396cc62c327529321c770c19aa8e729ccc6e0d",
+    "find_source_page_by_overlap": "0aad3b3a6b68eab39f7fb08aea90c94594d389dd889bdfb0c791e56b37d754c6",
+    "post_process_pdf_parsed_questions": "40021c8cea981a78fde579661da109659e4ddada85c74d912c31cbf93f97424a",
+    "run_pdf_parsing_task": "15aca35f1790891d9200761b09a1a6a8062a337520a9979fa5cc1304addcb622",
+    "parse_page_range": "e2e521673591307623e82004820f646b25c6bd8600eb823c5afd2ea3e9cf3538",
+    "run_docx_parsing_task": "e15b99804aa1a3c095bc1e847b19d66bff02b74c16056f5af8331f1ad3001e3e"
+  },
+  "routes": [
+    {
+      "path": "/",
+      "method": "GET",
+      "name": "read_index"
+    },
+    {
+      "path": "/api/ai/classify",
+      "method": "POST",
+      "name": "ai_classify"
+    },
+    {
+      "path": "/api/ai/clear-temp-crops",
+      "method": "POST",
+      "name": "clear_temp_crops"
+    },
+    {
+      "path": "/api/ai/draw_tikz",
+      "method": "POST",
+      "name": "draw_tikz_workbench_endpoint"
+    },
+    {
+      "path": "/api/ai/draw_tikz_from_image",
+      "method": "POST",
+      "name": "draw_tikz_from_image_endpoint"
+    },
+    {
+      "path": "/api/ai/manual-crop-pdf",
+      "method": "POST",
+      "name": "manual_crop_pdf"
+    },
+    {
+      "path": "/api/ai/parse-paper",
+      "method": "POST",
+      "name": "ai_parse_paper"
+    },
+    {
+      "path": "/api/ai/solve",
+      "method": "POST",
+      "name": "ai_solve"
+    },
+    {
+      "path": "/api/categories",
+      "method": "GET",
+      "name": "list_categories"
+    },
+    {
+      "path": "/api/config/curriculum-presets/{version}",
+      "method": "GET",
+      "name": "get_curriculum_preset_config"
+    },
+    {
+      "path": "/api/config/metadata",
+      "method": "GET",
+      "name": "get_metadata_config"
+    },
+    {
+      "path": "/api/config/metadata",
+      "method": "POST",
+      "name": "save_metadata_config"
+    },
+    {
+      "path": "/api/correct_tikz",
+      "method": "POST",
+      "name": "correct_tikz_endpoint"
+    },
+    {
+      "path": "/api/format/fractions",
+      "method": "POST",
+      "name": "format_fraction_style"
+    },
+    {
+      "path": "/api/heartbeat",
+      "method": "POST",
+      "name": "api_heartbeat"
+    },
+    {
+      "path": "/api/ocr",
+      "method": "POST",
+      "name": "ocr_formula"
+    },
+    {
+      "path": "/api/paper/ai-select",
+      "method": "POST",
+      "name": "ai_select_paper"
+    },
+    {
+      "path": "/api/paper/export/bundle",
+      "method": "POST",
+      "name": "export_paper_bundle"
+    },
+    {
+      "path": "/api/paper/export/pdf",
+      "method": "POST",
+      "name": "export_paper_pdf"
+    },
+    {
+      "path": "/api/paper/export/tex",
+      "method": "POST",
+      "name": "export_paper_tex"
+    },
+    {
+      "path": "/api/paper/export/word",
+      "method": "POST",
+      "name": "export_paper_word"
+    },
+    {
+      "path": "/api/paper/questions",
+      "method": "GET",
+      "name": "get_paper_questions"
+    },
+    {
+      "path": "/api/paper/save",
+      "method": "POST",
+      "name": "save_paper"
+    },
+    {
+      "path": "/api/papers",
+      "method": "GET",
+      "name": "list_papers"
+    },
+    {
+      "path": "/api/papers/{paper_id}",
+      "method": "DELETE",
+      "name": "delete_paper"
+    },
+    {
+      "path": "/api/papers/{paper_id}",
+      "method": "GET",
+      "name": "get_paper_detail"
+    },
+    {
+      "path": "/api/questions",
+      "method": "GET",
+      "name": "list_questions"
+    },
+    {
+      "path": "/api/questions",
+      "method": "POST",
+      "name": "create_question"
+    },
+    {
+      "path": "/api/questions/check-duplicates",
+      "method": "POST",
+      "name": "check_question_duplicates"
+    },
+    {
+      "path": "/api/questions/{question_id}",
+      "method": "DELETE",
+      "name": "delete_question"
+    },
+    {
+      "path": "/api/questions/{question_id}",
+      "method": "GET",
+      "name": "get_question"
+    },
+    {
+      "path": "/api/questions/{question_id}",
+      "method": "PUT",
+      "name": "update_question"
+    },
+    {
+      "path": "/api/questions/{question_id}/associate",
+      "method": "POST",
+      "name": "associate_questions_endpoint"
+    },
+    {
+      "path": "/api/questions/{question_id}/associated",
+      "method": "DELETE",
+      "name": "remove_association"
+    },
+    {
+      "path": "/api/questions/{question_id}/associated",
+      "method": "GET",
+      "name": "get_associated_questions"
+    },
+    {
+      "path": "/api/questions/{question_id}/figure_align",
+      "method": "POST",
+      "name": "update_question_figure_align"
+    },
+    {
+      "path": "/api/questions/{question_id}/figure_layout",
+      "method": "POST",
+      "name": "update_question_figure_layout"
+    },
+    {
+      "path": "/api/render_tikz",
+      "method": "POST",
+      "name": "render_tikz_endpoint"
+    },
+    {
+      "path": "/api/runtime/pandoc/install",
+      "method": "POST",
+      "name": "install_pandoc_runtime"
+    },
+    {
+      "path": "/api/runtime/pandoc/install/{task_id}",
+      "method": "GET",
+      "name": "get_pandoc_install_status"
+    },
+    {
+      "path": "/api/runtime/pandoc/status",
+      "method": "GET",
+      "name": "get_pandoc_runtime_status"
+    },
+    {
+      "path": "/api/settings",
+      "method": "GET",
+      "name": "get_settings"
+    },
+    {
+      "path": "/api/settings/save",
+      "method": "POST",
+      "name": "save_settings"
+    },
+    {
+      "path": "/api/shutdown",
+      "method": "POST",
+      "name": "shutdown_server"
+    },
+    {
+      "path": "/api/sources",
+      "method": "GET",
+      "name": "get_sources"
+    },
+    {
+      "path": "/api/stats",
+      "method": "GET",
+      "name": "get_db_stats"
+    },
+    {
+      "path": "/api/tasks/{task_id}/cancel",
+      "method": "POST",
+      "name": "cancel_pdf_task"
+    },
+    {
+      "path": "/api/tasks/{task_id}/status",
+      "method": "GET",
+      "name": "get_pdf_task_status"
+    },
+    {
+      "path": "/api/upload",
+      "method": "POST",
+      "name": "upload_image"
+    },
+    {
+      "path": "/api/upload/batch",
+      "method": "POST",
+      "name": "upload_batch_images"
+    },
+    {
+      "path": "/api/upload/docx-task",
+      "method": "POST",
+      "name": "upload_docx_task"
+    },
+    {
+      "path": "/api/upload/pdf-task",
+      "method": "POST",
+      "name": "upload_pdf_task"
+    },
+    {
+      "path": "/api/upload/tex-source",
+      "method": "POST",
+      "name": "upload_tex_source"
+    },
+    {
+      "path": "/api/version",
+      "method": "GET",
+      "name": "get_version_info"
+    },
+    {
+      "path": "/api/version/check-update",
+      "method": "GET",
+      "name": "check_version_update"
+    },
+    {
+      "path": "/apple-touch-icon-precomposed.png",
+      "method": "GET",
+      "name": "read_apple_touch_icon"
+    },
+    {
+      "path": "/apple-touch-icon.png",
+      "method": "GET",
+      "name": "read_apple_touch_icon"
+    },
+    {
+      "path": "/favicon.ico",
+      "method": "GET",
+      "name": "read_favicon"
+    },
+    {
+      "path": "/favicon.svg",
+      "method": "GET",
+      "name": "read_favicon_svg"
+    },
+    {
+      "path": "/healthz",
+      "method": "GET",
+      "name": "healthz"
+    }
+  ]
+}

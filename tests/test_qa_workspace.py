@@ -41,7 +41,9 @@ def test_qa_data_has_unique_traceable_entries_and_ships_with_scripts():
     index = (ROOT / 'static/index.html').read_text(encoding='utf-8')
     assert index.index('/static/js/qa-data.js') < index.index('/static/js/qa.js')
     route = (ROOT / 'main.py').read_text(encoding='utf-8')
-    assert '"qa-data.js"' in route and '"qa.js"' in route
+    assets = (ROOT / 'mathbank/web_assets.py').read_text(encoding='utf-8')
+    assert 'web_assets.build_index_response' in route
+    assert '"qa-data.js"' in assets and '"qa.js"' in assets
     script = (ROOT / 'static/js/qa.js').read_text(encoding='utf-8')
     assert '.innerHTML' not in script and '.textContent' in script
     assert 'fetch(' not in script and 'localStorage' not in script
