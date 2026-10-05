@@ -38,6 +38,7 @@ __pycache__/
 *.pyo
 .pytest_cache/
 .pytest/
+.test-artifacts/
 scratch/
 
 # 6. 忽略操作系统临时文件与 IDE 配置文件

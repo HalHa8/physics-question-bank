@@ -224,11 +224,15 @@
 - 前端启动 1 秒静默检测，有新版本时设置齿轮亮起红点；提供专属【版本更新】控制台与版本忽略功能。
 
 ### 3.14 后端功能边界与渐进式解耦
-- `main.py` 是应用装配和 HTTP 兼容入口，不是所有功能的唯一实现文件。保留 `uvicorn main:app`、原有路由、函数名及调用参数；启动生命周期、安全中间件、设置、题库 CRUD、AI 接口和导出入口尚在此文件，继续拆分时须按领域逐步迁移，不能一次重写。
+- 三阶段拆分已完成：`main.py` 仅配置 Windows 输出编码、调用应用工厂、导出 `app` 并安装旧入口适配。`mathbank.application_factory` 负责明确的应用装配与启动初始化，`api_routes` 保存 HTTP 注册清单，`domain_registry` 保存领域与依赖契约的对应关系；保留 `uvicorn main:app`、原有路由、函数名及调用参数。
+- 第二阶段领域：`question_queries` 负责查询、统计与查重入口，`question_commands` 负责题目保存、布局与关联，`question_asset_service` 负责资源晋升、引用与清理；`paper_record_service` 负责试卷记录，`paper_export_service` 负责验证和导出编排，继续复用既有 LaTeX/Word 排版引擎。资源操作仍须服从原事务、回滚及备份边界，不得另建数据库。
+- 第三阶段领域：`ocr_service`、`solve_service`、`drawing_service`、`classification_service`、`paper_parse_service`、`paper_selection_service` 按 AI 任务拆分，继续复用原有供应商、思考策略、HTTP 与提示构建器；`settings_service`、`curriculum_service` 分别管理模型设置和教材元数据；`runtime_service`、`maintenance_service` 管理安全、生命周期和就绪后维护，`image_upload_service`、`system_routes` 承接上传与系统接口。
+- 运行状态唯一存放在每个应用实例的 `application_state.RuntimeState`；各领域接收冻结的 `*Dependencies`，跨领域调用及外部能力由 `ApplicationBindings` 在调用边界装配，不允许业务模块反向导入 `main`、工厂或另起配置/任务状态。`application_imports` 只集中旧入口的依赖默认值，不执行业务初始化。导入任一领域模块或工厂不应写文件、启动服务、初始化数据库或发送 AI 请求；初始化仅在显式调用工厂时执行。
+- `application_bindings.install_legacy_facade` 只为旧调用保留 `from main import ...`、旧函数签名及测试替换入口。状态读写直接转到同一 `RuntimeState`，不能把可变状态复制到 `main.__dict__`；新代码直接使用领域模块与显式依赖，不再扩展旧入口。静态规则须检查功能真实所在模块，不用向 `main.py` 塞占位字符串来绕过测试。
 - `mathbank.pdf_import_service` 与 `mathbank.docx_import_service` 分别负责 PDF / Word 导入任务编排。`main.build_document_import_dependencies()` 在每次任务开始时提供不可变的 `DocumentImportDependencies`，显式传入现有任务管理器、并发信号量、路径及识图/拆题/原卷核对回调。服务不得反向导入 `main`，不得自行创建第二套任务管理器、供应商逻辑或全局配置。
 - `mathbank.document_text` 提供标题提取、页码范围解析、填空宏清洗、OCR 插图处理及原页匹配等纯文本能力；`mathbank.document_postprocess` 提供共用拆题后处理，资源路径与兼容回调显式注入。`main.py` 中旧函数名继续重导出或作为薄包装，避免破坏已有调用和测试。
 - `mathbank.web_assets` 负责首页、图标、离线脚本版本戳与缓存响应；本地令牌和服务实例 ID 由应用传入。`mathbank.version_updates` 负责版本比较和 Release 查询，仓库、当前版本、项目路径和 HTTP 请求函数由应用传入，不在导入模块时发起网络访问。
-- 专项验收为 `tests/test_backend_decoupling.py`：检查完整路由清单、独立模块导入与无副作用、运行时依赖共享、PDF/Word 独立运行和页面/版本响应契约。`tests/fixtures/backend_refactor_contract.json` 固定本次拆分前提交的算法 AST 指纹，验证仅迁移实现而未改变原有算法；后续有意修改算法时须核对并更新对应基线，不能为绕过失败而自动重录。仍须运行全量测试及真实浏览器回归，不以静态指纹替代功能验收。
+- 专项验收为 `tests/test_backend_decoupling.py` 及 `tests/test_backend_domains.py`：检查完整路由清单、OpenAPI 输入输出规范、模块独立导入与无副作用、状态隔离、旧入口覆盖与嵌套替换恢复、PDF/Word 独立运行以及启动失败资源释放。`tests/fixtures/backend_refactor_contract.json`、`backend_domain_contract.json` 和 `backend_openapi_contract.json` 固定拆分前提交的算法与接口基线；后续有意修改算法或接口时须核对并更新对应基线，不能为绕过失败而自动重录。仍须运行全量测试、真实浏览器和已安装 Word/PDF 工具回归，不以静态指纹替代功能验收。
 
 ## 4. 外部 API 接入规范
 - **密钥与鉴权**：读取 `.env` 密钥，修改类接口必须携带 `X-Local-Token` 头部。

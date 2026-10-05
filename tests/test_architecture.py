@@ -108,7 +108,8 @@ def test_editor_identity_and_meta_preview_have_single_sources():
 
 
 def test_multimodal_ai_routes_use_shared_provider_resolvers():
-    main_source = (PROJECT_ROOT / "main.py").read_text(encoding="utf-8")
+    main_source = "\n".join((PROJECT_ROOT / "mathbank" / name).read_text(encoding="utf-8")
+                            for name in ("ocr_service.py", "drawing_service.py"))
 
     for legacy_helper in (
         "def ocr_via_siliconflow",
@@ -124,7 +125,10 @@ def test_multimodal_ai_routes_use_shared_provider_resolvers():
 
 
 def test_all_text_ai_routes_parse_models_with_the_shared_effort_rules():
-    main_source = (PROJECT_ROOT / "main.py").read_text(encoding="utf-8")
+    main_source = "\n".join((PROJECT_ROOT / "mathbank" / name).read_text(encoding="utf-8")
+                            for name in ("solve_service.py", "paper_parse_service.py",
+                                         "classification_service.py", "paper_selection_service.py",
+                                         "paper_export_service.py", "drawing_service.py", "ocr_service.py"))
 
     assert "parse_effort=False" not in main_source
     assert "robust_request_post" not in main_source
@@ -173,11 +177,12 @@ def test_paper_parsers_use_defensive_ai_json_parser():
     def called_functions(path, name):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         function = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == name)
-        return {node.func.id for node in ast.walk(function)
-                if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)}
+        return {node.func.id if isinstance(node.func, ast.Name) else node.func.attr
+                for node in ast.walk(function) if isinstance(node, ast.Call)
+                and isinstance(node.func, (ast.Name, ast.Attribute))}
 
     for handler in ("parse_paper_text_internal", "ai_parse_paper"):
-        assert "parse_paper_completion" in called_functions(PROJECT_ROOT / "main.py", handler)
+        assert "parse_paper_completion" in called_functions(PROJECT_ROOT / "mathbank/paper_parse_service.py", handler)
     assert "parse_ai_json" in called_functions(
         PROJECT_ROOT / "mathbank" / "paper_parse.py", "parse_paper_completion"
     )
@@ -210,14 +215,14 @@ def test_backend_modules_and_cli_tools_live_in_packages():
 
 
 def test_server_holds_restore_runtime_lock_before_database_initialization():
-    main_source = (PROJECT_ROOT / "main.py").read_text(encoding="utf-8")
+    main_source = (PROJECT_ROOT / "mathbank/application_factory.py").read_text(encoding="utf-8")
 
     lock_call = main_source.index(
-        "_RUNTIME_LOCK = None if IS_TESTING else acquire_runtime_lock()"
+        "state._RUNTIME_LOCK = None if state.IS_TESTING else defaults.acquire_runtime_lock()"
     )
-    database_init = main_source.index("\ninit_db()", lock_call)
+    database_init = main_source.index("defaults.init_db()", lock_call)
     assert lock_call < database_init
-    assert "atexit.register(_RUNTIME_LOCK.close)" in main_source[lock_call:database_init]
+    assert "atexit.register(state._RUNTIME_LOCK.close)" in main_source[lock_call:database_init]
 
 
 def test_lifespan_owns_post_startup_maintenance(monkeypatch):
@@ -328,9 +333,9 @@ def test_post_startup_maintenance_stops_mutation_when_backup_fails(monkeypatch):
 
 
 def test_metadata_load_does_not_run_full_database_heal_before_ready():
-    main_source = (PROJECT_ROOT / "main.py").read_text(encoding="utf-8")
-    metadata_start = main_source.index("def load_or_init_metadata()")
-    metadata_end = main_source.index("def get_active_version_code()", metadata_start)
+    main_source = (PROJECT_ROOT / "mathbank/curriculum_service.py").read_text(encoding="utf-8")
+    metadata_start = main_source.index("def load_or_init_metadata(")
+    metadata_end = main_source.index("def get_active_version_code(", metadata_start)
     assert "heal_database_curriculum_names()" not in main_source[
         metadata_start:metadata_end
     ]

@@ -88,7 +88,8 @@ def test_upstream_workspaces_keep_physics_brand_and_defaults():
     paper = (root / "static/js/paper.js").read_text(encoding="utf-8")
     editor = (root / "static/js/editor.js").read_text(encoding="utf-8")
     import_ui = (root / "static/js/import.js").read_text(encoding="utf-8")
-    backend = (root / "main.py").read_text(encoding="utf-8")
+    backend = "\n".join((root / "mathbank" / name).read_text(encoding="utf-8")
+                         for name in ("application_factory.py", "paper_selection_service.py", "paper_export_service.py"))
 
     assert 'aria-label="PhysicsBank 主导航"' in index
     assert '<strong>PhysicsBank</strong>' in index

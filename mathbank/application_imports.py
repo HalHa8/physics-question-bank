@@ -1,0 +1,65 @@
+"""Compatibility dependency defaults; no application initialization or business logic."""
+
+import os
+import atexit
+import io
+import sys
+import uuid
+import json
+import copy
+import hashlib
+import time
+import re
+import signal
+import datetime
+import threading
+import tempfile
+import requests
+from contextlib import asynccontextmanager
+from pathlib import Path
+import secrets
+from typing import List, Optional
+from PIL import Image
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks, Request, Response, Header
+from fastapi.responses import FileResponse, JSONResponse, HTMLResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.orm import Session
+from dotenv import load_dotenv
+from mathbank.database import FIGURE_ALIGN_VALUES, FIGURE_SIZE_VALUES, Question, QuestionCurriculum, QuestionFingerprint as StoredQuestionFingerprint, Paper, PaperQuestion, engine, get_db, init_db, normalize_figure_size
+from mathbank.question_duplicates import QuestionDuplicateInput, build_question_fingerprint
+from mathbank.import_review import make_source_review_advisory
+from mathbank.question_duplicate_service import batch_local_matches, exact_duplicate_ids, find_indexed_candidates, fingerprint_for_question, index_status as duplicate_index_status, rebuild_all_missing_fingerprints, select_answer_images, select_visible_question_images, tikz_signatures as build_tikz_signatures, upsert_question_fingerprint, visible_image_signatures as build_visible_image_signatures
+from mathbank.paper_helper import build_latex_document, build_answer_sheet_latex, compile_tex_to_pdf, create_tex_zip_package, create_full_bundle_zip_package, collect_referenced_images, build_restricted_tex_environment
+from mathbank.word_export_helper import build_word_document, create_word_bundle_zip
+from mathbank.runtime_components import PANDOC_INSTALL_MANAGER, pandoc_status
+from mathbank.sync_helper import export_database_to_files
+from mathbank.backup import acquire_runtime_lock, create_full_backup_if_due
+from mathbank.health import readiness_report
+from mathbank.task_manager import TaskCancelled, TaskManager, TaskQueueFull
+from mathbank.docx_helper import extract_docx_markdown
+from mathbank import pdf_import_service, docx_import_service
+from mathbank import web_assets, version_updates
+from mathbank.version_updates import parse_version_tuple
+from mathbank.document_import_context import DocumentImportDependencies
+from mathbank.document_postprocess import post_process_questions
+from mathbank.document_text import normalize_fillin_macro, extract_title_from_latex, process_ocr_illustrations, find_source_page_by_overlap, parse_page_range
+from mathbank.content_locks import lock_visible_math, reconcile_visible_math
+from mathbank.paper_parse import parse_paper_completion, finalize_source_answers
+from mathbank.math_markdown import normalize_question_math_markdown
+from mathbank.fraction_style import normalize_fraction_style
+from mathbank.tex_helper import MAX_TEX_BYTES, decode_and_prepare_tex, prepare_tex_source, tex_asset_basename, tex_asset_references_match
+from mathbank.latex_diagnostics import build_local_latex_diagnostic, merge_ai_latex_diagnostic
+from mathbank.ai_json import parse_ai_json
+from mathbank.ai_http import post_chat_completion
+from mathbank.ai_providers import MultimodalProviderConfig, OCRConfigurationError, OCRResponseTimeoutError, ParseConfigurationError, apply_model_thinking_policy, resolve_draw_provider, resolve_ocr_fallbacks, resolve_ocr_provider, resolve_text_provider
+from mathbank.curriculums import build_default_metadata, get_curriculum_preset, load_curriculum
+from mathbank.prompts import COMMON_OCR_PROMPT, ILLUSTRATION_BOX_PROMPT, build_ai_solve_prompts, build_classification_system_prompt, build_import_parse_system_prompt, build_latex_error_explanation_prompts, build_paper_selection_prompts, build_pdf_parse_system_prompt, build_tikz_correction_prompt, build_tikz_draw_prompt
+from mathbank.question_types import detect_structured_question_form, normalize_ai_question_form, normalize_section_order
+import shutil
+from mathbank.pdf_inspector_helper import is_pdf_inspector_available, inspect_and_extract_pdf, merge_pdf_page_texts
+from mathbank.pdf_figures import PDF_STRATEGIES, apply_pdf_layout_reviews, enrich_pdf_with_figures, isolate_shared_pdf_figures
+from mathbank.pdf_layout import inspect_pdf_page
+from mathbank.paths import DATABASE_PATH, DATA_BACKUP_DIR, ENV_FILE, PROJECT_ROOT, STATIC_CSS_DIR, STATIC_DIR, STATIC_JS_DIR, SYSTEM_GENERATED_DIR, TEST_UPLOADS_DIR, UPLOADS_DIR
+from mathbank.asset_security import AssetSecurityError, InvalidImageError, MAX_OCR_IMAGE_BYTES, MAX_PDF_BYTES, MAX_SINGLE_IMAGE_BYTES, UploadTooLargeError, harden_private_path, normalize_answer_tikz_assets, normalize_content_tikz_assets, normalize_optional_upload_asset_reference, normalize_raster_image, normalize_upload_asset_reference, normalize_upload_asset_references, read_stream_limited, resolve_upload_asset, write_private_text_atomic
+from mathbank.application_errors import PaperExportValidationError
