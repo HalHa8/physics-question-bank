@@ -195,7 +195,7 @@ global.window = {
 };
 """ + helper_source + r"""
 const fillin = String.raw`\fillin`;
-const renderedFillin = String.raw`$\underline{\hspace{1.5cm}}$`;
+const renderedFillin = String.raw`\(\underline{\hspace{1.5cm}}\)`;
 for (let count = 1; count <= 6; count += 1) {
   const source = `11${fillin.repeat(count)}`;
   const rendered = window.preprocessFormulaForKaTeX(source);

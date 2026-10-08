@@ -13,3 +13,8 @@ PhysicsBank is distributed under the same GNU AGPL-3.0 license. See `LICENSE`.
 The codebase also incorporates upstream MathBank changes through commit
 `adbc2df` (MathBank 2.4.0 plus later main-branch commits), while retaining
 the original repository history.
+
+Additional selected upstream preview fixes have been adapted with
+physics-specific regression checks. Their source commits and remaining
+unported changes are recorded in `docs/upstream-sync.md`; this does not
+represent a complete upgrade to the latest MathBank release.
