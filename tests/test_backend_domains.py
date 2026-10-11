@@ -50,7 +50,9 @@ class RestoreNames(ast.NodeTransformer):
 
 
 @pytest.mark.parametrize('name,module', sorted(CONTRACT['functions'].items()))
-def test_each_extracted_function_keeps_its_original_algorithm(name, module):
+def test_each_extracted_function_keeps_its_audited_algorithm(name, module):
+    # Extraction baselines remain fixed except individually documented,
+    # intentional fixes with separate behavior regressions in the contract.
     tree = ast.parse((ROOT / 'mathbank' / (module + '.py')).read_text(encoding='utf-8'))
     function = next(n for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == name)
     body = [RestoreNames().visit(copy.deepcopy(n)) for n in function.body]

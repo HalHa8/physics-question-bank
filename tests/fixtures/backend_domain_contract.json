@@ -1,5 +1,13 @@
 {
   "baseline_commit": "94de5dd1fd5e9fd4ea6256312be2e1ebf311899f",
+  "intentional_algorithm_updates": {
+    "heal_database_curriculum_names": {
+      "upstream_commit": "3252b7237f3add8f632f00a413a23814ed8882a4",
+      "reason": "Keep custom and historical knowledge labels; exclude PhysicsBank P mirrors from mathematics book aliases.",
+      "previous_body_sha256": "8ed3bda7de19bd3df0ca8838a256b0b11c36a5e60e051aa28bd83caa1421f90f",
+      "behavior_regressions": "tests/test_startup_knowledge_preservation.py"
+    }
+  },
   "functions": {
     "schedule_database_export": "maintenance_service",
     "schedule_question_fingerprint_retry": "maintenance_service",
@@ -109,7 +117,7 @@
     "schedule_question_fingerprint_retry": "757ed575359f4e38da0b655c173e0d7be7c59558b69b3cafdc13692039ba31c4",
     "print_startup_diagnostics": "0feb145ebf5e182f982a1b4863ec7030aa384c1309ff52d0fb39311a13011436",
     "print_optional_tool_diagnostics": "1b44fb8aa0a6a85abd75a33e568c49d1814a33611243a5d925a08249af433ed2",
-    "heal_database_curriculum_names": "8ed3bda7de19bd3df0ca8838a256b0b11c36a5e60e051aa28bd83caa1421f90f",
+    "heal_database_curriculum_names": "66b906f711b5b5fc18799d9bdae9811a596cb9bd6c3e42da790df6b523876397",
     "clean_orphaned_images": "db2b5964eb44d04d162ac1f642922a9c170d20b628db0e229458e8feee9b4fd0",
     "recalibrate_usage_counts": "96aba02af03ac5d84173d7529f5499994a25024c1ab2cf86bd0d6a5b9dad05db",
     "start_startup_cleanup": "13400d3b386cf93d0dd97d1abb2f1e9e736824169cad789e4e2709f28861c2b0",

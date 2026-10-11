@@ -79,7 +79,7 @@ jobs:
       - name: Install guard-test runner
         run: python -m pip install --disable-pip-version-check pytest==9.0.3
       - name: Run Release and launcher guard tests without app conftest
-        run: python -m pytest --noconftest tests/test_release_hardening.py tests/test_windows_launcher.py
+        run: python -m pytest --noconftest tests/test_release_hardening.py tests/test_windows_launcher.py tests/test_release_tool_boundary.py
       - name: Build, package, and import-smoke the embedded Windows runtime
         if: runner.os == 'Windows'
         shell: pwsh

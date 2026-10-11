@@ -14,7 +14,14 @@ The codebase also incorporates upstream MathBank changes through commit
 `adbc2df` (MathBank 2.4.0 plus later main-branch commits), while retaining
 the original repository history.
 
-Additional selected upstream preview fixes have been adapted with
+Additional selected upstream preview and release-boundary fixes have been adapted with
 physics-specific regression checks. Their source commits and remaining
 unported changes are recorded in `docs/upstream-sync.md`; this does not
 represent a complete upgrade to the latest MathBank release.
+
+The upright-constant preview, startup knowledge preservation and
+maintenance-tool release isolation changes
+adapt selected portions of upstream commits `3252b72` and `550b319`, authored
+by JudgePeach. Their adoption does not imply the OCR or schema changes from
+MathBank 2.7.0 are included. Source-only tools remain available in this source
+repository; they are excluded from portable runtime packages.

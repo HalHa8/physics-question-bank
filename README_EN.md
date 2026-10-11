@@ -18,6 +18,11 @@ The physics adaptation adds a 2019 PEP high-school physics curriculum, six
 physics-oriented question types, physics-specific OCR and solution prompts,
 and regular-exam defaults. Data and API keys remain local by default.
 
+Browser previews support explicit upright constants `\iu` / `\upi` and
+`\eu` / `\upe` without rewriting ordinary current/charge variables `i` and `e`.
+Legacy-library startup repairs preserve custom knowledge labels and independent
+physics curriculum records.
+
 > This project does not bundle a freely redistributable question collection.
 > Imported questions, papers, and images remain subject to their own copyright
 > and usage terms.

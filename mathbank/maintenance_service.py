@@ -158,40 +158,19 @@ def heal_database_curriculum_names(*, dependencies: MaintenanceServiceDependenci
 
         updated_mappings = 0
         for old, new in mappings.items():
-            res = db.query(dependencies.QuestionCurriculum).filter(dependencies.QuestionCurriculum.compulsory == old).update(
+            res = db.query(dependencies.QuestionCurriculum).filter(
+                dependencies.QuestionCurriculum.compulsory == old,
+                dependencies.QuestionCurriculum.version_code != "P",
+            ).update(
                 {dependencies.QuestionCurriculum.compulsory: new}, synchronize_session=False
             )
             updated_mappings += res
 
-        # 清理在主表 questions 及镜像表 question_curriculums 中残留的不属于各自大纲小节列表的旧章名/错位知识点
-        curr = dependencies.get_current_curriculum()
-        healed_know_count = 0
-        all_qs = db.query(dependencies.Question).all()
-        for q in all_qs:
-            comp = q.category_compulsory
-            chap = q.category_chapter
-            know = q.category_knowledge
-            if know:
-                valid_knows = curr.get(comp, {}).get(chap, [])
-                if know not in valid_knows:
-                    q.category_knowledge = ""
-                    healed_know_count += 1
-
-        all_qcs = db.query(dependencies.QuestionCurriculum).all()
-        for qc in all_qcs:
-            if qc.knowledge:
-                try:
-                    c_tree = dependencies.load_curriculum(qc.version_code)
-                except ValueError:
-                    c_tree = curr
-                valid_knows = c_tree.get(qc.compulsory, {}).get(qc.chapter, [])
-                if qc.knowledge not in valid_knows:
-                    qc.knowledge = ""
-                    healed_know_count += 1
-
-        if updated_questions > 0 or updated_mappings > 0 or healed_know_count > 0:
+        # Custom and historical labels need explicit teacher review, not silent
+        # deletion against today's preset. P mirrors never use math book aliases.
+        if updated_questions > 0 or updated_mappings > 0:
             db.commit()
-            print(f"[Self-Healing DB] Migrated {updated_questions} questions, {updated_mappings} mappings, and cleaned {healed_know_count} mismatched knowledge values.")
+            print(f"[Self-Healing DB] Migrated book aliases for {updated_questions} questions and {updated_mappings} mappings; preserved all knowledge labels.")
     except Exception as e:
         db.rollback()
         print(f"[Self-Healing DB Error] Failed to run database book names migration: {e}")

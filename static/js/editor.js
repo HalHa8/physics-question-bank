@@ -2203,6 +2203,10 @@ window.normalizeEditorFractions = normalizeEditorFractions;
         }
         function registerSchoolMathSymbols(renderer) {
             const { Span, SvgNode, PathNode } = renderer.__domTree;
+            // Match exam-zh's explicit upright constants in every shared preview.
+            // Do not rewrite ordinary i/e (e.g. current or elementary charge).
+            ['iu', 'upi'].forEach(name => renderer.__defineMacro('\\' + name, '\\mathrm{i}'));
+            ['eu', 'upe'].forEach(name => renderer.__defineMacro('\\' + name, '\\mathrm{e}'));
             renderer.__defineMacro('\\ensuremath', context =>
                 context.mode === 'text' ? '\\({#1}\\)' : '{#1}');
             renderer.__defineFunction({
