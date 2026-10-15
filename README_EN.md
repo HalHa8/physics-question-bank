@@ -4,6 +4,17 @@
 
 # PhysicsBank: Local High-School Physics Question Bank
 
+Screenshot OCR now crops figures directly from the original image, preserving
+their text, option or table positions. Original-image mode is enabled by default.
+Unresolved or inaccurate figures can be manually cropped or re-cropped from the
+same screenshot; a separate illustration upload is unnecessary. Cropping is
+local and needs no LaTeX or extra AI review request. Check labels, axes, polarity
+and circuit connections before saving. Turning off original-image mode explicitly
+enables extra paid TikZ drawing calls per figure.
+
+This update is on `codex/refactor-backend-modules`; existing Windows portable
+packages have not been rebuilt. Use this source branch to obtain the changes.
+
 [简体中文](README.md) · [AGPL-3.0 license](LICENSE) · [Notices](NOTICE.md)
 
 PhysicsBank is a local-first question bank, AI-assisted solution, import, search,

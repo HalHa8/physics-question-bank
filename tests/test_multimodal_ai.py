@@ -73,7 +73,7 @@ def test_ocr_request_uses_resolved_multimodal_provider(tmp_path, base, model, ef
     assert kwargs["json"]["model"] == model
     assert kwargs["json"]["reasoning_effort"] == effort
     assert "enable_thinking" not in kwargs["json"]
-    image_item = kwargs["json"]["messages"][0]["content"][1]
+    image_item = kwargs["json"]["messages"][-1]["content"][1]
     assert image_item["image_url"]["url"].startswith("data:image/png;base64,")
 
 
@@ -355,9 +355,16 @@ def test_failed_workbench_draw_does_not_leave_reference_file(client):
     assert set(upload_root.glob("tikz_reference_*")) == before
 
 
-def test_question_ocr_still_auto_draws_tikz_and_returns_original_reference(client):
+def test_question_ocr_explicit_redraw_uses_only_bound_crop_and_returns_per_figure_reference(client, tmp_path, monkeypatch):
+    import main
+    import json
+    monkeypatch.setattr(main, 'UPLOAD_DIR', str(tmp_path))
+    monkeypatch.setattr(main, 'UPLOAD_DIR_REL', 'static/test_uploads')
     generated = "\\begin{tikzpicture}\\draw (0,0)--(1,0);\\end{tikzpicture}"
     rendered_url = "/static/test_uploads/tikz_auto_test.png"
+    Image.new('RGB', (50, 48), 'white').save(tmp_path / 'tikz_auto_test.png')
+    source = io.BytesIO()
+    Image.new('RGB', (100, 80), 'white').save(source, format='PNG')
     observed_original = None
     provider = SimpleNamespace(
         api_key="ocr-key",
@@ -370,19 +377,21 @@ def test_question_ocr_still_auto_draws_tikz_and_returns_original_reference(clien
         nonlocal observed_original
         observed_original = Path(original_path)
         assert observed_original.is_file()
+        assert Image.open(observed_original).size == (50, 48)
         return generated
 
     try:
         with patch("main.resolve_ocr_provider", return_value=provider), patch(
             "main.ocr_via_provider",
-            return_value="已知三角形 ABC\n[ILLUSTRATION_BOX: 10, 20, 90, 80]",
+            return_value=json.dumps({'markdown': '物理示意图\n[插图待补: 图1]', 'figures': [
+                {'slot': '图1', 'bbox': {'left': 100, 'top': 100, 'right': 600, 'bottom': 700}}]}),
         ), patch("main.draw_tikz_via_high_model", side_effect=draw), patch(
             "main.compile_tikz_to_png", return_value=rendered_url
         ):
             response = client.post(
                 "/api/ocr",
                 data={"engine": "siliconflow", "skip_tikz": "false"},
-                files={"file": ("question.png", _png_bytes(), "image/png")},
+                files={"file": ("question.png", source.getvalue(), "image/png")},
                 headers={"X-Local-Token": LOCAL_TOKEN},
             )
 
@@ -393,9 +402,11 @@ def test_question_ocr_still_auto_draws_tikz_and_returns_original_reference(clien
         assert payload["image_path"].startswith("/static/test_uploads/ocr_original_")
         assert "ILLUSTRATION_BOX" not in payload["latex"]
         assert "$$" not in payload["latex"]
-        assert payload["latex"].startswith("已知三角形 ABC\n\n![](")
+        assert payload["latex"].startswith("物理示意图\n![](")
         assert rendered_url in payload["latex"]
         assert observed_original is not None
+        assert payload['tikz_assets'][0]['reference_image_path'].endswith(observed_original.name)
+        assert not observed_original.name.startswith('ocr_original_')
     finally:
         if observed_original is not None:
             observed_original.unlink(missing_ok=True)
@@ -424,7 +435,8 @@ def test_question_ocr_removes_illustration_marker_before_math_normalization_when
 
         assert response.status_code == 200
         payload = response.json()
-        assert payload["latex"] == "已知三角形 ABC"
+        assert payload["latex"] == "已知三角形 ABC\n[插图待补]"
+        assert payload['illustrations'][0]['status'] == 'unresolved'
         assert "ILLUSTRATION_BOX" not in payload["latex"]
         assert "$$" not in payload["latex"]
         draw.assert_not_called()

@@ -1,6 +1,18 @@
 {
   "baseline_commit": "94de5dd1fd5e9fd4ea6256312be2e1ebf311899f",
   "intentional_algorithm_updates": {
+    "ocr_via_provider": {
+      "upstream_commit": "3252b7237f3add8f632f00a413a23814ed8882a4",
+      "reason": "Single screenshots request named per-figure slots once; reject incomplete output and disable retries; PDF text protocol unchanged.",
+      "previous_body_sha256": "365fb58cae8042b4da63a72dd6c36291acd74b6cc4ddba605c540bbc092b250a",
+      "behavior_regressions": "tests/test_physics_ocr_crops.py"
+    },
+    "ocr_formula": {
+      "upstream_commit": "3252b7237f3add8f632f00a413a23814ed8882a4",
+      "reason": "Materialize bounded source crops at unique original anchors; retain unresolved placeholders, manual review, physics pixels and rollback; no paid review requests.",
+      "previous_body_sha256": "a56949c8f2e5420084c9acdcef467d03b3b989906397fd97372e30c30f425276",
+      "behavior_regressions": "tests/test_physics_ocr_crops.py; tests/test_single_ocr_illustrations.py; tests/test_single_ocr_frontend.py"
+    },
     "heal_database_curriculum_names": {
       "upstream_commit": "3252b7237f3add8f632f00a413a23814ed8882a4",
       "reason": "Keep custom and historical knowledge labels; exclude PhysicsBank P mirrors from mathematics book aliases.",
@@ -142,8 +154,8 @@
     "auto_crop_image": "300bb084eba6afad4f69b1a51aeec63087dd6ea1b1947200be85479a010258f6",
     "upload_tex_source": "ed4f5cdc500e47ed28511fc34b903c5534611348d08b674b19365d091bb3d0ad",
     "upload_batch_images": "4a7680c5430df4097abf2c66f1130d55adfb35c28b520b0c1a89889d67010756",
-    "ocr_via_provider": "365fb58cae8042b4da63a72dd6c36291acd74b6cc4ddba605c540bbc092b250a",
-    "ocr_formula": "a56949c8f2e5420084c9acdcef467d03b3b989906397fd97372e30c30f425276",
+    "ocr_via_provider": "ba642bc0d7b4341d677868c044b924260d5f7817e3259c0c3206d147e9887a43",
+    "ocr_formula": "febe3d8e81c98350f93dbddb60d3e3fe5a25e84d168ab9550ec1c2c38a882d2a",
     "ocr_pdf_page_image": "95e69e5e3125ee8366dcb3547909cfa76755f528280a3a03a1e46bc41074d8dc",
     "extract_tikz_source": "e26bf4292edcb249fae01993bb83592cbf66e51b8f44633a472658ca29a659cd",
     "request_tikz_completion": "34b3bf7c5d601f3e4cf7675deaeb08934c9bf4cf1b5de31f27f527bb012d4fbd",

@@ -6,6 +6,9 @@ from typing import Any, Callable
 from mathbank.application_state import RuntimeState
 from fastapi import UploadFile, File, Form
 from mathbank.ai_providers import MultimodalProviderConfig
+from mathbank.ocr_illustrations import parse_single_ocr_response, materialize_ocr_illustrations
+from mathbank.math_markdown import normalize_table_math_wrappers
+from mathbank.prompts import build_single_ocr_vision_prompt, SINGLE_OCR_STRUCTURED_INSTRUCTIONS
 
 
 @dataclass(frozen=True)
@@ -59,7 +62,9 @@ def ocr_via_provider(image_path: str, provider: MultimodalProviderConfig, includ
 
     prompt = dependencies.COMMON_OCR_PROMPT
     if include_illustration_box:
-        prompt += dependencies.ILLUSTRATION_BOX_PROMPT
+        # Preserve the legacy argument/signature, but use upstream's named,
+        # per-figure protocol for single screenshots. PDF callers stay text-only.
+        prompt = build_single_ocr_vision_prompt()
 
     payload = {
         "model": provider.model_name,
@@ -85,17 +90,23 @@ def ocr_via_provider(image_path: str, provider: MultimodalProviderConfig, includ
         provider=provider,
         task="ocr",
     )
+    if include_illustration_box:
+        payload["messages"].insert(0, {
+            "role": "system", "content": SINGLE_OCR_STRUCTURED_INSTRUCTIONS,
+        })
 
     timeout = 240
     # Chat-completion POSTs are not idempotent: a read timeout can happen after
     # the provider has accepted (and billed) the request.  Do not automatically
     # send the same image two or three times.  The shared transport still
     # retries a connection-establishment failure where no response was read.
+    transport_options = {"retry_connection": False} if include_illustration_box else {}
     response = dependencies.post_chat_completion(
         provider,
         payload,
         timeout=timeout,
         check_status=False,
+        **transport_options,
     )
     if response.status_code != 200:
         raise RuntimeError(
@@ -106,6 +117,8 @@ def ocr_via_provider(image_path: str, provider: MultimodalProviderConfig, includ
     try:
         choices = res_json.get("choices", [])
         if choices and len(choices) > 0:
+            if choices[0].get("finish_reason") not in (None, "stop"):
+                raise RuntimeError("识图输出未完整结束，已拒绝采用；未自动重试，请缩小截图范围后手动处理。")
             content = choices[0].get("message", {}).get("content", "")
             return content.strip()
         else:
@@ -121,6 +134,7 @@ def ocr_via_provider(image_path: str, provider: MultimodalProviderConfig, includ
 def ocr_formula(file: UploadFile=File(...), engine: str=Form(None), skip_tikz: bool=Form(False), *, dependencies: OcrServiceDependencies):
     import re
     temp_filepath = None
+    created_crops = []
     try:
         # OCR route is synchronous and runs in FastAPI's worker pool.  Stream
         # only up to the endpoint cap, then fully decode/re-encode the image.
@@ -128,8 +142,8 @@ def ocr_formula(file: UploadFile=File(...), engine: str=Form(None), skip_tikz: b
         normalized = dependencies.normalize_raster_image(file_bytes)
         image = dependencies.Image.open(dependencies.io.BytesIO(normalized.data)).convert("RGB")
 
-        # 1. 运行自适应图像去噪/自动切边预处理
-        image = dependencies.auto_crop_image(image)
+        # Keep the complete normalized screenshot: auto-trimming can remove
+        # faint force arrows, circuit leads, polarity signs and axis labels.
 
         # 将裁剪后的图片保存为持久化 OCR 文件，未来可作为题目配图
         filename = f"ocr_original_{dependencies.uuid.uuid4().hex[:12]}.png"
@@ -160,11 +174,12 @@ def ocr_formula(file: UploadFile=File(...), engine: str=Form(None), skip_tikz: b
             ocr_provider = dependencies.resolve_ocr_provider(engine)
             if ocr_provider.api_key and ocr_provider.api_key.strip():
                 try:
-                    latex_content = dependencies.ocr_via_provider(
-                        temp_filepath,
-                        ocr_provider,
-                        include_illustration_box=True,
-                    )
+                    with dependencies.state.PDF_OCR_SEMAPHORE:
+                        latex_content = dependencies.ocr_via_provider(
+                            temp_filepath,
+                            ocr_provider,
+                            include_illustration_box=True,
+                        )
                     confidence = 0.99
                     provider = (
                         f"{ocr_provider.provider_label} "
@@ -184,75 +199,54 @@ def ocr_formula(file: UploadFile=File(...), engine: str=Form(None), skip_tikz: b
         if not latex_content:
             raise RuntimeError("当前分配的识图引擎无法启动或识别失败。请检查系统设置中所选识图平台的 API Key、模型名称和接口地址。")
 
-        # 成功，返回且进一步清洗
-        if latex_content:
-            # 过滤干扰字符
-            latex_content = latex_content.replace("\\,", "").replace("\\!", "")
-            # 自动清洗规范化下划线/连续划线/任何 \underline 变体为标准的 \fillin 宏
-            latex_content = dependencies.normalize_fillin_macro(latex_content)
+        recognized = parse_single_ocr_response(latex_content)
+        prefer_draw = dependencies.os.getenv("PREFER_DRAW_MODEL", "Qwen/Qwen3-VL-32B-Instruct")
 
-        # ----------------- 双阶段多模态识图与高级 TikZ 绘图模型联动 -----------------
-        tikz_code_from_high_model = None
-        tikz_image_path = None
+        def draw_one(crop_path, text_context, instruction):
+            return dependencies.draw_tikz_via_high_model(
+                crop_path, prefer_draw, latex_content=text_context,
+                instruction=instruction,
+            )
 
-        if latex_content:
-            import re
-            # 提取可能由默认模型标注的示意图 Bounding Box 标记
-            box_match = re.search(r"\[ILLUSTRATION_BOX:\s*(\d+),\s*(\d+),\s*(\d+),\s*(\d+)\]", latex_content, re.IGNORECASE)
-            if box_match:
-                # 第一步先确保擦除标记，防止乱入题干文本框
-                latex_content = re.sub(r"\[ILLUSTRATION_BOX:.*?\]", "", latex_content).strip()
-
-                if not skip_tikz:
-                    try:
-                        # 不再执行物理分割裁剪，直接将整张原始题目截图发送给高级视觉绘图模型进行图形分析与重画
-                        prefer_draw = dependencies.os.getenv("PREFER_DRAW_MODEL", "Qwen/Qwen3-VL-32B-Instruct")
-                        print(f"[Illustration Draw] 检测到插图标记，直接将整张原图送往高级模型 {prefer_draw} 进行 TikZ 解析绘图...")
-
-                        tikz_code_from_high_model = dependencies.draw_tikz_via_high_model(
-                            temp_filepath, # 传入整图
-                            prefer_draw,
-                            latex_content=latex_content
-                        )
-                    except Exception as draw_err:
-                        print(f"[Illustration Draw Fail] 高级多模态模型整图分析绘图失败: {str(draw_err)}")
-                else:
-                    print("[Illustration Draw] 检测到插图标记，但由于已勾选跳过，故未调用高级绘图模型进行 TikZ 绘制")
-            else:
-                # 剔除可能存在的由于大模型幻觉或者部分输出造成的残缺标记
-                latex_content = re.sub(r"\[ILLUSTRATION_BOX:.*?\]", "", latex_content).strip()
-
-            # Remove OCR protocol markers before repairing naked math. Otherwise
-            # the underscore in ILLUSTRATION_BOX can be mistaken for a subscript
-            # and leave behind an empty ``$$`` pair after marker cleanup.
-            latex_content = dependencies.normalize_question_math_markdown(latex_content)
-
-        # 如果高级模型成功生成了 TikZ 代码，我们在后台自动进行编译预览，并格式化追加到 latex 文本中！
-        if tikz_code_from_high_model:
-            try:
-                print(f"[Illustration Draw] 高级绘图模型成功输出 TikZ 源码！正在开始编译为预览图...")
-                compiled_path = dependencies.compile_tikz_to_png(tikz_code_from_high_model)
-                if compiled_path:
-                    tikz_image_path = compiled_path
-                    # 自动在题干文本的尾部追加 Markdown 插图引用
-                    latex_content += f"\n\n![]({compiled_path})"
-                    print(f"[Illustration Draw] 编译成功: {compiled_path}")
-            except Exception as compile_err:
-                print(f"[Illustration Draw] 编译高级模型生成的 TikZ 失败: {str(compile_err)}")
-
-        # 将 temp_filepath 置为 None，避免在 finally 块中被删除
+        # One OCR request supplies text plus boxes. Cropping is local and never
+        # initiates paid review/retries. All source crops remain teacher-review
+        # candidates, not visually verified evidence.
+        figures = materialize_ocr_illustrations(
+            recognized, image, skip_tikz=skip_tikz,
+            upload_root=dependencies.state.UPLOAD_DIR,
+            url_prefix=dependencies.state.UPLOAD_DIR_REL,
+            draw=draw_one, compile_tikz=dependencies.compile_tikz_to_png,
+        )
+        for item in figures["illustrations"]:
+            source_path = item.get("reference_image_path") or item.get("image_path")
+            if source_path and dependencies.os.path.basename(source_path).startswith("ocr_figure_"):
+                created_crops.append(dependencies.os.path.join(
+                    dependencies.state.UPLOAD_DIR, dependencies.os.path.basename(source_path)))
+            if item["status"] in ("cropped", "tikz"):
+                item["review"] = {"status": "manual_required"}
+        latex_content = figures["markdown"].replace("\\,", "").replace("\\!", "")
+        latex_content = dependencies.normalize_fillin_macro(latex_content)
+        latex_content = normalize_table_math_wrappers(latex_content)
+        latex_content = dependencies.normalize_question_math_markdown(latex_content)
+        first_asset = figures["tikz_assets"][0] if figures["tikz_assets"] else {}
         saved_filepath = temp_filepath
-        temp_filepath = None
-
-        return {
+        result = {
             "status": "success",
             "latex": latex_content,
             "confidence": confidence,
             "provider": provider,
             "image_path": f"/{dependencies.state.UPLOAD_DIR_REL}/{dependencies.os.path.basename(saved_filepath)}",
-            "tikz_code": tikz_code_from_high_model,
-            "tikz_image_path": tikz_image_path
+            "tikz_code": first_asset.get("tikz_code"),
+            "tikz_image_path": first_asset.get("image_path"),
+            "illustrations": figures["illustrations"],
+            "tikz_assets": figures["tikz_assets"],
+            "image_layouts": figures["image_layouts"],
+            "warnings": figures["warnings"],
+            "illustration_review": {"status": "manual_required", "visual_calls": 0},
         }
+        temp_filepath = None
+        created_crops.clear()
+        return result
     except dependencies.UploadTooLargeError:
         return dependencies.JSONResponse(
             content={"status": "error", "message": "公式识图失败: 图片不能超过 10MB。"},
@@ -269,6 +263,11 @@ def ocr_formula(file: UploadFile=File(...), engine: str=Form(None), skip_tikz: b
             status_code=500
         )
     finally:
+        for path in created_crops:
+            try:
+                dependencies.os.remove(path)
+            except OSError:
+                pass
         # 确保清理临时文件
         if temp_filepath and dependencies.os.path.exists(temp_filepath):
             try:

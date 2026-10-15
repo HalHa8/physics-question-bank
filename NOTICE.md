@@ -1,5 +1,11 @@
 # PhysicsBank notices
 
+The single-screenshot figure-slot/crop protocol, manual-crop editor and regression
+tests adapt selected code from MathBank commit
+`3252b7237f3add8f632f00a413a23814ed8882a4`, contributed by JudgePeach.
+PhysicsBank keeps physics prompts and a source-crop-first, teacher-review workflow;
+it does not enable the upstream automatic paid visual-review loop.
+
 PhysicsBank is a modified version of
 [JudgePeach/math-question-bank](https://github.com/JudgePeach/math-question-bank),
 originally distributed under the GNU Affero General Public License version 3.
