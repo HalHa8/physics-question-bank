@@ -676,10 +676,17 @@ window.normalizeEditorFractions = normalizeEditorFractions;
         function finishCloseQuestionEditorModal() {
             const modal = document.getElementById('editorSection');
             if (!modal || modal.classList.contains('hidden')) return;
+            const returnWorkspace = modal.dataset.returnWorkspace;
+            delete modal.dataset.returnWorkspace;
             modal.classList.add('hidden');
             modal.setAttribute('aria-hidden', 'true');
             document.body.classList.remove('question-editor-open');
             setQuestionEditorBackgroundInert(false);
+            if (returnWorkspace === 'import' && typeof window.selectWorkspace === 'function') {
+                if (typeof cancelAllOcr === 'function') cancelAllOcr(false);
+                if (typeof abortActiveAiSolve === 'function') abortActiveAiSolve();
+                window.selectWorkspace('import', '导入中心');
+            }
             if (questionEditorRestoreFocus && questionEditorRestoreFocus.isConnected) {
                 questionEditorRestoreFocus.focus({ preventScroll: true });
             }
@@ -724,6 +731,10 @@ window.normalizeEditorFractions = normalizeEditorFractions;
             const options = arguments[0] || {};
             return checkAndSwitch(() => {
                 const returnQuestionId = Number(EditorState.questionId || 0);
+                const returnWorkspace = options.returnWorkspace === 'import' ? 'import' : '';
+                if (returnWorkspace && typeof window.selectWorkspace === 'function') {
+                    window.selectWorkspace('bank', '题库管理');
+                }
                 // The list refresh performed by startNewQuestion must not
                 // auto-select the first question again and overwrite the new
                 // question draft while its modal is opening.
@@ -734,6 +745,8 @@ window.normalizeEditorFractions = normalizeEditorFractions;
                 setQuestionDetailEditAvailability(false);
                 const modal = document.getElementById('editorSection');
                 if (modal) {
+                    if (returnWorkspace) modal.dataset.returnWorkspace = returnWorkspace;
+                    else delete modal.dataset.returnWorkspace;
                     modal.dataset.allowNewQuestion = 'true';
                     modal.dataset.newQuestionMode = 'true';
                     if (Number.isSafeInteger(returnQuestionId) && returnQuestionId > 0) {

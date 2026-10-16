@@ -25,7 +25,7 @@
         byId('importImageMultiple').setAttribute('aria-pressed', String(state.mode === 'multiple'));
         document.querySelectorAll('[data-import-document]').forEach(node => node.classList.toggle('image-import-hidden', state.active));
         const single = state.active && state.mode === 'single';
-        byId('importGenerateAnswers')?.closest('.import-config-card')?.classList.toggle('image-import-hidden', single);
+        byId('importGenerateAnswers')?.closest('.import-config-card')?.classList.remove('image-import-hidden');
         byId('importImageModeHint').textContent = state.mode === 'single'
             ? '一张截图录入一道题。识别后在题目编辑器核对文字、选项和配图，再保存入库。'
             : '支持一图多题、多张连续页面。先用上移／下移调整页序，再开始拆题；跨图题目会按此顺序合并处理，结果请逐题核对。';
@@ -123,18 +123,53 @@
         }
         if (state.opening) return;
         const file = state.images[0].file, generation = state.generation;
+        const generateAnswer = Boolean(byId('importGenerateAnswers')?.checked);
+        let recognition;
         state.opening = true;
         try {
-            await openNewQuestionEditor({sourceTab: 'ocr', onReady: () => {
+            await openNewQuestionEditor({sourceTab: 'ocr', returnWorkspace: 'import', onReady: () => {
                 if (!state.active || generation !== state.generation) return;
                 const source = byId('editSource');
                 if (source) source.value = byId('importPaperTitle').value.trim();
-                runContentOcr(file);
+                recognition = runContentOcr(file);
             }});
+            const result = await recognition;
+            if (!generateAnswer || !result) return;
+            if (!state.active || generation !== state.generation || !SingleOcrFigures.current(result)
+                    || byId('editorSection').classList.contains('hidden')) return;
+            const content = byId('editContent').value;
+            const answer = byId('editAnswerMarkdown').value;
+            if (!result.applied || !content.trim() || content !== result.appliedText) {
+                showToast('识别结果尚未载入或题干已修改，未自动解答；请核对后手动生成。', 'info');
+                return;
+            }
+            if (answer.trim()) {
+                showToast('已有答案或解析，已保留，不再自动生成。', 'info');
+                return;
+            }
+            if (hasSourceAnswerMarker(content)) {
+                showToast('识别内容中有答案／解析标记，已保留原文；未另行生成。', 'info');
+                return;
+            }
+            if (parsedContentIssues(content, answer, null).length) {
+                showToast('题目仍有缺图或公式待核对，请修正后手动生成解答。', 'info');
+                return;
+            }
+            switchQuestionEditorPanel('answer');
+            switchWorkflowTab('ai');
+            triggerAISolve({onlyIfEmpty: true, preserveEdits: true});
         } finally {
             state.opening = false;
             refresh();
         }
+    }
+    function hasSourceAnswerMarker(content) {
+        const mask = text => ' '.repeat(text.length);
+        let searchable = replacePreviewLiteralSpans(content, mask);
+        searchable = replaceDelimitedMathForPreview(searchable, mask);
+        searchable = replaceLatexEnvironmentsForPreview(searchable, (environment, name) =>
+            /^(tabular\*?|tabularx|longtable|tblr|longtblr|talltblr)$/.test(name) ? environment : mask(environment));
+        return /【(?:参考答案|答案|解析|详解|解答)】|(?:^|\n)[ \t]*(?:#{1,6}[ \t]*)?(?:\*\*)?(?:参考答案|答案|解析|详解|解答)[：:]/.test(searchable);
     }
     function reset() {
         state.images.forEach(entry => URL.revokeObjectURL(entry.url));

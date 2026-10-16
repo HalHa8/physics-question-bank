@@ -6,6 +6,9 @@
 
 The Import Center now has a **Screenshot / Image** entry: upload, drop or paste
 images. Single-question mode opens the existing OCR editor for review and saving.
+Its optional automatic-answer checkbox runs the configured solver after OCR;
+it is off by default. Existing answers and source answer labels are preserved.
+Incomplete questions pause for correction, and late results cannot replace edits.
 Whole-page / multiple-question mode accepts up to 20 ordered images (10MB each,
 50MB total), with move-up/down and remove controls, then uses the existing paper
 splitting and question-review workflow. Choosing/reordering images stays local;

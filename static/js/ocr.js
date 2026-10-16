@@ -1120,6 +1120,7 @@
                 else loadToFinalReview('ocr');
                 state.applied = true;
                 registerAssets(state);
+                state.appliedText = element(state.target, 'editor').value;
                 render(state);
             }
             function complete(state, data) {
@@ -1295,8 +1296,8 @@
         })();
         window.SingleOcrFigures = SingleOcrFigures;
 
-        function runOcr(file) { runSingleOcr('answer', file); }
-        function runContentOcr(file) { runSingleOcr('content', file); }
+        function runOcr(file) { return runSingleOcr('answer', file); }
+        function runContentOcr(file) { return runSingleOcr('content', file); }
 
         function runSingleOcr(target, file) {
             if (!file.type.startsWith('image/')) {
@@ -1334,7 +1335,7 @@
                 if (target === 'content') contentOcrAbortController = null;
                 else answerOcrAbortController = null;
             };
-            fetch('/api/ocr', { method: 'POST', body: form, signal: controller.signal })
+            return fetch('/api/ocr', { method: 'POST', body: form, signal: controller.signal })
                 .then(async response => {
                     const data = await response.json();
                     if (!requestIsCurrent()) return;
@@ -1345,6 +1346,7 @@
                     const confidence = Number(data.confidence);
                     get('confidence').textContent = Number.isFinite(confidence) ? `置信度: ${(confidence * 100).toFixed(1)}%` : '请核对识别结果';
                     SingleOcrFigures.complete(state, data);
+                    return state;
                 })
                 .catch(error => {
                     if (!requestIsCurrent() || error.name === 'AbortError') return;
@@ -1525,7 +1527,11 @@
 
         // 3. AI Intelligent Solve handler
         function triggerAISolve() {
+            const options = arguments[0] || {};
             const content = document.getElementById('editContent').value;
+            const preservedAnswer = document.getElementById('editAnswerMarkdown').value;
+            if (options.onlyIfEmpty && preservedAnswer.trim()) return;
+            if (options.preserveEdits && document.getElementById('aiSolveBtn').disabled) return;
             const qtype = document.getElementById('editQType').value;
             const customPrompt = document.getElementById('aiCustomPrompt').value;
             
@@ -1591,11 +1597,17 @@
             const requestController = new AbortController();
             aiSolveAbortController = requestController;
 
-            const requestIsCurrent = () => isAiSolveRequestCurrent(
-                requestSequence,
-                requestController,
-                editorSnapshot
-            );
+            const requestIsCurrent = () => {
+                if (!isAiSolveRequestCurrent(requestSequence, requestController, editorSnapshot)) return false;
+                if (options.preserveEdits && (document.getElementById('editContent').value !== content
+                        || document.getElementById('editAnswerMarkdown').value !== preservedAnswer
+                        || document.getElementById('editorSection').classList.contains('hidden'))) {
+                    abortActiveAiSolve();
+                    showToast('编辑内容已变化或编辑器已关闭，自动解答已停止，不覆盖当前内容。', 'info');
+                    return false;
+                }
+                return true;
+            };
 
             const finishCurrentRequest = (resetProgress = false) => {
                 if (!requestIsCurrent()) return false;
@@ -1688,10 +1700,9 @@
                                             }
                                             finalOutput += accumulatedSolution;
                                             resultBox.textContent = finalOutput;
-                                            
+                                            if (!finishCurrentRequest()) return;
                                             loadToFinalReview('ai');
                                             showToast('AI 解析生成成功！');
-                                            finishCurrentRequest();
                                         }, 300);
                                         return;
                                     }
