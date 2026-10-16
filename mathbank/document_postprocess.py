@@ -1,16 +1,12 @@
-"""Shared PDF/Word result cleanup; paths and hooks are explicitly supplied."""
+"""Shared source-preserving PDF/Word postprocessing; never writes questions."""
 
 from pathlib import Path
-
 from mathbank.document_text import normalize_fillin_macro, find_source_page_by_overlap
+from mathbank.source_metadata import normalize_source_fillin
+from mathbank.question_assets import embedded_question_assets
 
 
-def post_process_questions(
-    parsed_questions: list, paper_title: str, task_id: str = None,
-    ocr_results: list = None, *, tmp_upload_dir: str | Path,
-    upload_dir_rel: str, normalize_fillin=normalize_fillin_macro,
-    find_source_page=find_source_page_by_overlap,
-) -> list:
+def post_process_questions(parsed_questions: list, paper_title: str, task_id: str = None, ocr_results: list = None, *, source_body_preserved: bool = False, preserved_indices=None, tmp_upload_dir, upload_dir_rel, normalize_fillin=normalize_fillin_macro, find_source_page=find_source_page_by_overlap) -> list:
     """PDF/Word 解析卡片后处理：修复图片路径并登记资产，保留正文中的图片锚点。
 
     image_paths 负责资产生命周期，不能替代选项、表格或正文中的图片位置。
@@ -18,11 +14,15 @@ def post_process_questions(
     import re
     import os
     import glob
+    preserved = (set(range(len(parsed_questions))) if source_body_preserved else set(preserved_indices or ()))
+    if any(type(index) is not int or not 0 <= index < len(parsed_questions) for index in preserved):
+        raise ValueError("保真题目位置无效。")
 
     # 0. 规范化所有拆解题目的填空下划线为 \fillin 宏
-    for q in parsed_questions:
+    for index, q in enumerate(parsed_questions):
         if q.get("content"):
-            q["content"] = normalize_fillin(q.get("content", ""))
+            q["content"] = (normalize_source_fillin(q["content"], normalize_fillin_macro)
+                            if index in preserved else normalize_fillin(q["content"]))
 
     # 1. 搜集该 PDF 任务在 tmp 文件夹中生成的所有物理裁剪图片，按生成时间（mtime）进行排序
     task_crop_urls = []
@@ -42,7 +42,9 @@ def post_process_questions(
     # 匹配 LaTeX 图片格式: \includegraphics[...]{path}
     latex_pattern = r'\\includegraphics(?:\[.*?\])?\{([^}]+)\}'
 
-    for q in parsed_questions:
+    for index, q in enumerate(parsed_questions):
+        if index in preserved:
+            continue
         for field in ["content", "answer_markdown"]:
             text_val = q.get(field, "")
             if isinstance(text_val, str):
@@ -68,21 +70,22 @@ def post_process_questions(
         print(f"[PDF PostProcess] 成功建立占位符修复映射: {mapping}")
 
     # 4. 对每个题目卡片进行字段修补、占位符替换与资源晋升准备
-    for q in parsed_questions:
+    for index, q in enumerate(parsed_questions):
         q["source"] = (q.get("source") or paper_title).strip()
 
         # 清理多余的双重转义 \n
-        for field in ["content", "answer_markdown"]:
-            if field in q and isinstance(q[field], str):
-                text = q[field]
-                text = re.sub(r'\\n(?![a-zA-Z])', '\n', text)
-                q[field] = text
+        if index not in preserved:
+            for field in ["content", "answer_markdown"]:
+                if field in q and isinstance(q[field], str):
+                    text = q[field]
+                    text = re.sub(r'\\n(?![a-zA-Z])', '\n', text)
+                    q[field] = text
 
         # 智能替换 Markdown 和 LaTeX 字段中的图片占位符
         for field in ["content", "answer_markdown"]:
             if field in q and isinstance(q[field], str):
                 # 替换已建立映射的非标准路径
-                for ph, real_url in mapping.items():
+                for ph, real_url in (() if index in preserved else mapping.items()):
                     if ph in q[field]:
                         q[field] = q[field].replace(ph, real_url)
                         # 如果是 LaTeX 的 \includegraphics 语法，顺带转换为 Markdown 图片语法以供前端预览渲染
@@ -91,13 +94,20 @@ def post_process_questions(
 
         # 寻找本题正文中夹带的所有临时图片 URL (注意：UUID 中含有 -，所以 regex 必须支持 [a-zA-Z0-9_-]+)
         found_crops = {}
-        for field in ["content", "answer_markdown"]:
-            if field in q and isinstance(q[field], str):
-                for match in re.finditer(r'/static/(?:uploads|test_uploads)/tmp/[a-zA-Z0-9_.-]+', q[field]):
-                    found_crops[match.group(0)] = None
+        if index in preserved:
+            # Literal source examples are not live image references. The
+            # optimizer already conserves real anchors in both source fields.
+            for path in embedded_question_assets(q.get("content", ""), q.get("answer_markdown", "")):
+                if "/tmp/" in path:
+                    found_crops[path] = None
+        else:
+            for field in ["content", "answer_markdown"]:
+                if field in q and isinstance(q[field], str):
+                    for match in re.finditer(r'/static/(?:uploads|test_uploads)/tmp/[a-zA-Z0-9_.-]+', q[field]):
+                        found_crops[match.group(0)] = None
 
         # 顺带检查 referenced_images 属性并应用修复映射
-        ref_imgs = q.get("referenced_images", [])
+        ref_imgs = [] if index in preserved else q.get("referenced_images", [])
         for ref in ref_imgs:
             mapped_ref = mapping.get(ref, ref)
             if "/tmp/" in mapped_ref:
@@ -109,7 +119,7 @@ def post_process_questions(
 
     # 5. 极致兜底机制：如果大模型在拆题时完全删除了图片占位标记或路径，导致最终题目关联的图片为空，
     # 我们利用 3-shingle 文本重合度，将原始 PDF 物理页面产生的物理插图自动关联绑定回拆分出的题目！
-    if ocr_results and task_id:
+    if ocr_results and task_id and len(preserved) < len(parsed_questions):
         page_crops = {}
         for p_idx, page_text in enumerate(ocr_results):
             # 获取当前页生成的所有 pdf_crop_ 临时文件 URL
@@ -118,7 +128,9 @@ def post_process_questions(
 
         print(f"[PDF PostProcess Failsafe] 每页识别到的插图关系: {page_crops}")
 
-        for q in parsed_questions:
+        for index, q in enumerate(parsed_questions):
+            if index in preserved:
+                continue
             if not q.get("image_paths"):
                 p_source = find_source_page(q.get("content", ""), ocr_results)
                 crops = page_crops.get(p_source, [])

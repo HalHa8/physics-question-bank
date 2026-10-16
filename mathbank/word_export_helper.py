@@ -49,6 +49,7 @@ EXAM_19_STARTS = {
     "fill_in_blank": 12,
     "detailed_answer": 15,
 }
+from .paper_image_layout import normalize_paper_image_choices, paper_image_factor
 from .image_layout import split_image_anchors, image_key, normalize_image_layouts, SIZE_CM
 
 IMAGE_PATTERN = re.compile(r"!\[.*?\]\(([^)]+)\)")
@@ -1156,6 +1157,7 @@ class WordExamBuilder:
             return False
 
     def add_question(self, item: PreparedQuestion, number: int) -> None:
+        self._paper_image_factor = paper_image_factor(item.question)
         align = item.question.get("figure_align") or "right"
         usable_images = [path for path in item.images if path.exists()]
         image_layouts = normalize_image_layouts(item.question.get("image_layouts", {}), item.question.get("content", ""))
@@ -1198,8 +1200,8 @@ class WordExamBuilder:
             self._add_floating_right_image(
                 p,
                 detached_images[0],
-                max_width=detached_width,
-                max_height=detached_height,
+                max_width=min(detached_width * self._paper_image_factor, self._usable_page_width_inches() / 2),
+                max_height=detached_height * self._paper_image_factor,
             )
             # single_paragraph=True 确保全文在同一个 Word 段落中，使文字平滑紧贴图片四周型环绕！
             self._add_content_blocks(p, item.stem, single_paragraph=not preserve_inline_images, images=inline_images, image_layouts=image_layouts)
@@ -1230,6 +1232,8 @@ class WordExamBuilder:
             spacer.paragraph_format.space_after = Cm(
                 max(0.2, item.solution_space - figure_height_cm - 0.3)
             )
+
+        self._paper_image_factor = 1
 
     def _format_question_paragraph(self, paragraph, number: int) -> None:
         paragraph.paragraph_format.left_indent = Cm(0)
@@ -1285,6 +1289,14 @@ class WordExamBuilder:
         max_height: float | None = None,
     ) -> None:
         try:
+            factor = getattr(self, "_paper_image_factor", 1)
+            available_width = self._usable_page_width_inches()
+            cell_width = getattr(paragraph._parent, "width", None)
+            if cell_width is not None:
+                available_width = min(available_width, float(cell_width) / float(Inches(1)))
+            max_width = min(max_width * factor, available_width)
+            if max_height is not None:
+                max_height = min(max_height * factor, self._usable_page_height_inches())
             run = paragraph.add_run()
             width = max_width
             height = None
@@ -1602,7 +1614,8 @@ def _resolve_image_paths(question: dict, uploads_dir: str | Path | None) -> list
 
 def _prepare_question(item: dict, uploads_dir: str | Path | None) -> PreparedQuestion:
     question = dict(item.get("question", {}) or {})
-    content, _ = split_image_anchors(question.get("content", "") or "")
+    question["content"] = normalize_paper_image_choices(question.get("content", ""), question.get("question_type", ""))
+    content, _ = split_image_anchors(question["content"])
     choices: list[str] = []
     match = CHOICES_PATTERN.search(content)
     if match:

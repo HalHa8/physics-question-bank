@@ -12,17 +12,18 @@ local and needs no LaTeX or extra AI review request. Check labels, axes, polarit
 and circuit connections before saving. Turning off original-image mode explicitly
 enables extra paid TikZ drawing calls per figure.
 
-This update is on `codex/refactor-backend-modules`; existing Windows portable
-packages have not been rebuilt. Use this source branch to obtain the changes.
+These changes and all three backend-decoupling stages are integrated into the
+`main` source. Existing Windows portable packages are not rebuilt by a local
+source update; check the downloaded build's commit and back up personal data.
 
 [简体中文](README.md) · [AGPL-3.0 license](LICENSE) · [Notices](NOTICE.md)
 
 PhysicsBank is a local-first question bank, AI-assisted solution, import, search,
 and paper-layout workbench for high-school physics. It is based on
 [JudgePeach/math-question-bank](https://github.com/JudgePeach/math-question-bank)
-and includes upstream functionality through MathBank 2.4.0 and its subsequent
-main-branch commit, including PDF extraction and source-image review, Word
-import review, and school-level symbol support. Physics-specific source review
+and selectively adapts subsequent upstream PDF/Word import upgrades. This is not
+a claim that every upstream feature is synchronized; see [sync notes](docs/upstream-sync.md).
+Physics-specific source review
 checks units, vector directions, circuit connections, and experimental apparatus.
 
 The physics adaptation adds a 2019 PEP high-school physics curriculum, six
@@ -79,6 +80,15 @@ and reuse rights first.
 Automatic PDF/Word question splitting needs a configured parsing model. Pages
 whose text cannot be extracted reliably also need an image-capable OCR model;
 the app will not silently accept incomplete native text as a complete page.
+
+The upgraded importer preserves reliable native content and original answers,
+uses bounded local/hybrid recognition for uncertain regions, and retains source
+evidence and visible review markers. Shared temporary images are copied on save.
+Retired images can be recovered through their original references; the private
+retention store has no automatic expiry and is not a substitute for a full backup.
+Extra source verification stays off by default; failed model requests are not
+automatically retried or switched to another provider. After backing up, reinstall
+`requirements.txt` in your environment to obtain the upgraded PDF dependency.
 
 XeLaTeX is required for PDF compilation and TikZ previews, but not for question
 entry, import, search, or LaTeX source export. Pandoc is recommended for editable

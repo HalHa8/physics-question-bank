@@ -2,10 +2,20 @@
   "baseline_commit": "94de5dd1fd5e9fd4ea6256312be2e1ebf311899f",
   "intentional_algorithm_updates": {
     "ocr_via_provider": {
-      "upstream_commit": "3252b7237f3add8f632f00a413a23814ed8882a4",
-      "reason": "Single screenshots request named per-figure slots once; reject incomplete output and disable retries; PDF text protocol unchanged.",
-      "previous_body_sha256": "365fb58cae8042b4da63a72dd6c36291acd74b6cc4ddba605c540bbc092b250a",
-      "behavior_regressions": "tests/test_physics_ocr_crops.py"
+      "date": "2026-10-16",
+      "source": "upstream 1a6e50a + PhysicsBank main 121a1d6",
+      "reason": "Route PDF text through the single-POST shared request contract; preserve screenshot crop protocol.",
+      "previous_body_sha256": "ba642bc0d7b4341d677868c044b924260d5f7817e3259c0c3206d147e9887a43",
+      "new_body_sha256": "1808a470273a3fd07dfe0ed8df34dd3b89e8a679c4bbc9c23ffb073a37b3a3a9",
+      "behavior_regressions": "tests/test_physics_ocr_crops.py; tests/test_multimodal_ai.py",
+      "prior_updates": [
+        {
+          "upstream_commit": "3252b7237f3add8f632f00a413a23814ed8882a4",
+          "reason": "Single screenshots request named per-figure slots once; reject incomplete output and disable retries; PDF text protocol unchanged.",
+          "previous_body_sha256": "365fb58cae8042b4da63a72dd6c36291acd74b6cc4ddba605c540bbc092b250a",
+          "behavior_regressions": "tests/test_physics_ocr_crops.py"
+        }
+      ]
     },
     "ocr_formula": {
       "upstream_commit": "3252b7237f3add8f632f00a413a23814ed8882a4",
@@ -18,6 +28,174 @@
       "reason": "Keep custom and historical knowledge labels; exclude PhysicsBank P mirrors from mathematics book aliases.",
       "previous_body_sha256": "8ed3bda7de19bd3df0ca8838a256b0b11c36a5e60e051aa28bd83caa1421f90f",
       "behavior_regressions": "tests/test_startup_knowledge_preservation.py"
+    },
+    "clean_orphaned_images": {
+      "date": "2026-10-16",
+      "source": "upstream 1a6e50a + PhysicsBank main 121a1d6",
+      "reason": "Move unused uploads to recoverable storage; retain active task files and fail closed on reference errors.",
+      "previous_body_sha256": "db2b5964eb44d04d162ac1f642922a9c170d20b628db0e229458e8feee9b4fd0",
+      "new_body_sha256": "c028e91a69153db7a80e6ef3fee1458e9297cd7542945fd1072c6327ad94201f",
+      "behavior_regressions": "tests/test_asset_lifecycle.py; tests/test_image_lifecycle_api.py"
+    },
+    "ocr_pdf_page_image": {
+      "date": "2026-10-16",
+      "source": "upstream 1a6e50a + PhysicsBank main 121a1d6",
+      "reason": "Use only the configured provider, explicit cancellation/report callbacks, and no automatic provider fallback.",
+      "previous_body_sha256": "95e69e5e3125ee8366dcb3547909cfa76755f528280a3a03a1e46bc41074d8dc",
+      "new_body_sha256": "c357a7cd9a4dfea719b5827b5d77c2292d1b9bf2f3bda020902db2280b308c37",
+      "behavior_regressions": "tests/test_pdf_regional_flow.py; tests/test_multimodal_ai.py"
+    },
+    "_duplicate_input_from_payload": {
+      "date": "2026-10-16",
+      "source": "upstream 1a6e50a + PhysicsBank main 121a1d6",
+      "reason": "Exclude review-only images from duplicate evidence; shared content images remain visible.",
+      "previous_body_sha256": "712d25d4a97bce3d8629e35e10cc1855fb611cb17f3584db2015dbf0ef864cbd",
+      "new_body_sha256": "e9b2531938132f4711cf6f71e44ff68f1a48f3e20d6c17646df36ddd4fa8873d",
+      "behavior_regressions": "tests/test_image_lifecycle_api.py"
+    },
+    "prepare_question_assets": {
+      "date": "2026-10-16",
+      "source": "upstream 1a6e50a + PhysicsBank main 121a1d6",
+      "reason": "Validate and promote review and structured assets with one path map; preserve private reference roles.",
+      "previous_body_sha256": "a6111ce3dffd261e17e3af4c2d9883e4f82e53ab352a6fb02853ddaab394639a",
+      "new_body_sha256": "3c25a066e7eef71da7f8480aaf472aabc141d2f12b55ecff92fde1168ce02147",
+      "behavior_regressions": "tests/test_image_lifecycle_api.py; tests/test_question_transactions.py"
+    },
+    "build_prepared_question_fingerprint": {
+      "date": "2026-10-16",
+      "source": "upstream 1a6e50a + PhysicsBank main 121a1d6",
+      "reason": "Apply the same review-only image exclusion at transactional fingerprint writes.",
+      "previous_body_sha256": "878749a08055d9d528d459f1a79988f1e541d98e2c30203419ab21043fbc20d1",
+      "new_body_sha256": "5f3cef978d06d1e37159588cee539c4e31dff97b59d385caf1b2641b1b019f1b",
+      "behavior_regressions": "tests/test_image_lifecycle_api.py"
+    },
+    "create_question": {
+      "date": "2026-10-16",
+      "source": "upstream 1a6e50a + PhysicsBank main 121a1d6",
+      "reason": "Copy/promote and validate all embedded assets, rewrite review/layout/TikZ references, return path map only after commit.",
+      "previous_body_sha256": "689202ec3f59d544884927b2f99aa9e8f16508962aa4c7942548286c40130210",
+      "new_body_sha256": "0adede237d27782e1570a1cd21a1f4d0d72fdbef0637a81a5dfd56ef0db27b53",
+      "behavior_regressions": "tests/test_question_transactions.py; tests/test_image_lifecycle_api.py"
+    },
+    "update_question": {
+      "date": "2026-10-16",
+      "source": "upstream 1a6e50a + PhysicsBank main 121a1d6",
+      "reason": "Apply complete asset mapping and review-only fingerprint policy atomically; clean removed references after commit.",
+      "previous_body_sha256": "b275c10a1147c64216bc28e5f89e53efa938808707cca7b6a11e2f99ac75ce09",
+      "new_body_sha256": "249e97524554743a743d790c6ab58904449144e5fcdf1dbe75d62a62befa6cb4",
+      "behavior_regressions": "tests/test_image_lifecycle_api.py; tests/test_question_transactions.py"
+    },
+    "parse_paper_text_internal": {
+      "date": "2026-10-16",
+      "source": "upstream 1a6e50a + PhysicsBank main 121a1d6",
+      "reason": "Bound document split requests at 600 seconds, preserve cancellation and strict output completion, no automatic paid retry.",
+      "previous_body_sha256": "3e7b96e1a3a878d2be1680aacf6ea62dd9567f70b329a3244f9014932c3a20bb",
+      "new_body_sha256": "67e7d00990cc4a12cf4feff2496d5cda9f9bc8d937e4b3cd291f6f02d190f280",
+      "behavior_regressions": "tests/test_api.py; tests/test_word_hybrid_flow.py; tests/test_pdf_hybrid_safety.py"
+    },
+    "rollback_question_asset_promotions": {
+      "date": "2026-10-16",
+      "source": "upstream 1a6e50a + PhysicsBank main 121a1d6",
+      "reason": "Delete only newly created promotion copies after rollback; never delete the temporary original.",
+      "previous_body_sha256": "2e4598885ad32ec4827f85f67d6a3829daca12e949c613b95af4f0223667a99b",
+      "new_body_sha256": "f53f86617ab99092c458563f0558f4bc98c8469d0b352073e47090ebfd7c14f2",
+      "behavior_regressions": "tests/test_question_transactions.py; tests/test_image_lifecycle_api.py"
+    },
+    "_referenced_question_assets": {
+      "date": "2026-10-16",
+      "source": "upstream 1a6e50a + PhysicsBank main 121a1d6",
+      "reason": "Include review and structured TikZ assets in one reference query; fail closed on malformed records.",
+      "previous_body_sha256": "dc1e656a1fb25c0677950d33d916fa4c4a8c56f69f4a74deead53cae9e2207d2",
+      "new_body_sha256": "7aefb722b23c2f0c6f7e837b60b821674f96adb85d526ef9375ab3b6194a5d57",
+      "behavior_regressions": "tests/test_image_lifecycle_api.py; tests/test_question_transactions.py"
+    },
+    "delete_unreferenced_question_assets": {
+      "date": "2026-10-16",
+      "source": "upstream 1a6e50a + PhysicsBank main 121a1d6",
+      "reason": "Quarantine instead of permanently unlinking removed assets, under the shared lifecycle lock.",
+      "previous_body_sha256": "ea4bd8ef9fe44817558785e04dcf35eb14e57ef3f3546c68c1efa8f1c7020692",
+      "new_body_sha256": "f702237709adb787b05ffe663afca7e4ab9cb2df037a93887d3481b6fb335242",
+      "behavior_regressions": "tests/test_question_transactions.py; tests/test_image_lifecycle_api.py"
+    },
+    "promote_question_temp_assets": {
+      "date": "2026-10-16",
+      "source": "upstream 1a6e50a + PhysicsBank main 121a1d6",
+      "reason": "Copy temporary originals, map exact embedded destinations and leave originals available to sibling cards.",
+      "previous_body_sha256": "a20f7b9c98d0b0743a163ba714e477fdce515828d34fd33cdb1207df998d1448",
+      "new_body_sha256": "6d845c9bcbcc7a328257532702c09bb917e0838971a3424e1c7d2c9bbfc9afd4",
+      "behavior_regressions": "tests/test_image_lifecycle_api.py"
+    },
+    "_delete_task_temp_assets": {
+      "date": "2026-10-16",
+      "source": "upstream 1a6e50a + PhysicsBank main 121a1d6",
+      "reason": "Retire task assets recoverably after checking all database references through injected SessionLocal.",
+      "previous_body_sha256": "f27a013a0cf39b3fd4d8eacf08c2573b57b87f4a17a0c3ef8b1555be92e970be",
+      "new_body_sha256": "39ef2f963831dd7a9bdf400ff8f02b748b680b1ae5af41e24d22d98c0a898eb2",
+      "behavior_regressions": "tests/test_asset_lifecycle.py; tests/test_image_lifecycle_api.py; tests/test_pdf_figures.py"
+    },
+    "build_document_import_dependencies": {
+      "date": "2026-10-16",
+      "source": "upstream 1a6e50a + PhysicsBank main 121a1d6",
+      "reason": "Inject curriculum and provider transport for native and hybrid PDF/Word planning.",
+      "previous_body_sha256": "b1db25b748f0e9277776db41f0bd58c1fbb480db7e0dc4d81fc2164c2888df88",
+      "new_body_sha256": "c3d26b189d527f6dedccf9cfe414320578e642ac2f4050f3c6131cb352f03712",
+      "behavior_regressions": "tests/test_backend_decoupling.py; tests/test_word_hybrid_flow.py"
+    },
+    "post_process_pdf_parsed_questions": {
+      "date": "2026-10-16",
+      "source": "upstream 1a6e50a + PhysicsBank main 121a1d6",
+      "reason": "Forward source-preserved indices to shared PDF/Word postprocessing.",
+      "previous_body_sha256": "a5b445933878983207029eed9f4d730ae97bc935975c089f44a616dc0f2534af",
+      "new_body_sha256": "8a385a12fb287cfc3ecf0bd02e8dd9679a22f3b4e19600c17fa69a88e27d40be",
+      "behavior_regressions": "tests/test_word_hybrid_flow.py"
+    },
+    "save_paper": {
+      "date": "2026-10-16",
+      "source": "upstream 1a6e50a + PhysicsBank main 121a1d6",
+      "reason": "Persist main per-question image scales in existing metadata, without a database migration.",
+      "previous_body_sha256": "c40c268ec3cc8c05bbc3cfd52cc4047bee2659f92e767c12ea76f8c4117aad2f",
+      "new_body_sha256": "294b6b13679303915732ad3c55092afc09beb17d50f41335fcedac82e58834b6",
+      "behavior_regressions": "tests/test_paper_image_scale.py"
+    },
+    "get_paper_detail": {
+      "date": "2026-10-16",
+      "source": "upstream 1a6e50a + PhysicsBank main 121a1d6",
+      "reason": "Restore saved per-question image scales for main-compatible paper editing.",
+      "previous_body_sha256": "5fe1483d9fa543bc349003f67ee511714fbafde7a74b32b3458de27741eb17d6",
+      "new_body_sha256": "768d5cfae5eddb08b21d49039162b8d525aca105f79f29d729e8ad404e48f9ab",
+      "behavior_regressions": "tests/test_paper_image_scale.py"
+    },
+    "_prepare_paper_export_questions": {
+      "date": "2026-10-16",
+      "source": "upstream 1a6e50a + PhysicsBank main 121a1d6",
+      "reason": "Integrate main image scale metadata into export copies without changing stored questions.",
+      "previous_body_sha256": "faddc97a2b8cfa22ad76feb73c4a200aa8613db8ec1008f6ba3c3c7df52c477c",
+      "new_body_sha256": "9fe82fbbb3fa500e33a2da84b1ea49157bd5602138123d65eea3b4b6ad89ce4d",
+      "behavior_regressions": "tests/test_paper_image_scale.py"
+    },
+    "export_paper_pdf": {
+      "date": "2026-10-16",
+      "source": "upstream 1a6e50a + PhysicsBank main 121a1d6",
+      "reason": "Preserve main per-question scale and teacher-facing TeX diagnostics through the decoupled export service.",
+      "previous_body_sha256": "8f88ba40933340d1f680aac4a913a8ca2b8da0c6be36d0b8b34a315b5ba70a87",
+      "new_body_sha256": "904b66a1540d305cfbc3b88443388ab3dfd672bef30eeae5e5cd5ea4523002bd",
+      "behavior_regressions": "tests/test_paper_image_scale.py; tests/test_latex_diagnostics.py"
+    },
+    "retain_document_task": {
+      "date": "2026-10-16",
+      "source": "upstream 1a6e50a + PhysicsBank main 121a1d6",
+      "reason": "New explicit service: renewable document-result lease.",
+      "previous_body_sha256": null,
+      "new_body_sha256": "fd8c895adf398efc5ef8d4d62cea8c971a5064b00191ab492792e4d8703fc944",
+      "behavior_regressions": "tests/test_image_lifecycle_api.py"
+    },
+    "validate_import_knowledge": {
+      "date": "2026-10-16",
+      "source": "upstream 1a6e50a + PhysicsBank main 121a1d6",
+      "reason": "New import-only classification leaf validation; never mutates the curriculum.",
+      "previous_body_sha256": null,
+      "new_body_sha256": "6a2bd58686223cee3fcf34c4c1da3fd21b43e0dfd2f7820965010863fa986658",
+      "behavior_regressions": "tests/test_physics_import_upgrade.py"
     }
   },
   "functions": {
@@ -122,7 +300,9 @@
     "export_paper_bundle": "paper_export_service",
     "explain_latex_compile_error": "paper_export_service",
     "export_paper_pdf": "paper_export_service",
-    "export_paper_word": "paper_export_service"
+    "export_paper_word": "paper_export_service",
+    "retain_document_task": "document_task_service",
+    "validate_import_knowledge": "paper_parse_service"
   },
   "body_sha256": {
     "schedule_database_export": "0e9019607f89682e0a4d3c94984855252060b9c2ed6d1f5f9eee3f68c67fa7c2",
@@ -130,7 +310,7 @@
     "print_startup_diagnostics": "0feb145ebf5e182f982a1b4863ec7030aa384c1309ff52d0fb39311a13011436",
     "print_optional_tool_diagnostics": "1b44fb8aa0a6a85abd75a33e568c49d1814a33611243a5d925a08249af433ed2",
     "heal_database_curriculum_names": "66b906f711b5b5fc18799d9bdae9811a596cb9bd6c3e42da790df6b523876397",
-    "clean_orphaned_images": "db2b5964eb44d04d162ac1f642922a9c170d20b628db0e229458e8feee9b4fd0",
+    "clean_orphaned_images": "c028e91a69153db7a80e6ef3fee1458e9297cd7542945fd1072c6327ad94201f",
     "recalibrate_usage_counts": "96aba02af03ac5d84173d7529f5499994a25024c1ab2cf86bd0d6a5b9dad05db",
     "start_startup_cleanup": "13400d3b386cf93d0dd97d1abb2f1e9e736824169cad789e4e2709f28861c2b0",
     "load_or_create_local_token": "97baddae123e30ec08ed6185cd4308f1fcf07cb3f91148523e409c09b8f63d02",
@@ -154,9 +334,9 @@
     "auto_crop_image": "300bb084eba6afad4f69b1a51aeec63087dd6ea1b1947200be85479a010258f6",
     "upload_tex_source": "ed4f5cdc500e47ed28511fc34b903c5534611348d08b674b19365d091bb3d0ad",
     "upload_batch_images": "4a7680c5430df4097abf2c66f1130d55adfb35c28b520b0c1a89889d67010756",
-    "ocr_via_provider": "ba642bc0d7b4341d677868c044b924260d5f7817e3259c0c3206d147e9887a43",
+    "ocr_via_provider": "1808a470273a3fd07dfe0ed8df34dd3b89e8a679c4bbc9c23ffb073a37b3a3a9",
     "ocr_formula": "febe3d8e81c98350f93dbddb60d3e3fe5a25e84d168ab9550ec1c2c38a882d2a",
-    "ocr_pdf_page_image": "95e69e5e3125ee8366dcb3547909cfa76755f528280a3a03a1e46bc41074d8dc",
+    "ocr_pdf_page_image": "c357a7cd9a4dfea719b5827b5d77c2292d1b9bf2f3bda020902db2280b308c37",
     "extract_tikz_source": "e26bf4292edcb249fae01993bb83592cbf66e51b8f44633a472658ca29a659cd",
     "request_tikz_completion": "34b3bf7c5d601f3e4cf7675deaeb08934c9bf4cf1b5de31f27f527bb012d4fbd",
     "draw_tikz_via_high_model": "0951df65bb1bacd1acf9303a9205ceb6efcfc85eb485bd657bb7d624e3ebf7d0",
@@ -171,7 +351,7 @@
     "get_seq_mapping": "eba47c6034ef55a8326fc88f1dad7d8a412cc04678645e46851cec381907e1c5",
     "list_questions": "2839b3aec522c8755a27651383cc47d45f8395465a8fe5137b6e2459da421ec2",
     "_duplicate_payload_list": "4a90815efea521dec8394a084557875d28f019bf7262ac5470c3be6b4ca7d63c",
-    "_duplicate_input_from_payload": "712d25d4a97bce3d8629e35e10cc1855fb611cb17f3584db2015dbf0ef864cbd",
+    "_duplicate_input_from_payload": "e9b2531938132f4711cf6f71e44ff68f1a48f3e20d6c17646df36ddd4fa8873d",
     "_prompt_visible_image_paths": "7dbdf8dddbcdfaf9e3687175c1f0dc21419af4f1bee6824597feefbb7ef0e9fc",
     "check_question_duplicates": "3073904e24a137425e114e044d81691ce8d944f6fa21f548b4d9c7afc5816f50",
     "get_question": "c76bde093b77d96f27bb39d3ce4b147050da749e6f99c6d8243a87dd0b40b3b7",
@@ -179,11 +359,11 @@
     "list_categories": "574fbc41457b016680118ff9d622c264e3d0fd84308b133ada75186603cdde80",
     "get_sources": "5d90b2758d40934727e3ec7debf8177e3f2656a2a26d59cc7beeb062f4ac1a99",
     "committed_question_response": "86758e92e3b310d2fbbc08c65a583f8a9b8f4ab8cb4ef00e61660de6a3a72d32",
-    "prepare_question_assets": "a6111ce3dffd261e17e3af4c2d9883e4f82e53ab352a6fb02853ddaab394639a",
-    "build_prepared_question_fingerprint": "878749a08055d9d528d459f1a79988f1e541d98e2c30203419ab21043fbc20d1",
+    "prepare_question_assets": "3c25a066e7eef71da7f8480aaf472aabc141d2f12b55ecff92fde1168ce02147",
+    "build_prepared_question_fingerprint": "5f3cef978d06d1e37159588cee539c4e31dff97b59d385caf1b2641b1b019f1b",
     "duplicate_review_required_response": "738ac53f9f0fbbedb27131d07657a37ded74b2572d932a2588a414002c9bc537",
-    "create_question": "689202ec3f59d544884927b2f99aa9e8f16508962aa4c7942548286c40130210",
-    "update_question": "b275c10a1147c64216bc28e5f89e53efa938808707cca7b6a11e2f99ac75ce09",
+    "create_question": "0adede237d27782e1570a1cd21a1f4d0d72fdbef0637a81a5dfd56ef0db27b53",
+    "update_question": "249e97524554743a743d790c6ab58904449144e5fcdf1dbe75d62a62befa6cb4",
     "update_question_figure_align": "c1a78a7bceeaaeb39dc6f8dd10e7ebaf58ef50990a61d404b49785d905cb9317",
     "update_question_figure_layout": "4f29022dd798c0a2924a2c71087b22603d7b61b1708ce10ebf3409b5a46cd6f3",
     "get_associated_questions": "c0b774b7a56798a97801ad9b65a3434bb46af2829fe694cefb942ea63e0d3eee",
@@ -198,16 +378,16 @@
     "route_chapter": "55b45c0e4b218927302e86ef2bc20092f2cc49824a4cc65d9c9a085f8038be22",
     "save_metadata_config": "c8fd49dbd66c3caa05e67992be0fc1b7ef0effb312a2c08e027d50b7729e5e91",
     "ai_classify": "ae67232a651f3a618eadbaf1712d011a4531ae99bb0eaeba1f9afaab61df7dbd",
-    "parse_paper_text_internal": "3e7b96e1a3a878d2be1680aacf6ea62dd9567f70b329a3244f9014932c3a20bb",
+    "parse_paper_text_internal": "67e7d00990cc4a12cf4feff2496d5cda9f9bc8d937e4b3cd291f6f02d190f280",
     "ai_parse_paper": "cd51f70e1e4d216a3c1c1f04501a98c6468385e5b9ad50524b4ae1991bc8817c",
-    "rollback_question_asset_promotions": "2e4598885ad32ec4827f85f67d6a3829daca12e949c613b95af4f0223667a99b",
-    "_referenced_question_assets": "dc1e656a1fb25c0677950d33d916fa4c4a8c56f69f4a74deead53cae9e2207d2",
-    "delete_unreferenced_question_assets": "ea4bd8ef9fe44817558785e04dcf35eb14e57ef3f3546c68c1efa8f1c7020692",
-    "promote_question_temp_assets": "a20f7b9c98d0b0743a163ba714e477fdce515828d34fd33cdb1207df998d1448",
-    "_delete_task_temp_assets": "f27a013a0cf39b3fd4d8eacf08c2573b57b87f4a17a0c3ef8b1555be92e970be",
-    "build_document_import_dependencies": "b1db25b748f0e9277776db41f0bd58c1fbb480db7e0dc4d81fc2164c2888df88",
+    "rollback_question_asset_promotions": "f53f86617ab99092c458563f0558f4bc98c8469d0b352073e47090ebfd7c14f2",
+    "_referenced_question_assets": "7aefb722b23c2f0c6f7e837b60b821674f96adb85d526ef9375ab3b6194a5d57",
+    "delete_unreferenced_question_assets": "f702237709adb787b05ffe663afca7e4ab9cb2df037a93887d3481b6fb335242",
+    "promote_question_temp_assets": "6d845c9bcbcc7a328257532702c09bb917e0838971a3424e1c7d2c9bbfc9afd4",
+    "_delete_task_temp_assets": "39ef2f963831dd7a9bdf400ff8f02b748b680b1ae5af41e24d22d98c0a898eb2",
+    "build_document_import_dependencies": "c3d26b189d527f6dedccf9cfe414320578e642ac2f4050f3c6131cb352f03712",
     "manual_crop_pdf": "fd715b1763a34af4b47bfb294e81064449337efed8b1fdb7d3c75aa4eb32b97c",
-    "post_process_pdf_parsed_questions": "a5b445933878983207029eed9f4d730ae97bc935975c089f44a616dc0f2534af",
+    "post_process_pdf_parsed_questions": "8a385a12fb287cfc3ecf0bd02e8dd9679a22f3b4e19600c17fa69a88e27d40be",
     "run_pdf_parsing_task": "179d67bd3be0730f9036a64919124f9e7a73f860a21bf1effe48fa9d302affed",
     "upload_pdf_task": "149fb7f2b6b67bad63f33b5dc3319e59b2238777caa87a70d081b98b3a1046f0",
     "run_docx_parsing_task": "34d49c944577d37dfdd8948860773e5d9f93e4f35dbe90cac7361691e998c260",
@@ -217,15 +397,17 @@
     "clear_temp_crops": "9f684694d500fd53846b69c56437956fc5ab83d40376e207f4acb3bfb863a893",
     "ai_select_paper": "d4c30547ecc8382ed1813bc0b59d4e1c04798c1ba9e1430afc1d9994142d0e46",
     "get_paper_questions": "1f3b0f140bcaeae8f496d621887fec366a1e772a673f2cc29316769f9623d6dc",
-    "save_paper": "c40c268ec3cc8c05bbc3cfd52cc4047bee2659f92e767c12ea76f8c4117aad2f",
+    "save_paper": "294b6b13679303915732ad3c55092afc09beb17d50f41335fcedac82e58834b6",
     "list_papers": "1693cbeb2ddd51d8b2030b4cc210a0e3ccbd565a13bc05632a5b41db5c003a7e",
-    "get_paper_detail": "5fe1483d9fa543bc349003f67ee511714fbafde7a74b32b3458de27741eb17d6",
+    "get_paper_detail": "768d5cfae5eddb08b21d49039162b8d525aca105f79f29d729e8ad404e48f9ab",
     "delete_paper": "beac040c685f0aec49277d9ceacc3cb1291961b28c4451205e50c9580b789878",
-    "_prepare_paper_export_questions": "faddc97a2b8cfa22ad76feb73c4a200aa8613db8ec1008f6ba3c3c7df52c477c",
+    "_prepare_paper_export_questions": "9fe82fbbb3fa500e33a2da84b1ea49157bd5602138123d65eea3b4b6ad89ce4d",
     "export_paper_tex": "b0c35dd15c01834c305033dc43d4b22e2fa3f7cd07b1c4515f7b39ebdb2f9828",
     "export_paper_bundle": "1132617f7a5aa26052bc7598330c9a5566544bd539cdf1bf53d458d87a6e1937",
     "explain_latex_compile_error": "555eb45c65d5677b7bf82f18b348987dc7b9b1a9a505b5fbc6a2c111734b01d1",
-    "export_paper_pdf": "8f88ba40933340d1f680aac4a913a8ca2b8da0c6be36d0b8b34a315b5ba70a87",
-    "export_paper_word": "b429ff42557b7069c504378c7dab94ba72373e78d0b1691482912700bc7bb6c1"
+    "export_paper_pdf": "904b66a1540d305cfbc3b88443388ab3dfd672bef30eeae5e5cd5ea4523002bd",
+    "export_paper_word": "b429ff42557b7069c504378c7dab94ba72373e78d0b1691482912700bc7bb6c1",
+    "retain_document_task": "fd8c895adf398efc5ef8d4d62cea8c971a5064b00191ab492792e4d8703fc944",
+    "validate_import_knowledge": "6a2bd58686223cee3fcf34c4c1da3fd21b43e0dfd2f7820965010863fa986658"
   }
 }

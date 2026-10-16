@@ -12,6 +12,10 @@ from mathbank.document_import_context import DocumentImportDependencies
 @dataclass(frozen=True)
 class DocumentTaskServiceDependencies:
     state: RuntimeState
+    get_current_curriculum: Callable
+    resolve_text_provider: Callable
+    post_chat_completion: Callable
+    HTTPException: Any
     DocumentImportDependencies: Any
     Image: Any
     JSONResponse: Any
@@ -50,6 +54,8 @@ def build_document_import_dependencies(*, dependencies: DocumentTaskServiceDepen
         postprocess=dependencies.post_process_pdf_parsed_questions,
         delete_temp_assets=dependencies._delete_task_temp_assets,
         extract_docx=dependencies.extract_docx_markdown, reconcile_math=dependencies.reconcile_visible_math,
+        get_curriculum=dependencies.get_current_curriculum,
+        resolve_provider=dependencies.resolve_text_provider, post=dependencies.post_chat_completion,
     )
 
 
@@ -132,13 +138,14 @@ def manual_crop_pdf(payload: dict, *, dependencies: DocumentTaskServiceDependenc
         )
 
 
-def post_process_pdf_parsed_questions(parsed_questions: list, paper_title: str, task_id: str=None, ocr_results: list=None, *, dependencies: DocumentTaskServiceDependencies) -> list:
+def post_process_pdf_parsed_questions(parsed_questions: list, paper_title: str, task_id: str=None, ocr_results: list=None, *, source_body_preserved: bool=False, preserved_indices=None, dependencies: DocumentTaskServiceDependencies) -> list:
     """Compatibility entry point; the result processor owns the implementation."""
     return dependencies.post_process_questions(
         parsed_questions, paper_title, task_id, ocr_results,
         tmp_upload_dir=dependencies.state.TMP_UPLOAD_DIR, upload_dir_rel=dependencies.state.UPLOAD_DIR_REL,
         normalize_fillin=dependencies.normalize_fillin_macro,
         find_source_page=dependencies.find_source_page_by_overlap,
+        source_body_preserved=source_body_preserved, preserved_indices=preserved_indices,
     )
 
 
@@ -152,7 +159,12 @@ def run_pdf_parsing_task(task_id: str, file_bytes: bytes, filename: str, generat
     )
 
 
-def upload_pdf_task(file: UploadFile=File(...), generate_answers: str=Form('false'), page_range: Optional[str]=Form(None), pdf_strategy: str=Form('native_preferred'), pdf_verify_suspicions: bool=Form(False), *, dependencies: DocumentTaskServiceDependencies):
+def upload_pdf_task(
+    file: UploadFile = File(...),
+    generate_answers: str = Form("false"),
+    page_range: Optional[str] = Form(None),
+    pdf_strategy: str = Form("native_preferred"),
+    pdf_verify_suspicions: bool = Form(False), *, dependencies: DocumentTaskServiceDependencies):
     try:
         if pdf_strategy not in dependencies.PDF_STRATEGIES:
             return dependencies.JSONResponse(content={"status": "error", "message": "不支持的 PDF 解析策略。"}, status_code=400)
@@ -228,7 +240,10 @@ def run_docx_parsing_task(task_id: str, file_bytes: bytes, filename: str, genera
     )
 
 
-def upload_docx_task(file: UploadFile=File(...), generate_answers: str=Form('false'), docx_verify_suspicions: str=Form('false'), *, dependencies: DocumentTaskServiceDependencies):
+def upload_docx_task(
+    file: UploadFile = File(...),
+    generate_answers: str = Form("false"),
+    docx_verify_suspicions: str = Form("false"), *, dependencies: DocumentTaskServiceDependencies):
     try:
         generate_answers_bool = generate_answers.lower() in ("true", "1", "yes")
 
@@ -366,3 +381,9 @@ def clear_temp_crops(payload: dict, *, dependencies: DocumentTaskServiceDependen
             content={"status": "error", "message": f"清理临时插图出错: {str(e)}"},
             status_code=500
         )
+
+
+def retain_document_task(task_id: str, *, dependencies: DocumentTaskServiceDependencies):
+    if dependencies.state.DOCUMENT_TASKS.retain(task_id):
+        return {"status": "success"}
+    raise dependencies.HTTPException(status_code=404, detail="任务已过期或不可续期；已生成图片仍可通过原地址恢复。")

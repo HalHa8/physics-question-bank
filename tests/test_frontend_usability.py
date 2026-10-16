@@ -349,7 +349,7 @@ def test_paper_preview_separates_choices_before_figure_layout():
 
     node = shutil.which("node")
     assert node, "Node.js is required for the frontend executable regression"
-    script = helper_source + r'''
+    script = 'global.window = {};\n' + helper_source + r'''
 const source = String.raw`题干
 \begin{choices}
 \item A
@@ -626,7 +626,7 @@ if (!rightLarge.includes('max-width: min(100%, 155px)') ||
 
 def test_bottom_left_figure_layout_runs_across_state_and_both_previews():
     api_source = _read(STATIC_JS_DIR / "api.js")
-    api_start = api_source.index("const FigureLayoutState = {")
+    api_start = api_source.index("window.ImageLayoutTools = {")
     api_end_marker = "window.FigureLayoutState = FigureLayoutState;"
     api_end = api_source.index(api_end_marker, api_start) + len(api_end_marker)
     layout_state_source = api_source[api_start:api_end]

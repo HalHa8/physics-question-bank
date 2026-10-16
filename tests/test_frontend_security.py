@@ -647,7 +647,7 @@ def test_document_poll_generation_rejects_old_terminal_callbacks_in_real_js():
     poll_start = import_source.index("function pollPdfTaskStatus(")
     poll_end = import_source.index("function renderImagesList()", poll_start)
     poll_source = import_source[poll_start:poll_end]
-    latex_start = import_source.index("// Normal LaTeX branch")
+    latex_start = import_source.index("// Text-source branch")
     latex_end = import_source.index("let documentImportTaskGeneration = 0", latex_start)
     latex_source = import_source[latex_start:latex_end]
 
@@ -750,7 +750,7 @@ def test_question_selection_and_save_are_transactional():
     assert "const requestBackupSnapshot = Object.freeze" in save_source
     assert "EditorState.isCurrent(editorSession)" in save_source
     assert "window.editorMatchesBackupSnapshot(requestBackupSnapshot)" in save_source
-    assert "backupEditorState(data.question.id, null, requestBackupSnapshot)" in save_source
+    assert "backupEditorState(data.question.id, null, savedBackupSnapshot)" in save_source
     assert "EditorState.useQuestion(data.question)" in save_source
     assert "selectQuestion(data.question" not in save_source
     assert "window.isQuestionSaveInFlight" in import_source
@@ -1112,7 +1112,9 @@ def test_shared_question_preview_pipeline_is_used_by_editor_and_duplicate_review
     update_start = editor_source.index("const updateContentPreview = () =>")
     update_end = editor_source.index("const updateAnswerPreview = () =>", update_start)
     update_source = editor_source[update_start:update_end]
-    assert "const preparedHtml = renderQuestionPreviewContent(previewContainer, text, { imageLayouts: FigureLayoutState.imageLayouts })" in update_source
+    assert "const displayText = window.ImageLayoutTools.normalizeImageChoices(text, document.getElementById('editQType').value)" in update_source
+    assert "const preparedHtml = renderQuestionPreviewContent(previewContainer, displayText, { imageLayouts: FigureLayoutState.imageLayouts })" in update_source
+    assert "editContent.value =" not in update_source
     assert "renderQuestionPreviewContent(paperContainer, text, { preparedHtml: preparedHtml })" in update_source
     assert "renderMathInElement(" not in update_source
 

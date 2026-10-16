@@ -218,7 +218,11 @@ class Question(Base):
             if reference:
                 hidden_references.add(reference)
         hidden_references.discard("")
-        return [path for path in self.image_paths if path not in hidden_references]
+        from mathbank.question_assets import without_review_only_assets
+        return without_review_only_assets(
+            [path for path in self.image_paths if path not in hidden_references],
+            self.content or "", self.answer_markdown or "", self.review or "",
+        )
 
     def to_dict(self):
         return {

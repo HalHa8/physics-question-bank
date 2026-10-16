@@ -1,5 +1,13 @@
 {
   "baseline_commit": "94de5dd1fd5e9fd4ea6256312be2e1ebf311899f",
-  "openapi_sha256": "d09a69ede236271789904e3902c6849e275bf55bef6998688523e48b4a9746a2",
-  "paths": 49
+  "openapi_sha256": "61c72d878ae85f3772693c15520118e2143e46bf0ddc016efe8e02848fcb5ff5",
+  "paths": 50,
+  "intentional_schema_updates": [
+    {
+      "date": "2026-10-16",
+      "previous_sha256": "d09a69ede236271789904e3902c6849e275bf55bef6998688523e48b4a9746a2",
+      "new_sha256": "61c72d878ae85f3772693c15520118e2143e46bf0ddc016efe8e02848fcb5ff5",
+      "reason": "Only POST /api/tasks/{task_id}/retain is added. Every pre-existing path, parameter, response schema and component was compared with 65b7bdb and remains identical."
+    }
+  ]
 }

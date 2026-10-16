@@ -10,6 +10,9 @@ from fastapi import Form
 @dataclass(frozen=True)
 class PaperParseServiceDependencies:
     state: RuntimeState
+    validate_import_knowledge: Any
+    request_pdf_paper_completion: Any
+    PAPER_SPLIT_TIMEOUT_SECONDS: Any
     JSONResponse: Any
     ParseConfigurationError: Any
     apply_model_thinking_policy: Any
@@ -32,8 +35,18 @@ class PaperParseServiceDependencies:
     uuid: Any
 
 
-def parse_paper_text_internal(latex_content: str, generate_answers_bool: bool, *, diagnostics: dict | None=None, preserve_source_answers: bool=False, dependencies: PaperParseServiceDependencies) -> list:
+def parse_paper_text_internal(
+    latex_content: str,
+    generate_answers_bool: bool,
+    *,
+    diagnostics: dict | None = None,
+    preserve_source_answers: bool = False,
+    pdf_retry: bool = False,
+    check_cancelled=lambda: None,
+    report_attempt=lambda _event: None,
+    connection_retry: bool = False, dependencies: PaperParseServiceDependencies) -> list:
     """内部通用函数：调用选定的 LLM 接口，将 LaTeX 试卷内容解析拆分为结构化 JSON 卡片"""
+    check_cancelled()
     parse_model = dependencies.os.getenv("PREFER_PARSE_MODEL") or dependencies.os.getenv("DEEPSEEK_PARSE_MODEL", "deepseek-flash")
     provider = dependencies.resolve_text_provider(parse_model)
     api_key = provider.api_key
@@ -69,21 +82,35 @@ def parse_paper_text_internal(latex_content: str, generate_answers_bool: bool, *
         task="parse",
     )
 
-    response = dependencies.post_chat_completion(
-        provider,
-        data,
-        timeout=180,
-        provider_name=provider_name,
-    )
-
-    parsed_questions = dependencies.parse_paper_completion(
-        response.json(),
-        raw_markdown="" if preserve_source_answers else latex_content,
-        diagnostics=diagnostics,
-    )
+    if pdf_retry:
+        parsed_questions = dependencies.request_pdf_paper_completion(
+            provider, data, post=dependencies.post_chat_completion,
+            raw_markdown="" if preserve_source_answers else latex_content,
+            diagnostics=diagnostics, check_cancelled=check_cancelled, report_attempt=report_attempt,
+        )
+    else:
+        check_cancelled()
+        transport_kwargs = ({"retry_connection": False, "allow_redirects": False}
+                            if not connection_retry else {})
+        response = dependencies.post_chat_completion(
+            provider,
+            data,
+            timeout=dependencies.PAPER_SPLIT_TIMEOUT_SECONDS,
+            provider_name=provider_name,
+            **transport_kwargs,
+        )
+        check_cancelled()
+        parsed_questions = dependencies.parse_paper_completion(
+            response.json(),
+            raw_markdown="" if preserve_source_answers else latex_content,
+            diagnostics=diagnostics,
+        )
     if preserve_source_answers:
+        dependencies.validate_import_knowledge(parsed_questions, dependencies.get_current_curriculum())
         # Compare the original response before answer filtering or formula edits.
         return parsed_questions
+
+    dependencies.validate_import_knowledge(parsed_questions, dependencies.get_current_curriculum())
 
     # 强制进行静默净化：若未勾选自动生成答案，则对于没有带有 [EXTRACTED_ORIGINAL] 的解析和解答，将其强行抹平为空。
     for q in parsed_questions:
@@ -303,3 +330,22 @@ def ai_parse_paper(latex_content: str=Form(...), paper_title: str=Form(''), imag
             },
             status_code=500
         )
+
+
+def validate_import_knowledge(questions: list[dict], curriculum: dict, *, dependencies: PaperParseServiceDependencies) -> None:
+    """Reject fabricated import subsections; empty knowledge means whole chapter."""
+    for index, question in enumerate(questions, start=1):
+        compulsory = question.get("category_compulsory", "")
+        chapter = question.get("category_chapter", "")
+        # Older parse providers may omit this optional field. Normalize omission
+        # to explicit whole-chapter status; never synthesize the chapter as a leaf.
+        knowledge = question.get("category_knowledge", "")
+        question["category_knowledge"] = knowledge
+        if not isinstance(knowledge, str):
+            raise ValueError(f"第 {index} 题的小节字段无效，请重新导入并核对。")
+        if compulsory or chapter:
+            if compulsory not in curriculum or chapter not in curriculum[compulsory]:
+                raise ValueError(f"第 {index} 题的学段或章节不在当前教材版本中，请重新导入并核对。")
+        if knowledge and (compulsory not in curriculum or chapter not in curriculum[compulsory]
+                          or knowledge not in curriculum[compulsory][chapter]):
+            raise ValueError(f"第 {index} 题的小节不属于所选版本、学段和章节，请重新导入并核对。")

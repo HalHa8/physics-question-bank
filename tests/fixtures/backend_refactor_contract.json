@@ -7,10 +7,10 @@
     "extract_title_from_latex": "f254a072d395069aa1732af4d049a83ccea7deb23af8f8a90545f9bf0b408575",
     "process_ocr_illustrations": "1c5b80bbe2c872ce149de74cbf396cc62c327529321c770c19aa8e729ccc6e0d",
     "find_source_page_by_overlap": "0aad3b3a6b68eab39f7fb08aea90c94594d389dd889bdfb0c791e56b37d754c6",
-    "post_process_pdf_parsed_questions": "40021c8cea981a78fde579661da109659e4ddada85c74d912c31cbf93f97424a",
-    "run_pdf_parsing_task": "15aca35f1790891d9200761b09a1a6a8062a337520a9979fa5cc1304addcb622",
+    "post_process_pdf_parsed_questions": "cfcd745f719faf99eaeff2b0ac3619b9d505508dcf93b902c53004aaa51da4a8",
+    "run_pdf_parsing_task": "d69ec7e5957bcd38eb5f63b13874831b9c409090379629bc0ded05b9824b9acd",
     "parse_page_range": "e2e521673591307623e82004820f646b25c6bd8600eb823c5afd2ea3e9cf3538",
-    "run_docx_parsing_task": "e15b99804aa1a3c095bc1e847b19d66bff02b74c16056f5af8331f1ad3001e3e"
+    "run_docx_parsing_task": "4e405e24523057e77d488d98d5a7fe21b1e8d84aee1a45aad140b637f265109d"
   },
   "routes": [
     {
@@ -249,6 +249,11 @@
       "name": "cancel_pdf_task"
     },
     {
+      "path": "/api/tasks/{task_id}/retain",
+      "method": "POST",
+      "name": "retain_document_task"
+    },
+    {
       "path": "/api/tasks/{task_id}/status",
       "method": "GET",
       "name": "get_pdf_task_status"
@@ -312,6 +317,43 @@
       "path": "/healthz",
       "method": "GET",
       "name": "healthz"
+    }
+  ],
+  "intentional_algorithm_updates": {
+    "run_pdf_parsing_task": {
+      "date": "2026-10-16",
+      "source": "upstream 1a6e50a + PhysicsBank main 121a1d6",
+      "reason": "Adopt native/transcript evidence, bounded details and hybrid source preservation; retain failed page evidence, 110 DPI wide-table requests, explicit error codes and opt-in single-call verification.",
+      "previous_body_sha256": "15aca35f1790891d9200761b09a1a6a8062a337520a9979fa5cc1304addcb622",
+      "new_body_sha256": "d69ec7e5957bcd38eb5f63b13874831b9c409090379629bc0ded05b9824b9acd",
+      "behavior_regressions": "tests/test_pdf_regional_flow.py; tests/test_pdf_hybrid_safety.py; tests/test_pdf_detail_flow.py; tests/test_pdf_source_verify_flow.py"
+    },
+    "run_docx_parsing_task": {
+      "date": "2026-10-16",
+      "source": "upstream 1a6e50a + PhysicsBank main 121a1d6",
+      "reason": "Adopt native metadata/hybrid splitting and evidence caches; keep partial successes and visible uncertainty, no paid fallback; optional verification remains off by default.",
+      "previous_body_sha256": "e15b99804aa1a3c095bc1e847b19d66bff02b74c16056f5af8331f1ad3001e3e",
+      "new_body_sha256": "4e405e24523057e77d488d98d5a7fe21b1e8d84aee1a45aad140b637f265109d",
+      "behavior_regressions": "tests/test_word_hybrid_flow.py; tests/test_word_hybrid_request_edges.py; tests/test_docx_source_verify_flow.py"
+    },
+    "post_process_pdf_parsed_questions": {
+      "date": "2026-10-16",
+      "source": "upstream 1a6e50a + PhysicsBank main 121a1d6",
+      "reason": "Preserve certified source fields and original literal formula/image anchors per question while retaining legacy normalization elsewhere.",
+      "previous_body_sha256": "40021c8cea981a78fde579661da109659e4ddada85c74d912c31cbf93f97424a",
+      "new_body_sha256": "cfcd745f719faf99eaeff2b0ac3619b9d505508dcf93b902c53004aaa51da4a8",
+      "behavior_regressions": "tests/test_word_hybrid_flow.py; tests/test_docx_import.py"
+    }
+  },
+  "intentional_route_updates": [
+    {
+      "date": "2026-10-16",
+      "route": {
+        "path": "/api/tasks/{task_id}/retain",
+        "method": "POST",
+        "name": "retain_document_task"
+      },
+      "reason": "Keep unsaved import result images available while the import workspace is active; protected by the existing local-token middleware."
     }
   ]
 }

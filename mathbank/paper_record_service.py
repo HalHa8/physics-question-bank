@@ -6,6 +6,7 @@ from typing import Any, Callable
 from mathbank.application_state import RuntimeState
 from fastapi import Depends, BackgroundTasks
 from sqlalchemy.orm import Session
+from mathbank.paper_image_layout import normalize_image_scale
 from mathbank.database import get_db
 
 
@@ -43,7 +44,7 @@ def get_paper_questions(ids: str='', db: Session=Depends(get_db), *, dependencie
         return dependencies.JSONResponse(content={"status": "error", "message": str(e)}, status_code=500)
 
 
-def save_paper(payload: dict, background_tasks: BackgroundTasks, db: Session=Depends(get_db), *, dependencies: PaperRecordServiceDependencies):
+def save_paper(payload: dict, background_tasks: BackgroundTasks, db: Session = Depends(get_db), *, dependencies: PaperRecordServiceDependencies):
     """保存排版好的试卷，自增被选中题目的 usage_count"""
     try:
         if not isinstance(payload, dict):
@@ -89,6 +90,9 @@ def save_paper(payload: dict, background_tasks: BackgroundTasks, db: Session=Dep
         meta = payload.get("metadata", {})
         if not isinstance(meta, dict):
             meta = {}
+        meta = dict(meta)
+        meta["image_scales"] = {str(qid): normalize_image_scale(item.get("image_scale"))
+                                for (qid, _score), item in zip(normalized_items, questions_payload)}
         meta["show_secret"] = payload.get("show_secret", True)
         meta["show_notice"] = payload.get("show_notice", True)
         meta["section_order"] = dependencies.normalize_section_order(payload.get("section_order", meta.get("section_order")))
@@ -149,7 +153,7 @@ def list_papers(db: Session=Depends(get_db), *, dependencies: PaperRecordService
         return dependencies.JSONResponse(content={"status": "error", "message": str(e)}, status_code=500)
 
 
-def get_paper_detail(paper_id: int, db: Session=Depends(get_db), *, dependencies: PaperRecordServiceDependencies):
+def get_paper_detail(paper_id: int, db: Session = Depends(get_db), *, dependencies: PaperRecordServiceDependencies):
     """获取单张试卷的详细信息及关联题目列表（用于一键载入）"""
     try:
         paper = db.query(dependencies.Paper).filter(dependencies.Paper.id == paper_id).first()
@@ -164,10 +168,14 @@ def get_paper_detail(paper_id: int, db: Session=Depends(get_db), *, dependencies
             .all()
         )
 
+        scales = dependencies.json.loads(paper.metadata_json or "{}").get("image_scales", {})
+        if not isinstance(scales, dict):
+            scales = {}
         questions_list = [
             {
                 "id": question.id,
                 "score": paper_question.score,
+                "image_scale": normalize_image_scale(scales.get(str(question.id))),
                 "question": question.to_dict(),
             }
             for paper_question, question in rows

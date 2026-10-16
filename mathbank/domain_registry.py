@@ -170,6 +170,7 @@ DOMAINS = (
         paper_parse_service.PaperParseServiceDependencies,
         (
             'parse_paper_text_internal',
+            'validate_import_knowledge',
             'ai_parse_paper',
         ),
     ),
@@ -196,6 +197,7 @@ DOMAINS = (
             'run_docx_parsing_task',
             'upload_docx_task',
             'get_pdf_task_status',
+            'retain_document_task',
             'cancel_pdf_task',
             'clear_temp_crops',
         ),

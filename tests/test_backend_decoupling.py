@@ -31,6 +31,8 @@ DEPENDENCY_NAMES = {
     "postprocess": "post_process_pdf_parsed_questions",
     "delete_temp_assets": "_delete_task_temp_assets",
     "extract_docx": "extract_docx_markdown", "reconcile_math": "reconcile_visible_math",
+    "get_curriculum": "get_current_curriculum", "resolve_provider": "resolve_text_provider",
+    "post": "post_chat_completion",
 }
 
 

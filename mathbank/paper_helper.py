@@ -1,3 +1,4 @@
+from .paper_image_layout import normalize_paper_image_choices, paper_image_factor, scaled_cm
 from .image_layout import split_image_anchors, image_key, normalize_image_layouts, SIZE_CM
 from .geometry_symbols import normalize_school_math_symbols
 
@@ -59,9 +60,10 @@ def _figure_height_limit_cm(figure_size: str) -> float:
     return float(height.removesuffix("cm"))
 
 
-def _bounded_includegraphics(filename: str, width: str, height: str) -> str:
+def _bounded_includegraphics(filename: str, width: str, height: str, factor: float = 1) -> str:
     """Render an image within both its requested cap and the current line box."""
 
+    width, height = scaled_cm(width, factor), scaled_cm(height, factor)
     image = (
         rf"\includegraphics[max width={width},max height={height},keepaspectratio]"
         rf"{{{filename}}}"
@@ -74,21 +76,23 @@ def _bounded_tikz(
     *,
     figure_size: str,
     figure_align: str,
+    factor: float = 1,
 ) -> str:
     """Keep right-side TikZ safe while allowing explicit larger lower figures."""
 
     if figure_size == "auto":
         # Preserve the historical automatic TikZ width while still respecting
         # the active line/minipage box and a finite vertical budget.
-        resized = rf"\resizebox{{4.5cm}}{{!}}{{{tikz_code}}}"
+        resized = rf"\resizebox{{{scaled_cm('4.5cm', factor)}}}{{!}}{{{tikz_code}}}"
         return (
-            rf"\adjustbox{{max width=\linewidth,max height={_DEFAULT_FIGURE_MAX_HEIGHT},"
+            rf"\adjustbox{{max width=\linewidth,max height={scaled_cm(_DEFAULT_FIGURE_MAX_HEIGHT, factor)},"
             rf"keepaspectratio}}{{{resized}}}"
         )
 
     width, height = _FIGURE_SIZE_LIMITS[figure_size]
     if figure_align == "right":
         width = "5.0cm"
+    width, height = scaled_cm(width, factor), scaled_cm(height, factor)
     bounded = (
         rf"\adjustbox{{max width={width},max height={height},keepaspectratio}}"
         rf"{{{tikz_code}}}"
@@ -365,6 +369,7 @@ def clean_content_for_latex(
     preserve_image_positions: bool = False,
     tikz_sources: dict[str, str] | None = None,
     image_layouts: dict | None = None,
+    image_factor: float = 1,
 ) -> str:
     r"""
     Clean markdown/LaTeX question content for exam-zh LaTeX document export based on 试卷类模板.tex.
@@ -373,7 +378,12 @@ def clean_content_for_latex(
     if not content:
         return ""
     
-    text = normalize_school_math_symbols(content.strip(), target="latex")
+    text = normalize_school_math_symbols(normalize_paper_image_choices(content, q_type).strip(), target="latex")
+    if q_type in ("single_choice", "multi_choice") and r"\begin{choices}" in text:
+        stem, options = text.split(r"\begin{choices}", 1)
+        body, images = split_image_anchors(stem)
+        if images:
+            text = clean_choice_stem_parentheses(body) + "\n\n" + images + "\n" + r"\begin{choices}" + options
     # Restore rendered TikZ only after all prose/table/choice transformations.
     # Otherwise paragraph joining can make a '%' comment swallow drawing code.
     tikz_blocks = {}
@@ -421,9 +431,9 @@ def clean_content_for_latex(
                 if r"\begin{tikzpicture}" not in code:
                     code = "\\begin{tikzpicture}\n" + code + "\n\\end{tikzpicture}"
                 rendered = (r"\adjustbox{max width=\linewidth}{"
-                            r"\adjustbox{max width=3.0cm,max height=3.0cm,keepaspectratio}{" + code + "\n}}")
+                            rf"\adjustbox{{max width={scaled_cm('3.0cm', image_factor)},max height={scaled_cm('3.0cm', image_factor)},keepaspectratio}}{{" + code + "\n}}")
             else:
-                rendered = _bounded_includegraphics(base_name, "3.0cm", "3.0cm")
+                rendered = _bounded_includegraphics(base_name, "3.0cm", "3.0cm", image_factor)
             token = f"{token_prefix}N{len(tikz_blocks)}END"
             tikz_blocks[token] = rendered
             return token
@@ -433,6 +443,7 @@ def clean_content_for_latex(
             width, height = SIZE_CM.get(layout['size'], (9.0, 6.0))
             if inside_table:
                 height = min(height, 4.0)
+            width, height = width * image_factor, height * image_factor
             if code:
                 if r"\begin{tikzpicture}" not in code:
                     code = "\\begin{tikzpicture}\n" + code + "\n\\end{tikzpicture}"
@@ -455,30 +466,31 @@ def clean_content_for_latex(
             if inside_table:
                 rendered = (
                     r"\adjustbox{valign=m,margin=0pt 3pt}{"
-                    r"\adjustbox{max width=\linewidth,max height=4.0cm,keepaspectratio}{"
+                    rf"\adjustbox{{max width=\linewidth,max height={scaled_cm('4.0cm', image_factor)},keepaspectratio}}{{"
                     + code + "\n}}"
                 )
             else:
                 rendered = (
                     "\\begin{center}\n"
                     r"\adjustbox{max width=\linewidth}{"
-                    r"\adjustbox{max width=9.0cm,max height=6.0cm,keepaspectratio}{"
+                    rf"\adjustbox{{max width={scaled_cm('9.0cm', image_factor)},max height={scaled_cm('6.0cm', image_factor)},keepaspectratio}}{{"
                     + code + "\n}}\n\\end{center}"
                 )
             token = f"{token_prefix}N{len(tikz_blocks)}END"
             tikz_blocks[token] = rendered
             return token if inside_table else "\n" + token + "\n"
         if inside_table:
+            table_width = r"\linewidth" if image_factor >= 1 else str(image_factor) + r"\linewidth"
             return (
                 r"\adjustbox{valign=m,margin=0pt 3pt}{"
-                rf"\includegraphics[max width=\linewidth,max height=4.0cm,keepaspectratio]{{{base_name}}}"
-                r"}"
+                + rf"\includegraphics[max width={table_width},max height={scaled_cm('4.0cm', image_factor)},keepaspectratio]{{{base_name}}}"
+                + r"}"
             )
         if preserve_image_positions:
             return (
                 "\n\\begin{center}\n"
-                rf"\includegraphics[max width=9.0cm,max height=6.0cm,keepaspectratio]{{{base_name}}}"
-                "\n\\end{center}\n"
+                + _bounded_includegraphics(base_name, "9.0cm", "6.0cm", image_factor)
+                + "\n\\end{center}\n"
             )
         return f"\n\\begin{{center}}\n\\includegraphics[max width=0.85\\linewidth]{{{base_name}}}\n\\end{{center}}\n"
     
@@ -533,6 +545,27 @@ def _escape_paper_type_label(value: str) -> str:
         "$": r"\textdollar{}", "^": r"\textasciicircum{}", "~": r"\textasciitilde{}",
     }
     return "".join(replacements.get(char, char) for char in value)
+
+
+class _QuestionSourceMarker(str):
+    """A locally generated diagnostic comment, never supplied by question text."""
+
+
+def _sanitize_source_markers(value: str) -> str:
+    # Reserve only this diagnostic comment namespace in the export copy.
+    # User comments remain comments, but cannot forge a question's identity.
+    return "".join(
+        re.sub(r"^(\s*)%\s*MathBank-Question-", r"\1% User-Question-", line)
+        for line in str(value).splitlines(keepends=True)
+    )
+
+
+def _question_source_marker(question_id, number: int, part: str) -> _QuestionSourceMarker:
+    safe_id = str(question_id) if re.fullmatch(r"\d+", str(question_id)) else "-"
+    legacy = f"% MathBank-Question-ID: {safe_id}\n" if safe_id != "-" else ""
+    return _QuestionSourceMarker(
+        legacy + f"% MathBank-Question-Begin: id={safe_id}; number={number}; part={part}"
+    )
 
 
 def build_latex_document(
@@ -628,6 +661,7 @@ def build_latex_document(
     lines.append(r"\usepackage[export]{adjustbox}")
     lines.append(r"\examsetup{")
     lines.append(r"  page/size=a4paper,")
+    lines.append(r"  page/foot-content={物理试题第;页（共;页）},")
     lines.append(r"  paren/show-paren=true,")
     if include_answers:
         lines.append(r"  paren/show-answer=true,")
@@ -703,6 +737,7 @@ def build_latex_document(
         grouped[q_type].append(item)
         
     labels = custom_type_labels(question_types)
+    paper_question_number = 1
     for q_type in paper_type_order(grouped, paper_type, question_types, section_order):
         if q_type not in grouped or not grouped[q_type]:
             continue
@@ -719,6 +754,7 @@ def build_latex_document(
         # 填空: 12
         # 解答: 15
         if paper_type == "exam_19":
+            paper_question_number = {"single_choice": 1, "multi_choice": 9, "fill_in_blank": 12, "detailed_answer": 15}.get(q_type, paper_question_number)
             if q_type == "single_choice":
                 lines.append(r"\ExplSyntaxOn \int_gset:Nn \g__examzh_question_index_int {1} \ExplSyntaxOff")
             elif q_type == "multi_choice":
@@ -752,7 +788,8 @@ def build_latex_document(
         
         for item in items:
             q = item.get("question", {})
-            raw_content = q.get("content", "")
+            raw_content = normalize_paper_image_choices(q.get("content", ""), q_type)
+            image_factor = paper_image_factor(q)
             q_score = item.get("score", 5)
             content_tikz_assets = q.get("content_tikz_assets", [])
             if not isinstance(content_tikz_assets, list):
@@ -804,6 +841,7 @@ def build_latex_document(
                 q_type=q_type,
                 preserve_image_positions=preserve_inline_images,
                 image_layouts=normalize_image_layouts(q.get("image_layouts", {}), cleaned_raw),
+                image_factor=image_factor,
                 tikz_sources=(
                     _inline_tikz_sources(
                         raw_content, content_tikz_assets, str(q.get("tikz_code") or "").strip()
@@ -827,7 +865,7 @@ def build_latex_document(
                 fig_align = "center"
 
             figure_size = _normalize_figure_size(q.get("figure_size"))
-            figure_height_reserve_cm = _figure_height_limit_cm(figure_size)
+            figure_height_reserve_cm = _figure_height_limit_cm(figure_size) * image_factor
             fig_elements = []
             compact_auto_images = len(img_matches) > 1 or bool(tikz_codes)
             for figure_kind, figure_value in figure_specs:
@@ -837,6 +875,7 @@ def build_latex_document(
                             figure_value,
                             figure_size=figure_size,
                             figure_align=fig_align,
+                            factor=image_factor,
                         )
                     )
                     continue
@@ -853,6 +892,7 @@ def build_latex_document(
                         figure_value,
                         image_width,
                         image_height,
+                        image_factor,
                     )
                 )
 
@@ -865,8 +905,7 @@ def build_latex_document(
                 fig_body = figure_separator.join(fig_elements)
 
             question_id = q.get("id")
-            if question_id is not None:
-                lines.append(f"% MathBank-Question-ID: {question_id}")
+            lines.append(_question_source_marker(question_id, paper_question_number, "content"))
             lines.append(f"\\begin{{{env_name}}}{points_arg}")
             if fig_body:
                 choices_part = ""
@@ -957,17 +996,24 @@ def build_latex_document(
                         lines.append(f"\\vspace*{{{space_val:.1f}cm}}")
 
             lines.append(f"\\end{{{env_name}}}")
+            lines.append(_QuestionSourceMarker("% MathBank-Question-End"))
 
             if include_answers:
                 ans_text = q.get("answer_markdown", "").strip()
                 if ans_text:
+                    lines.append(_question_source_marker(question_id, paper_question_number, "answer"))
                     lines.append(r"\begin{solution}")
                     lines.append(clean_content_for_latex(ans_text))
                     lines.append(r"\end{solution}")
+                    lines.append(_QuestionSourceMarker("% MathBank-Question-End"))
             lines.append("")
+            paper_question_number += 1
 
     lines.append(r"\end{document}")
-    return "\n".join(lines)
+    return "\n".join(
+        line if isinstance(line, _QuestionSourceMarker) else _sanitize_source_markers(line)
+        for line in lines
+    )
 
 def collect_referenced_images(
     questions_data: list,
@@ -1448,9 +1494,9 @@ def build_answer_sheet_latex(title: str, subtitle: str, questions_data: list) ->
             cleaned_lines.append("% " + line)
         else:
             cleaned_lines.append(line)
-    tex_str = "\n".join(cleaned_lines)
+    tex_str = _sanitize_source_markers("\n".join(cleaned_lines))
 
-    paper_title = title.strip() or "2026年普通高等学校招生全国统一考试"
+    paper_title = _sanitize_source_markers(title.strip()) or "2026年普通高等学校招生全国统一考试"
     tex_str = re.sub(r'202\d年普通高等学校招生全国统一考试', paper_title, tex_str)
 
     detailed_questions = []
@@ -1496,6 +1542,11 @@ def build_answer_sheet_latex(title: str, subtitle: str, questions_data: list) ->
         else:
             replacement = new_line
 
+        replacement = (
+            str(_question_source_marker(q.get("id"), int(q_num), "figure"))
+            + "\n" + _sanitize_source_markers(replacement)
+            + "\n% MathBank-Question-End"
+        )
         tex_str = tex_str.replace(default_line, replacement)
 
     return tex_str

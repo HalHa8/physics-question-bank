@@ -826,7 +826,8 @@ window.normalizeEditorFractions = normalizeEditorFractions;
                 answer_markdown: answerMarkdown,
                 review: review,
                 tags: tags,
-                image_paths: Array.from(new Set([
+                image_paths: typeof window.editorAssetReferences === 'function'
+                    ? window.editorAssetReferences() : Array.from(new Set([
                     ...uploadedImages,
                     ...(typeof uploadedAnswerImages !== 'undefined' ? uploadedAnswerImages : []),
                     ...TikzState.referencePaths()
@@ -918,7 +919,10 @@ window.normalizeEditorFractions = normalizeEditorFractions;
             uploadedAnswerImages = typeof window.collectAnswerImagePaths === 'function'
                 ? window.collectAnswerImagePaths(draft.answer_markdown || '')
                 : [];
-            uploadedImages = allDraftImages.filter(path => !uploadedAnswerImages.includes(path));
+            const visibleDraftImages = window.MathBankImageAssets
+                ? window.MathBankImageAssets.withoutReviewOnly(allDraftImages, draft.content || '', draft.answer_markdown || '', draft.review || '')
+                : allDraftImages;
+            uploadedImages = visibleDraftImages.filter(path => !uploadedAnswerImages.includes(path));
             window.hydrateTikzState(draft);
             FigureLayoutState.hydrate(draft);
             const hiddenTikzReferencePaths = new Set(TikzState.referencePaths());
@@ -1874,7 +1878,10 @@ window.normalizeEditorFractions = normalizeEditorFractions;
         function choicesGridOverflows(grid) {
             return Array.from(grid.children).some(item => {
                 const content = item.querySelector('.choices-content') || item;
-                const imageMinWidth = grid.closest('.paper-choice-options-row') ? 100 : 140;
+                const scaledBank = grid.matches('.choices-four-images') && grid.closest('.bank-image-scale-host');
+                const imageMinWidth = scaledBank
+                    ? 120 * window.ImageLayoutTools.imageScale(scaledBank.dataset.bankImageScale) / 100
+                    : (grid.closest('.paper-choice-options-row') ? 100 : 140);
                 const imageTooSmall = Array.from(content.querySelectorAll('img')).some(img =>
                     Math.min(img.naturalWidth, imageMinWidth) > content.clientWidth + 1
                 );
@@ -1927,6 +1934,277 @@ window.normalizeEditorFractions = normalizeEditorFractions;
         }
         window.adaptChoicesGridLayout = adaptChoicesGridLayout;
 
+        // Detail actions keep the existing editor/session and explicit-save flow.
+        // In particular, opening the AI tools must not reload a question and lose
+        // unsaved teacher edits or create another solve request while one is live.
+        function generateMissingEditorAnswer(session) {
+            if (!EditorState.isCurrent(session)) {
+                showToast('当前题目已变化，请在当前题目中重新操作。', 'info');
+                return;
+            }
+            const content = document.getElementById('editContent');
+            const answer = document.getElementById('editAnswerMarkdown');
+            const solveButton = document.getElementById('aiSolveBtn');
+            if (!content || !answer || !content.value.trim()) {
+                showToast('请先选择一道题目或输入题干。', 'info');
+                return;
+            }
+            const alreadyHasAnswer = Boolean(answer.value.trim());
+            openQuestionEditorModal('answer');
+            const modal = document.getElementById('editorSection');
+            if (!modal || modal.classList.contains('hidden')) return;
+            const tools = document.getElementById('answerSourceTools');
+            if (tools) tools.open = true;
+            if (typeof switchWorkflowTab === 'function') switchWorkflowTab('ai');
+            if (alreadyHasAnswer) {
+                showToast('已有解析已保留；请先查看，不会自动重新生成。', 'info');
+                return;
+            }
+            if (!solveButton || solveButton.disabled) {
+                showToast('解析正在生成，请在此查看进度。', 'info');
+                return;
+            }
+            if (typeof triggerAISolve === 'function') triggerAISolve();
+        }
+
+        function renderMissingEditorAnswer(container) {
+            if (!container) return;
+            container.innerHTML = '';
+            const message = document.createElement('p');
+            message.className = 'text-slate-400 italic';
+            message.textContent = '暂无解析内容。';
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'mt-3 min-h-[44px] px-4 py-2 rounded-xl bg-brand-50 text-brand-700 border border-brand-100 text-xs font-semibold';
+            button.textContent = '生成解析';
+            button.dataset.editorAction = 'generate-answer';
+            const session = EditorState.snapshot();
+            button.addEventListener('click', () => generateMissingEditorAnswer(session));
+            const help = document.createElement('p');
+            help.className = 'mt-2 text-xs text-slate-500 leading-relaxed';
+            help.textContent = '使用当前配置的解题模型，可能产生费用。生成后请核对物理规律、单位和配图条件，再保存。';
+            container.append(message, button, help);
+        }
+
+        function collectEditorFormulaErrors(container) {
+            const issues = new Map();
+            const add = (fragment, message) => {
+                // The same failure may be exposed by HTML and MathML. Keep a
+                // single actionable source fragment instead of double-reporting.
+                if (!issues.has(fragment)) issues.set(fragment, {fragment, message});
+            };
+            container.querySelectorAll('.katex-error').forEach(node => add(
+                String(node.textContent || ''),
+                String(node.getAttribute('title') || '公式无法在网页预览中显示。')
+            ));
+            if (typeof katex !== 'undefined' && typeof katex.renderToString === 'function') {
+                container.querySelectorAll('.katex').forEach(formula => {
+                    // With throwOnError:false, an unknown command can be a
+                    // normal .katex node containing a red MathML mstyle instead
+                    // of .katex-error. Color is only a candidate signal: authored
+                    // red physics notation must never itself be called an error.
+                    const candidate = Array.from(formula.querySelectorAll('mstyle[mathcolor]')).some(node =>
+                        String(node.getAttribute('mathcolor') || '').toLowerCase() === '#cc0000');
+                    if (!candidate) return;
+                    const annotation = formula.querySelector('annotation[encoding="application/x-tex"]');
+                    if (!annotation) return;
+                    const fragment = String(annotation.textContent || '');
+                    if (!fragment || issues.has(fragment)) return;
+                    try {
+                        // Reuse the live renderer, including PhysicsBank's
+                        // already registered symbols; never enable trusted TeX.
+                        katex.renderToString(fragment, {
+                            throwOnError: true, trust: false,
+                            displayMode: Boolean(formula.closest('.katex-display'))
+                        });
+                    } catch (error) {
+                        add(fragment, String(error.message || error));
+                    }
+                });
+            }
+            return [...issues.values()];
+        }
+
+        function locateEditorFormulaIssue(target, source, fragment, session) {
+            if (!['editContent', 'editAnswerMarkdown'].includes(target)) return;
+            const input = document.getElementById(target);
+            if (!input || !EditorState.isCurrent(session) || input.value !== source) {
+                showToast('内容已变化，请使用最新预览中的定位入口。', 'info');
+                return;
+            }
+            openQuestionEditorModal(target === 'editContent' ? 'content' : 'answer');
+            const modal = document.getElementById('editorSection');
+            if (!modal || modal.classList.contains('hidden')) return;
+            if (target === 'editContent' && typeof switchContentTab === 'function') switchContentTab('manual');
+            // The modal focuses its heading on the next frame. Queue this after
+            // that callback so the explicit locate action focuses the source.
+            requestAnimationFrame(() => {
+                if (!EditorState.isCurrent(session) || input.value !== source) return;
+                input.focus();
+                const offset = fragment ? source.indexOf(fragment) : -1;
+                if (offset >= 0) input.setSelectionRange(offset, offset + fragment.length);
+                else showToast('已打开原文；预览转换后的片段无法精确匹配，请对照诊断检查。', 'info');
+                input.scrollIntoView({ block: 'nearest' });
+            });
+        }
+
+        function renderEditorFormulaDiagnostics(container, target) {
+            if (!container || !['editContent', 'editAnswerMarkdown'].includes(target)) return;
+            const previous = container.querySelector('.editor-formula-diagnostics');
+            if (previous) previous.remove();
+            const issues = collectEditorFormulaErrors(container);
+            const input = document.getElementById(target);
+            if (!issues.length || !input) return;
+            const source = input.value;
+            const session = EditorState.snapshot();
+            const identity = EditorState.seqNum != null ? `题目 #${EditorState.seqNum}`
+                : EditorState.questionId != null ? `题目 ID ${EditorState.questionId}`
+                : EditorState.draftId ? '当前草稿' : '当前新题目';
+            const field = target === 'editContent' ? '题干' : '解析';
+            const details = document.createElement('details');
+            details.className = 'editor-formula-diagnostics mt-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs';
+            const summary = document.createElement('summary');
+            summary.className = 'cursor-pointer font-semibold text-amber-800';
+            summary.textContent = `${identity} · ${field}有 ${issues.length} 处公式显示异常`;
+            const note = document.createElement('p');
+            note.className = 'mt-2 leading-relaxed text-slate-600';
+            note.textContent = '以下为网页预览的实际报错，原始内容未改写；不等同于 PDF 编译诊断。可定位原文修正，或复制诊断反馈。';
+            details.append(summary, note);
+            const visibleIssues = issues.slice(0, 10);
+            visibleIssues.forEach((issue, index) => {
+                const row = document.createElement('div');
+                row.className = 'mt-3 space-y-2';
+                const code = document.createElement('pre');
+                code.className = 'whitespace-pre-wrap break-words font-mono text-xs max-h-40 overflow-auto select-text';
+                code.textContent = `${index + 1}. ${issue.fragment}\n${issue.message}`;
+                const locate = document.createElement('button');
+                locate.type = 'button';
+                locate.className = 'min-h-[44px] px-3 py-2 rounded-lg border border-amber-300 text-amber-800';
+                locate.textContent = `定位${field}原文`;
+                locate.addEventListener('click', () => locateEditorFormulaIssue(target, source, issue.fragment, session));
+                row.append(code, locate);
+                details.append(row);
+            });
+            if (issues.length > visibleIssues.length) {
+                const remaining = document.createElement('p');
+                remaining.textContent = '仅展开前 10 处；复制诊断包含全部已检测报错。';
+                details.append(remaining);
+            }
+            const copy = document.createElement('button');
+            copy.type = 'button';
+            copy.className = 'mt-3 min-h-[44px] px-3 py-2 rounded-lg border border-amber-300 text-amber-800';
+            copy.textContent = '复制公式诊断';
+            copy.addEventListener('click', async () => {
+                const report = `${identity} · ${field} · 网页公式预览\n原文未改写；此报告不是 PDF 编译日志。\n\n`
+                    + issues.map((issue, index) => `${index + 1}. 片段：${issue.fragment}\n诊断：${issue.message}`).join('\n\n');
+                try {
+                    await navigator.clipboard.writeText(report);
+                    showToast('已复制题号、公式片段与诊断。分享前请检查题目内容是否适合公开。', 'success');
+                } catch (error) {
+                    details.open = true;
+                    showToast('无法访问剪贴板，请展开诊断后手动复制。', 'info');
+                }
+            });
+            details.append(copy);
+            container.append(details);
+        }
+
+
+        // A display preference, not question content or FigureLayoutState.
+        // PaperStore keeps the separate per-paper scale used by exports.
+        const bankPreviewScales = new Map();
+        function bankImageScaleKey() {
+            if (EditorState.questionId != null) return 'question:' + EditorState.questionId;
+            if (EditorState.draftId != null) return 'draft:' + EditorState.draftId;
+            return 'session:' + EditorState.generation;
+        }
+        function readBankImageScale(key) {
+            if (bankPreviewScales.has(key)) return bankPreviewScales.get(key);
+            try { return window.ImageLayoutTools.imageScale(localStorage.getItem('physicsbank_bank_image_scale:' + key)); }
+            catch (_) { return 70; }
+        }
+        function applyBankImageScale(container) {
+            const scale = window.ImageLayoutTools.imageScale(container.dataset.bankImageScale) / 100;
+            container.querySelectorAll('img').forEach(img => {
+                if (!img.naturalWidth || !img.naturalHeight) return;
+                if (!img._bankImageBounds) {
+                    let width = 360, height = 240;
+                    if (img.closest('.choices-content')) {
+                        width = height = 120;
+                    } else {
+                        for (const [size, w, h] of [['small', 200, 168], ['medium', 320, 240], ['large', 420, 300]]) {
+                            if (img.classList.contains('mb-inline-image-size-' + size)) { width = w; height = h; }
+                        }
+                        // Respect existing detached-figure and individual-image presets.
+                        const w = img.style.maxWidth.match(/([0-9.]+)px/);
+                        const h = img.style.maxHeight.match(/([0-9.]+)px/);
+                        if (w) width = Number(w[1]);
+                        if (h) height = Number(h[1]);
+                        if (img.closest('td')) height = Math.min(height, 160);
+                    }
+                    img._bankImageBounds = { width, height };
+                }
+                const bounds = img._bankImageBounds;
+                const width = Math.min(img.naturalWidth, bounds.width, bounds.height * img.naturalWidth / img.naturalHeight);
+                img.style.width = (width * scale) + 'px';
+                img.style.height = 'auto';
+                img.style.maxWidth = '100%';
+                img.style.maxHeight = (bounds.height * scale) + 'px';
+            });
+            adaptChoicesGridLayout(container);
+        }
+        function initializeBankImageScale(container) {
+            if (!container) return;
+            const images = [...container.querySelectorAll('img')];
+            container.classList.toggle('bank-image-scale-host', images.length > 0);
+            if (!images.length) return;
+            const session = EditorState.snapshot();
+            const key = bankImageScaleKey();
+            const value = readBankImageScale(key);
+            container.dataset.bankImageScale = String(value);
+            const label = document.createElement('label');
+            label.className = 'bank-image-scale-control print:hidden';
+            label.title = '仅调整本机题库预览，不修改原图，也不影响试卷的图片比例';
+            const text = document.createElement('span');
+            text.textContent = '图片大小';
+            const input = document.createElement('input');
+            input.type = 'range'; input.min = '20'; input.max = '150'; input.step = '5';
+            input.value = String(value);
+            input.setAttribute('aria-label', '题库预览图片大小');
+            const output = document.createElement('output');
+            output.className = 'bank-image-scale-value';
+            output.textContent = value + '%';
+            label.append(text, input, output);
+            label.addEventListener('click', event => event.stopPropagation());
+            input.addEventListener('input', () => {
+                if (!EditorState.isCurrent(session)) return;
+                const value = window.ImageLayoutTools.imageScale(input.value);
+                bankPreviewScales.set(key, value);
+                if (!key.startsWith('session:')) {
+                    try { localStorage.setItem('physicsbank_bank_image_scale:' + key, String(value)); } catch (_) {}
+                }
+                for (const id of ['contentPreview', 'paperContent']) {
+                    const host = document.getElementById(id);
+                    if (!host || !host.classList.contains('bank-image-scale-host')) continue;
+                    host.dataset.bankImageScale = String(value);
+                    const slider = host.querySelector('.bank-image-scale-control input');
+                    const readout = host.querySelector('.bank-image-scale-value');
+                    if (slider) slider.value = String(value);
+                    if (readout) readout.textContent = value + '%';
+                    applyBankImageScale(host);
+                }
+            });
+            container.prepend(label);
+            applyBankImageScale(container);
+            images.forEach(img => {
+                if (!img.complete) img.addEventListener('load', () => {
+                    if (container.isConnected && container.contains(img) && EditorState.isCurrent(session)) {
+                        applyBankImageScale(container);
+                    }
+                }, { once: true });
+            });
+        }
+
         function setupRealtimePreviews() {
             const editContent = document.getElementById('editContent');
             const editAnswer = document.getElementById('editAnswerMarkdown');
@@ -1936,8 +2214,11 @@ window.normalizeEditorFractions = normalizeEditorFractions;
                 const previewContainer = document.getElementById('contentPreview');
                 const paperContainer = document.getElementById('paperContent');
                 
-                // Automatically sync illustrations list with text content
-                if (uploadedImages.length > 0) {
+                // Rebuild references after edits, undo and pasted image markup.
+                if (typeof window.syncEditorImageReferences === 'function') {
+                    window.syncEditorImageReferences();
+                    renderIllustrationBadges();
+                } else if (uploadedImages.length > 0) {
                     uploadedImages = uploadedImages.filter(path => text.includes(path));
                     renderIllustrationBadges();
                 }
@@ -1948,12 +2229,17 @@ window.normalizeEditorFractions = normalizeEditorFractions;
                     return;
                 }
                 
-                const preparedHtml = renderQuestionPreviewContent(previewContainer, text, { imageLayouts: FigureLayoutState.imageLayouts });
+                const displayText = window.ImageLayoutTools.normalizeImageChoices(text, document.getElementById('editQType').value);
+                const preparedHtml = renderQuestionPreviewContent(previewContainer, displayText, { imageLayouts: FigureLayoutState.imageLayouts });
                 renderQuestionPreviewContent(paperContainer, text, { preparedHtml: preparedHtml });
                 if (typeof window.applyEditorFigureLayoutPreview === 'function') {
                     window.applyEditorFigureLayoutPreview(previewContainer, text);
                     window.applyEditorFigureLayoutPreview(paperContainer, text);
                 }
+                initializeBankImageScale(previewContainer);
+                initializeBankImageScale(paperContainer);
+                renderEditorFormulaDiagnostics(previewContainer, 'editContent');
+                renderEditorFormulaDiagnostics(paperContainer, 'editContent');
             };
 
             const updateAnswerPreview = () => {
@@ -1967,7 +2253,7 @@ window.normalizeEditorFractions = normalizeEditorFractions;
                 
                 if (!text.trim()) {
                     previewContainer.innerHTML = '<p class="text-slate-400 italic">在左侧输入解析内容，此处将实时展示极其精美的 LaTeX 排版...</p>';
-                    paperContainer.innerHTML = '<p class="text-slate-400 italic">暂无解析内容。</p>';
+                    renderMissingEditorAnswer(paperContainer);
                     return;
                 }
                 
@@ -1997,6 +2283,8 @@ window.normalizeEditorFractions = normalizeEditorFractions;
                 } catch(e) {
                     console.error(e);
                 }
+                renderEditorFormulaDiagnostics(previewContainer, 'editAnswerMarkdown');
+                renderEditorFormulaDiagnostics(paperContainer, 'editAnswerMarkdown');
             };
             
             // Attach inputs
@@ -2049,6 +2337,7 @@ window.normalizeEditorFractions = normalizeEditorFractions;
             const editTags = document.getElementById('editTags');
 
             editQType.addEventListener('change', renderEditorPaperMeta);
+            editQType.addEventListener('change', updateContentPreview);
             editDifficulty.addEventListener('change', renderEditorPaperMeta);
             editSource.addEventListener('input', renderEditorPaperMeta);
             if (editTags) editTags.addEventListener('input', renderEditorPaperMeta);
@@ -2746,7 +3035,7 @@ window.normalizeEditorFractions = normalizeEditorFractions;
                 }
 
                 const preferredColumns = gridCols === 'grid-cols-1' ? 1 : (gridCols === 'grid-cols-2' ? 2 : 4);
-                let html = `<div class="grid ${gridCols} gap-2 my-2 select-none choices-grid ${hasImages ? 'choices-has-images' : ''} items-baseline" data-preferred-columns="${preferredColumns}">`;
+                let html = `<div class="grid ${gridCols} gap-2 my-2 select-none choices-grid ${hasImages ? 'choices-has-images' : ''} ${fourImageOptions ? 'choices-four-images' : ''} items-baseline" data-preferred-columns="${preferredColumns}">`;
                 items.forEach((item, idx) => {
                     const label = labels[idx] || (idx + 1);
                     let cleanItem = item;

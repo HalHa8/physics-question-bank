@@ -11,9 +11,16 @@ from sqlalchemy.orm import Session
 @dataclass(frozen=True)
 class QuestionAssetServiceDependencies:
     state: RuntimeState
+    structured_question_assets: Any
+    rewrite_question_asset_paths: Any
+    quarantine_asset: Any
+    os: Any
+    embedded_question_assets: Any
+    AssetLifecycleError: Any
     AssetSecurityError: Any
     Path: Any
     Question: Any
+    SessionLocal: Any
     _referenced_question_assets: Callable
     json: Any
     normalize_upload_asset_reference: Any
@@ -27,9 +34,10 @@ def rollback_question_asset_promotions(promotions: list[tuple[Path, Path]], *, d
 
     for source, destination in reversed(promotions):
         try:
-            if destination.is_file() and not source.exists():
-                source.parent.mkdir(parents=True, exist_ok=True)
-                dependencies.shutil.move(str(destination), str(source))
+            # Only newly created copies are logged. Reused permanent files
+            # can belong to another committed question and are never removed.
+            if destination.is_file() and source.is_file():
+                destination.unlink()
         except OSError as exc:
             print(f"[Storage Rollback] Failed to restore a promoted asset: {type(exc).__name__}")
 
@@ -42,15 +50,24 @@ def _referenced_question_assets(db: Session, *, dependencies: QuestionAssetServi
         dependencies.Question._image_paths,
         dependencies.Question.content,
         dependencies.Question.answer_markdown,
+        dependencies.Question.review,
+        dependencies.Question._content_tikz_assets,
+        dependencies.Question._answer_tikz_assets,
+        dependencies.Question.tikz_reference_image_path,
     ).all()
-    for raw_paths, content, answer_markdown in rows:
+    for raw_paths, content, answer_markdown, review, content_assets, answer_assets, legacy_reference in rows:
         references = []
         try:
             parsed = dependencies.json.loads(raw_paths or "[]")
-            if isinstance(parsed, list):
-                references.extend(parsed)
-        except (TypeError, dependencies.json.JSONDecodeError):
-            pass
+            if not isinstance(parsed, list):
+                raise ValueError("题目图片清单不是数组，已停止清理")
+            references.extend(parsed)
+            references.extend(dependencies.structured_question_assets(
+                content_assets, answer_assets, legacy_reference=legacy_reference,
+            ))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("题目图片记录损坏，已停止清理") from exc
+        references.extend(dependencies.embedded_question_assets(content, answer_markdown, review))
         references.extend(
             dependencies.re.findall(
                 r'/static/(?:uploads|test_uploads)/[a-zA-Z0-9_./-]+',
@@ -72,7 +89,7 @@ def _referenced_question_assets(db: Session, *, dependencies: QuestionAssetServi
 
 
 def delete_unreferenced_question_assets(db: Session, references, *, dependencies: QuestionAssetServiceDependencies) -> int:
-    """Delete committed-away images only when no remaining question uses them."""
+    """Retain committed-away images recoverably after checking every reference."""
 
     candidates: set[dependencies.Path] = set()
     for reference in set(references or []):
@@ -95,24 +112,30 @@ def delete_unreferenced_question_assets(db: Session, references, *, dependencies
     for candidate in candidates:
         try:
             if candidate.is_file() and candidate not in referenced:
-                candidate.unlink()
-                removed += 1
-        except OSError:
+                relative = candidate.relative_to(dependencies.Path(dependencies.state.UPLOAD_DIR).resolve()).as_posix()
+                removed += int(dependencies.quarantine_asset(
+                    f"/{dependencies.state.UPLOAD_DIR_REL}/{relative}", uploads_dir=dependencies.state.UPLOAD_DIR,
+                    url_prefix=dependencies.state.UPLOAD_DIR_REL, reason="question-reference-removed",
+                ))
+        except (OSError, dependencies.AssetLifecycleError):
             print("[Storage Cleanup] Skipped an unavailable legacy image path.")
     return removed
 
 
-def promote_question_temp_assets(content: str, answer_markdown: str, image_paths_list: list, *, promotion_log: list[tuple[Path, Path]] | None=None, dependencies: QuestionAssetServiceDependencies) -> tuple:
-    """物理移动临时图片到永久目录，并更新题干、解析和图片路径列表中的引用"""
+def promote_question_temp_assets(
+    content: str,
+    answer_markdown: str,
+    image_paths_list: list,
+    *,
+    promotion_log: list[tuple[Path, Path]] | None = None,
+    path_map: dict[str, str] | None = None, dependencies: QuestionAssetServiceDependencies) -> tuple:
+    """Copy temporary images durably, preserving drafts and shared import cards."""
     import shutil
 
     if not isinstance(image_paths_list, list):
         raise dependencies.AssetSecurityError("image_paths 必须是插图路径数组。")
 
-    embedded_paths = dependencies.re.findall(
-        r'/static/(?:uploads|test_uploads)/tmp/[a-zA-Z0-9_.-]+',
-        f"{content}\n{answer_markdown}",
-    )
+    embedded_paths = dependencies.embedded_question_assets(content, answer_markdown)
     all_references = [value for value in image_paths_list if value] + embedded_paths
 
     # Validate the complete set before moving anything.  A bad second path must
@@ -147,11 +170,32 @@ def promote_question_temp_assets(content: str, answer_markdown: str, image_paths
                 url_prefix=dependencies.state.UPLOAD_DIR_REL,
                 require_file=False,
             )
+            # A previous card may already have copied this same shared image.
+            # Reuse only byte-identical content and never overwrite a collision.
+            from mathbank.asset_lifecycle import restore_asset
+            restore_asset(destination, uploads_dir=upload_root)
             if destination.exists():
-                raise dependencies.AssetSecurityError("目标插图文件已存在，已停止覆盖。")
-            shutil.move(str(source), str(destination))
-            if promotion_log is not None:
-                promotion_log.append((source, destination))
+                with source.open("rb") as original, destination.open("rb") as existing:
+                    while True:
+                        left, right = original.read(1024 * 1024), existing.read(1024 * 1024)
+                        if left != right:
+                            raise dependencies.AssetSecurityError("目标插图文件已存在且内容不同，已停止覆盖。")
+                        if not left:
+                            break
+            else:
+                # Exclusive creation plus the lifecycle lock makes rollback
+                # ownership unambiguous even under concurrent batch imports.
+                output = destination.open("xb")
+                try:
+                    with output, source.open("rb") as original:
+                        shutil.copyfileobj(original, output)
+                        output.flush()
+                        dependencies.os.fsync(output.fileno())
+                except Exception:
+                    destination.unlink(missing_ok=True)
+                    raise
+                if promotion_log is not None:
+                    promotion_log.append((source, destination))
             promoted_by_canonical[canonical] = dependencies.normalize_upload_asset_reference(
                 destination_url,
                 uploads_dir=upload_root,
@@ -168,11 +212,10 @@ def promote_question_temp_assets(content: str, answer_markdown: str, image_paths
         replacements[original] = promoted
         replacements[canonical] = promoted
 
-    new_content = content
-    new_answer = answer_markdown
-    for old_path, new_path in replacements.items():
-        new_content = new_content.replace(old_path, new_path)
-        new_answer = new_answer.replace(old_path, new_path)
+    new_content = dependencies.rewrite_question_asset_paths(content, replacements)
+    new_answer = dependencies.rewrite_question_asset_paths(answer_markdown, replacements)
+    if path_map is not None:
+        path_map.update({old: new for old, new in replacements.items() if old != new})
 
     updated_paths: list[str] = []
     for original in image_paths_list:
@@ -191,9 +234,17 @@ def promote_question_temp_assets(content: str, answer_markdown: str, image_paths
 
 
 def _delete_task_temp_assets(paths: list, *, dependencies: QuestionAssetServiceDependencies) -> int:
-    """Delete only explicit files below this instance's upload tmp directory."""
+    """Retain task files recoverably so old drafts and result URLs still work."""
     removed = 0
     tmp_root = dependencies.Path(dependencies.state.TMP_UPLOAD_DIR).resolve()
+    # Old clients/databases may still contain durable references into tmp.
+    # Keep them in place for exports and full backups as well as HTTP reads.
+    try:
+        with dependencies.SessionLocal() as db:
+            referenced = dependencies._referenced_question_assets(db)
+    except Exception as exc:
+        print(f"[Storage Retention] Could not verify task image references; kept files ({type(exc).__name__}).")
+        return 0
     for url in paths or []:
         try:
             full_path = dependencies.resolve_upload_asset(
@@ -204,12 +255,14 @@ def _delete_task_temp_assets(paths: list, *, dependencies: QuestionAssetServiceD
             )
         except dependencies.AssetSecurityError:
             continue
-        if full_path.parent != tmp_root:
+        if full_path.parent != tmp_root or full_path in referenced:
             continue
         if full_path.is_file():
             try:
-                full_path.unlink()
-                removed += 1
-            except OSError:
+                removed += int(dependencies.quarantine_asset(
+                    str(url), uploads_dir=dependencies.state.UPLOAD_DIR,
+                    url_prefix=dependencies.state.UPLOAD_DIR_REL, reason="document-task-expired-or-cancelled",
+                ))
+            except (OSError, dependencies.AssetLifecycleError):
                 pass
     return removed

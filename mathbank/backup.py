@@ -21,6 +21,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from mathbank import __version__
+from mathbank.question_assets import embedded_question_assets
 from mathbank.asset_security import SAFE_IMAGE_EXTENSIONS, harden_private_path
 from mathbank.paths import (
     DATA_BACKUP_DIR,
@@ -247,7 +248,7 @@ def _database_upload_references(
 
     references: set[str] = set()
     selected_columns = [
-        name for name in ("image_paths", "content", "answer_markdown") if name in columns
+        name for name in ("image_paths", "content", "answer_markdown", "review") if name in columns
     ]
     if not selected_columns:
         return references
@@ -276,6 +277,8 @@ def _database_upload_references(
                     raise RuntimeError(
                         f"题目 {question_id} 包含无效插图引用"
                     ) from exc
+        for reference in embedded_question_assets(values_by_column.get("review") or ""):
+            references.add(_upload_archive_name(reference, url_prefix=url_prefix))
         for field_name in ("content", "answer_markdown"):
             text = values_by_column.get(field_name)
             if not isinstance(text, str):

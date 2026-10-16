@@ -198,6 +198,10 @@ def _duplicate_input_from_payload(item: dict, *, dependencies: QuestionQueriesDe
     evidence_image_paths = [
         path for path in image_paths if path not in hidden_references
     ]
+    from mathbank.question_assets import without_review_only_assets
+    evidence_image_paths = without_review_only_assets(
+        evidence_image_paths, content, answer_markdown, item.get("review") or ""
+    )
     visible_paths = dependencies.select_visible_question_images(
         content,
         answer_markdown,

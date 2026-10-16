@@ -9,11 +9,16 @@ from typing import Optional
 from fastapi import Depends, Form, BackgroundTasks
 from sqlalchemy.orm import Session
 from mathbank.database import Question, get_db
+from mathbank.question_assets import rewrite_image_layout_paths, rewrite_question_asset_paths
 
 
 @dataclass(frozen=True)
 class QuestionCommandsDependencies:
     state: RuntimeState
+    structured_question_assets: Any
+    rewrite_structured_asset_paths: Any
+    embedded_question_assets: Any
+    AssetSecurityError: Any
     FIGURE_ALIGN_VALUES: Any
     FIGURE_SIZE_VALUES: Any
     HTTPException: Any
@@ -55,7 +60,12 @@ class QuestionCommandsDependencies:
     uuid: Any
 
 
-def committed_question_response(db: Session, db_question: Question, question_id: int, *, operation: str, dependencies: QuestionCommandsDependencies) -> dict:
+def committed_question_response(
+    db: Session,
+    db_question: Question,
+    question_id: int,
+    *,
+    operation: str, dependencies: QuestionCommandsDependencies) -> dict:
     """Serialize a committed write without ever misreporting it as failed."""
 
     try:
@@ -79,7 +89,18 @@ def committed_question_response(db: Session, db_question: Question, question_id:
         return {"status": "success", "question": {"id": question_id}}
 
 
-def prepare_question_assets(content: str, answer_markdown: str, image_paths: str, content_tikz_assets: Optional[str], tikz_reference_image_path: str, answer_tikz_assets: str, tikz_code: str='', *, promotion_log: list[tuple[Path, Path]], dependencies: QuestionCommandsDependencies) -> tuple[
+def prepare_question_assets(
+    content: str,
+    answer_markdown: str,
+    image_paths: str,
+    content_tikz_assets: Optional[str],
+    tikz_reference_image_path: str,
+    answer_tikz_assets: str,
+    tikz_code: str = "",
+    *,
+    review: str = "",
+    promotion_log: list[tuple[Path, Path]],
+    path_map: dict[str, str] | None = None, dependencies: QuestionCommandsDependencies) -> tuple[
     str,
     str,
     list[str],
@@ -91,12 +112,26 @@ def prepare_question_assets(content: str, answer_markdown: str, image_paths: str
     """Promote and validate all visible and AI-only assets in one policy path."""
 
     parsed_img_paths = dependencies.json.loads(image_paths) if image_paths else []
+    if not isinstance(parsed_img_paths, list):
+        raise dependencies.AssetSecurityError("image_paths 必须是插图路径数组。")
+    parsed_img_paths.extend(dependencies.embedded_question_assets(review))
+    parsed_img_paths.extend(dependencies.structured_question_assets(
+        content_tikz_assets, answer_tikz_assets,
+        legacy_reference=tikz_reference_image_path,
+    ))
+    replacements: dict[str, str] = {}
     content, answer_markdown, parsed_img_paths = dependencies.promote_question_temp_assets(
         content,
         answer_markdown,
         parsed_img_paths,
         promotion_log=promotion_log,
+        path_map=replacements,
     )
+    if path_map is not None:
+        path_map.update(replacements)
+    content_tikz_assets = dependencies.rewrite_structured_asset_paths(content_tikz_assets, replacements)
+    answer_tikz_assets = dependencies.rewrite_structured_asset_paths(answer_tikz_assets, replacements)
+    tikz_reference_image_path = replacements.get(tikz_reference_image_path, tikz_reference_image_path)
     parsed_img_paths = dependencies.normalize_upload_asset_references(
         parsed_img_paths,
         uploads_dir=dependencies.state.UPLOAD_DIR,
@@ -143,7 +178,7 @@ def prepare_question_assets(content: str, answer_markdown: str, image_paths: str
     )
 
 
-def build_prepared_question_fingerprint(*, content: str, answer_markdown: str, question_type: str, image_paths: list[str], content_tikz_assets: list[dict[str, str]], answer_tikz_assets: list[dict[str, str]], tikz_code: str, tikz_reference_image_path: str, dependencies: QuestionCommandsDependencies):
+def build_prepared_question_fingerprint(*, content: str, answer_markdown: str, question_type: str, image_paths: list[str], content_tikz_assets: list[dict[str, str]], answer_tikz_assets: list[dict[str, str]], tikz_code: str, tikz_reference_image_path: str, review: str = "", dependencies: QuestionCommandsDependencies):
     hidden_references = {str(tikz_reference_image_path or "").strip()}
     for asset in [*content_tikz_assets, *answer_tikz_assets]:
         if isinstance(asset, dict):
@@ -156,7 +191,7 @@ def build_prepared_question_fingerprint(*, content: str, answer_markdown: str, q
         content,
         answer_markdown,
         registered_visible_paths,
-        content_tikz_assets,
+        content_tikz_assets, review=review,
     )
     return dependencies.build_question_fingerprint(
         dependencies.QuestionDuplicateInput(
@@ -216,6 +251,7 @@ def duplicate_review_required_response(db: Session, *, fingerprint, question_ids
 
 def create_question(background_tasks: BackgroundTasks, content: str=Form(...), question_type: str=Form(...), category_compulsory: str=Form(''), category_chapter: str=Form(''), category_knowledge: str=Form(''), difficulty: str=Form(...), source: str=Form(''), answer_markdown: str=Form(''), review: str=Form(''), tikz_code: str=Form(''), content_tikz_assets: Optional[str]=Form(None), tikz_reference_image_path: str=Form(''), answer_tikz_assets: str=Form('[]'), figure_align: str=Form('right'), figure_align_custom: bool=Form(False), figure_size: str=Form('auto'), image_layouts: str=Form('{}'), tags: str=Form(''), related_question_id: str=Form(''), image_paths: str=Form('[]'), duplicate_snapshot_hash: str=Form(''), duplicate_override: str=Form(''), db: Session=Depends(get_db), *, dependencies: QuestionCommandsDependencies):
     asset_promotions: list[tuple[dependencies.Path, dependencies.Path]] = []
+    asset_path_map: dict[str, str] = {}
     duplicate_warning = ""
     try:
         duplicate_snapshot_hash = str(duplicate_snapshot_hash or "").strip()
@@ -250,8 +286,10 @@ def create_question(background_tasks: BackgroundTasks, content: str=Form(...), q
             tikz_reference_image_path,
             answer_tikz_assets,
             tikz_code,
-            promotion_log=asset_promotions,
+            promotion_log=asset_promotions, review=review, path_map=asset_path_map,
         )
+
+        review = rewrite_question_asset_paths(review, asset_path_map)
 
         # 1. Fallback if third level is empty, default to chapter
         if not category_knowledge and category_chapter:
@@ -274,7 +312,7 @@ def create_question(background_tasks: BackgroundTasks, content: str=Form(...), q
             figure_size=figure_size,
             tags=tags
         )
-        db_question.image_layouts = image_layouts
+        db_question.image_layouts = rewrite_image_layout_paths(image_layouts, asset_path_map)
         db_question.image_paths = parsed_img_paths
         db_question.content_tikz_assets = parsed_content_tikz_assets
         db_question.answer_tikz_assets = parsed_answer_tikz_assets
@@ -301,6 +339,7 @@ def create_question(background_tasks: BackgroundTasks, content: str=Form(...), q
                 answer_markdown=answer_markdown,
                 question_type=question_type,
                 image_paths=parsed_img_paths,
+                review=review,
                 content_tikz_assets=parsed_content_tikz_assets,
                 answer_tikz_assets=parsed_answer_tikz_assets,
                 tikz_code=parsed_tikz_code,
@@ -375,6 +414,8 @@ def create_question(background_tasks: BackgroundTasks, content: str=Form(...), q
         committed_question_id,
         operation="create_question",
     )
+    if asset_path_map:
+        response["asset_path_map"] = asset_path_map
     if duplicate_warning:
         response["warning"] = duplicate_warning
     return response
@@ -386,6 +427,7 @@ def update_question(question_id: int, background_tasks: BackgroundTasks, content
         raise dependencies.HTTPException(status_code=404, detail="未找到对应的题目")
 
     asset_promotions: list[tuple[dependencies.Path, dependencies.Path]] = []
+    asset_path_map: dict[str, str] = {}
     duplicate_warning = ""
     old_images = list(db_question.image_paths)
     try:
@@ -422,8 +464,10 @@ def update_question(question_id: int, background_tasks: BackgroundTasks, content
             tikz_reference_image_path,
             answer_tikz_assets,
             tikz_code,
-            promotion_log=asset_promotions,
+            promotion_log=asset_promotions, review=review, path_map=asset_path_map,
         )
+
+        review = rewrite_question_asset_paths(review, asset_path_map)
 
         # 1. Fallback if third level is empty, default to chapter
         if not category_knowledge and category_chapter:
@@ -450,7 +494,7 @@ def update_question(question_id: int, background_tasks: BackgroundTasks, content
         # Physical cleanup happens only after the database commit succeeds.
         removed_images = set(old_images) - set(parsed_img_paths)
 
-        db_question.image_layouts = image_layouts if image_layouts is not None else db_question.image_layouts
+        db_question.image_layouts = rewrite_image_layout_paths(image_layouts if image_layouts is not None else db_question.image_layouts, asset_path_map)
         db_question.image_paths = parsed_img_paths
         db_question.content_tikz_assets = parsed_content_tikz_assets
         db_question.answer_tikz_assets = parsed_answer_tikz_assets
@@ -501,6 +545,7 @@ def update_question(question_id: int, background_tasks: BackgroundTasks, content
                 answer_markdown=answer_markdown,
                 question_type=question_type,
                 image_paths=parsed_img_paths,
+                review=review,
                 content_tikz_assets=parsed_content_tikz_assets,
                 answer_tikz_assets=parsed_answer_tikz_assets,
                 tikz_code=parsed_tikz_code,
@@ -575,6 +620,8 @@ def update_question(question_id: int, background_tasks: BackgroundTasks, content
         question_id,
         operation="update_question",
     )
+    if asset_path_map:
+        response["asset_path_map"] = asset_path_map
     if duplicate_warning:
         response["warning"] = duplicate_warning
     return response

@@ -1,20 +1,63 @@
-"""PDF import orchestration with explicit dependencies and bounded paid calls."""
-
-import os
-import re
-import tempfile
-from pathlib import Path
+"""Document import orchestration with explicit task-scoped dependencies."""
 
 from mathbank.document_import_context import DocumentImportDependencies
-from mathbank.document_text import parse_page_range, process_ocr_illustrations, extract_title_from_latex
-from mathbank.task_manager import TaskCancelled
+import tempfile
 from mathbank.ai_providers import OCRConfigurationError, OCRResponseTimeoutError, ParseConfigurationError
-from mathbank.pdf_figures import PDF_STRATEGIES, apply_pdf_layout_reviews, enrich_pdf_with_figures, isolate_shared_pdf_figures
+from mathbank.document_text import parse_page_range, process_ocr_illustrations, extract_title_from_latex, normalize_fillin_macro
+from mathbank.asset_security import (
+    AssetSecurityError,
+    InvalidImageError,
+    MAX_OCR_IMAGE_BYTES,
+    MAX_PDF_BYTES,
+    MAX_SINGLE_IMAGE_BYTES,
+    UploadTooLargeError,
+    harden_private_path,
+    normalize_answer_tikz_assets,
+    normalize_content_tikz_assets,
+    normalize_optional_upload_asset_reference,
+    normalize_raster_image,
+    normalize_upload_asset_reference,
+    normalize_upload_asset_references,
+    read_stream_limited,
+    resolve_upload_asset,
+    write_private_text_atomic,
+)
+from mathbank.content_locks import lock_visible_math, reconcile_visible_math
+from mathbank.document_requests import DOCUMENT_AI_TIMEOUT_SECONDS
+from mathbank.import_review import (
+    make_source_review_advisory, prepare_word_extraction_reviews, finalize_word_extraction_reviews,
+)
+from mathbank.paper_parse import (
+    PAPER_SPLIT_TIMEOUT_SECONDS, PAPER_SPLIT_CACHE_MAX_CHARACTERS,
+    parse_paper_completion, finalize_source_answers, request_pdf_paper_completion,
+)
+from mathbank.pdf_figures import (
+    PDF_STRATEGIES,
+    apply_pdf_layout_reviews,
+    refresh_pdf_review_items,
+    enrich_pdf_with_figures,
+    isolate_shared_pdf_figures,
+)
+from mathbank.pdf_inspector_helper import (
+    is_pdf_inspector_available,
+    get_pdf_inspector_version,
+    inspect_and_extract_pdf,
+    merge_pdf_page_texts,
+)
 from mathbank.pdf_layout import inspect_pdf_page
-from mathbank.pdf_inspector_helper import merge_pdf_page_texts
-from mathbank.content_locks import lock_visible_math
-from mathbank.paper_parse import finalize_source_answers
-from mathbank.import_review import make_source_review_advisory
+from mathbank.pdf_vision_request import completion_content, request_pdf_vision, collected_usage
+from mathbank.task_manager import (
+    TaskCancelled,
+    TaskManager,
+    TaskQueueFull,
+)
+from pathlib import Path
+import copy
+import hashlib
+import json
+import os
+import re
+import threading
 
 
 def run_pdf_parsing_task(
@@ -24,9 +67,7 @@ def run_pdf_parsing_task(
     generate_answers: bool = False,
     page_range: str = None,
     pdf_strategy: str = "native_preferred",
-    pdf_verify_suspicions: bool = False,
-    *, dependencies: DocumentImportDependencies,
-):
+    pdf_verify_suspicions: bool = False, *, dependencies: DocumentImportDependencies):
     """PDF parsing with bounded OCR concurrency and cooperative cancellation."""
 
     import concurrent.futures
@@ -35,6 +76,75 @@ def run_pdf_parsing_task(
     tmp_pdf_path = Path(dependencies.tmp_upload_dir) / f"{task_id}.pdf"
     diagnostics: dict = {}
     layout_result = None
+    page_urls = []
+    target_page_indices = []
+    ocr_results = []
+    source_pages = None
+    vision_lock = threading.Lock()
+
+    def check_pdf_cancelled():
+        dependencies.tasks.check_cancelled(task_id)
+        if not dependencies.tasks.exists(task_id):
+            raise TaskCancelled("PDF 任务已移除。")
+
+    def report_pdf_attempt(event):
+        check_pdf_cancelled()
+        with vision_lock:
+            report = diagnostics.setdefault("pdf_vision", {
+                "timeout_seconds": DOCUMENT_AI_TIMEOUT_SECONDS, "max_attempts": 1, "attempts": [],
+            })
+            event = {**event, "page_number": event["page_index"] + 1}
+            identity = (event["page_index"], event["stage"], event["attempt"])
+            previous = next((item for item in report["attempts"]
+                             if (item["page_index"], item["stage"], item["attempt"]) == identity), None)
+            if previous is None:
+                report["attempts"].append(event)
+            else:
+                previous.update(event)
+            report["calls"] = len(report["attempts"])
+            report["retries"] = sum(item["attempt"] > 1 for item in report["attempts"])
+            report["usage"] = collected_usage(report["attempts"])
+            report["usage_complete"] = all(all(key in item["usage"] for key in
+                                               ("prompt_tokens", "completion_tokens", "total_tokens"))
+                                           for item in report["attempts"])
+            if event["status"] == "running":
+                log = f"第 {event['page_number']} 页识别：第 {event['attempt']} / 1 次请求，每次等待上限 {DOCUMENT_AI_TIMEOUT_SECONDS} 秒..."
+            elif event.get("retrying"):
+                log = f"第 {event['page_number']} 页识别失败，准备重试一次：{event['error']}"
+            else:
+                log = None
+            changes = {"diagnostics": copy.deepcopy(diagnostics)}
+            if log:
+                changes["log"] = log
+            dependencies.tasks.update(task_id, **changes)
+
+    def report_pdf_split_attempt(event):
+        check_pdf_cancelled()
+        if event.get("stream_progress"):
+            received = event.get("stream_content_characters", 0)
+            log = f"模型已返回 {received} 个正文字符，正在接收完整拆题结果..." if received else None
+        elif event["status"] == "running":
+            log = f"正在拆解已识别的试卷文本：第 {event['attempt']} / 1 次请求，每次等待上限 {PAPER_SPLIT_TIMEOUT_SECONDS} 秒..."
+        elif event.get("retrying"):
+            log = f"试卷文本拆题失败，准备重试一次：{event['error']}"
+        else:
+            log = None
+        changes = {"diagnostics": copy.deepcopy(diagnostics)}
+        if log:
+            changes["log"] = log
+        dependencies.tasks.update(task_id, **changes)
+
+    def retain_split_input(source_content, model_source):
+        # Task-local diagnostic evidence; this is not a persistent response
+        # cache or a promise that a failed upload can be resumed automatically.
+        cache = {"source_sha256": hashlib.sha256(file_bytes).hexdigest(),
+                 "model_source_sha256": hashlib.sha256(model_source.encode("utf-8")).hexdigest(),
+                 "input_characters": len(model_source), "status": "complete",
+                 "source_markdown": source_content, "model_source": model_source}
+        if len(json.dumps(cache, ensure_ascii=False)) > PAPER_SPLIT_CACHE_MAX_CHARACTERS:
+            cache = {key: value for key, value in cache.items() if key not in ("source_markdown", "model_source")}
+            cache["status"] = "metadata_only"
+        dependencies.tasks.update(task_id, pdf_source_cache=cache)
 
     try:
         import pymupdf as fitz
@@ -111,6 +221,7 @@ def run_pdf_parsing_task(
                 file_bytes,
                 task_id,
                 page_indices=target_page_indices,
+                include_source_review_evidence=True,
             )
             inspector_pages = {
                 int(page.get("page_index")): page
@@ -158,6 +269,59 @@ def run_pdf_parsing_task(
                     plan = plan_pdf_regions(document[page_num], info)
                     if plan is not None:
                         regional_plans[local_idx] = plan
+
+        # Auxiliary views do not own text/slots and are not regional OCR or
+        # independent verification. Render from the original PDF serially;
+        # HTTP workers get only internally registered paths and metadata.
+        detail_results: dict[int, dict] = {}
+        if pdf_strategy == "layout_aware":
+            from mathbank.pdf_vision_details import render_pdf_detail_views
+            detail_bytes_remaining = 80 * 1024 * 1024
+
+            def register_detail_asset(path):
+                if path not in temp_assets:
+                    temp_assets.append(path)
+                if not dependencies.tasks.add_temp_asset(task_id, path):
+                    raise TaskCancelled("PDF 任务已移除。")
+                check_pdf_cancelled()
+
+            full_page_indices = [index for index in pages_requiring_ocr if index not in regional_plans]
+            if full_page_indices:
+                dependencies.tasks.update(task_id, log="正在准备原页局部放大视图，辅助精读小字和数学符号...")
+                with fitz.open(stream=file_bytes, filetype="pdf") as document:
+                    for local_idx in full_page_indices:
+                        check_pdf_cancelled()
+                        page_num = target_page_indices[local_idx]
+                        try:
+                            details = render_pdf_detail_views(
+                                document[page_num], page_index=page_num,
+                                output_dir=Path(dependencies.tmp_upload_dir),
+                                asset_prefix=f"pdf_detail_{task_id}_{page_num}",
+                                url_prefix=f"/{dependencies.upload_dir_rel}/tmp",
+                                register_asset=register_detail_asset,
+                                check_cancelled=check_pdf_cancelled,
+                                byte_budget=detail_bytes_remaining,
+                            )
+                        except TaskCancelled:
+                            raise
+                        except Exception:
+                            # Optional local preparation must not discard the
+                            # already rendered complete navigation page.
+                            details = {"status": "skipped", "views": [], "total_png_bytes": 0,
+                                       "notes": ["本页高清辅助视图无法准备，继续使用整页识图。"]}
+                        detail_results[local_idx] = details
+                        detail_bytes_remaining -= details.get("total_png_bytes", 0)
+            diagnostics["pdf_detail_views"] = {
+                "prepared_pages": sum(bool(item["views"]) for item in detail_results.values()),
+                "prepared_images": sum(len(item["views"]) for item in detail_results.values()),
+                "separate_detail_requests": 0, "independent_verification": False,
+                "pages": [{"page_number": target_page_indices[index] + 1,
+                           "status": item["status"], "notes": list(item["notes"]),
+                           "views": [{key: view[key] for key in
+                                      ("id", "page_index", "bbox", "actualdpi", "width", "height", "sha256")}
+                                     for view in item["views"]]}
+                          for index, item in detail_results.items()],
+            }
         extraction_pages = []
         for local_idx, page_num in enumerate(target_page_indices):
             plan = regional_plans.get(local_idx)
@@ -236,9 +400,9 @@ def run_pdf_parsing_task(
                 acquired = False
                 try:
                     while not acquired:
-                        dependencies.tasks.check_cancelled(task_id)
+                        check_pdf_cancelled()
                         acquired = dependencies.ocr_semaphore.acquire(timeout=0.25)
-                    dependencies.tasks.check_cancelled(task_id)
+                    check_pdf_cancelled()
                     real_page_num = target_page_indices[local_idx] + 1
                     joint = None
                     if local_idx in regional_plans:
@@ -246,39 +410,36 @@ def run_pdf_parsing_task(
                         joint = request_pdf_regions(
                             image_path, page_layout_infos[real_page_num - 1], regional_plans[local_idx],
                             include_figures=pdf_strategy == "layout_aware",
-                            check_cancelled=lambda: dependencies.tasks.check_cancelled(task_id),
+                            check_cancelled=check_pdf_cancelled, report_attempt=report_pdf_attempt,
+                            include_transcription_evidence=True,
                         )
                         raw_text = joint["markdown"]
                     elif pdf_strategy == "layout_aware":
-                        from mathbank.pdf_page_vision import (
-                            choose_pdf_page_vision_dpi, request_pdf_page,
-                            DEFAULT_PAGE_VISION_DPI,
-                        )
-                        render_dpi = choose_pdf_page_vision_dpi(
-                            inspector_pages.get(real_page_num - 1)
-                        )
+                        from mathbank.pdf_page_vision import request_pdf_page, choose_pdf_page_vision_dpi, DEFAULT_PAGE_VISION_DPI
+                        detail_kwargs = ({"detail_views": detail_results[local_idx]["views"]}
+                                         if detail_results.get(local_idx, {}).get("views") else {})
+                        render_dpi = choose_pdf_page_vision_dpi(inspector_pages.get(real_page_num - 1))
                         if render_dpi == DEFAULT_PAGE_VISION_DPI:
                             joint = request_pdf_page(
                                 image_path, page_layout_infos[real_page_num - 1],
-                                check_cancelled=lambda: dependencies.tasks.check_cancelled(task_id),
+                                check_cancelled=check_pdf_cancelled, report_attempt=report_pdf_attempt,
+                                **detail_kwargs, include_transcription_evidence=True,
                             )
                         else:
-                            # Re-render from vectors instead of resampling the
-                            # 150-DPI preview. The compact image is request-only.
-                            with tempfile.TemporaryDirectory(prefix="physicsbank-vision-") as temp_dir:
-                                compact_path = Path(temp_dir) / "page.png"
-                                with fitz.open(stream=file_bytes, filetype="pdf") as source_pdf:
-                                    source_pdf[real_page_num - 1].get_pixmap(
-                                        dpi=render_dpi, alpha=False,
-                                    ).save(compact_path)
-                                dependencies.tasks.check_cancelled(task_id)
-                                joint = request_pdf_page(
-                                    str(compact_path), page_layout_infos[real_page_num - 1],
-                                    check_cancelled=lambda: dependencies.tasks.check_cancelled(task_id),
-                                )
+                            # Request-only render; source previews and figure crops stay full quality.
+                            # No persistent transcription certificate may refer to this temporary image.
+                            with tempfile.TemporaryDirectory(prefix="physicsbank-vision-") as compact_dir:
+                                compact_path = Path(compact_dir) / "page.png"
+                                with fitz.open(stream=file_bytes, filetype="pdf") as original_pdf:
+                                    original_pdf[real_page_num - 1].get_pixmap(dpi=render_dpi, alpha=False).save(compact_path)
+                                check_pdf_cancelled()
+                                joint = request_pdf_page(str(compact_path), page_layout_infos[real_page_num - 1],
+                                    check_cancelled=check_pdf_cancelled, report_attempt=report_pdf_attempt)
                         raw_text = joint["markdown"]
                     else:
-                        raw_text = dependencies.ocr_page(image_path)
+                        raw_text = dependencies.ocr_page(image_path, check_cancelled=check_pdf_cancelled,
+                                                     report_attempt=report_pdf_attempt,
+                                                     page_index=real_page_num - 1)
                     print(
                         f"[PDF OCR] 第 {real_page_num} 页识别完成 "
                         f"(characters={len(raw_text)})."
@@ -305,24 +466,24 @@ def run_pdf_parsing_task(
                     )
 
                 completed = 0
+                page_errors = []
                 for future in concurrent.futures.as_completed(futures):
-                    dependencies.tasks.check_cancelled(task_id)
+                    check_pdf_cancelled()
                     local_idx, text, error, joint = future.result()
                     if error:
                         real_page_num = target_page_indices[local_idx] + 1
-                        if isinstance(error, OCRConfigurationError):
-                            raise OCRConfigurationError(f"第 {real_page_num} 页需要识图：{error}") from error
-                        if isinstance(error, OCRResponseTimeoutError):
-                            raise OCRResponseTimeoutError(f"第 {real_page_num} 页识图超时：{error}") from error
-                        raise RuntimeError(f"解析第 {real_page_num} 页出错: {error}")
-                    processed_text = process_ocr_illustrations(text)
-                    real_page_num = target_page_indices[local_idx] + 1
-                    if joint is not None:
-                        joint_page_results[real_page_num - 1] = joint
-                    ocr_results[local_idx] = (
-                        f"<!-- MATHBANK_PDF_PAGE:{real_page_num} -->\n"
-                        f"{processed_text.strip()}"
-                    )
+                        error_code = ("ocr_configuration_required" if isinstance(error, OCRConfigurationError)
+                                      else "ocr_response_timeout" if isinstance(error, OCRResponseTimeoutError) else None)
+                        page_errors.append({"page_number": real_page_num, "error": str(error), "error_code": error_code})
+                    else:
+                        processed_text = process_ocr_illustrations(text)
+                        real_page_num = target_page_indices[local_idx] + 1
+                        if joint is not None:
+                            joint_page_results[real_page_num - 1] = joint
+                        ocr_results[local_idx] = (
+                            f"<!-- MATHBANK_PDF_PAGE:{real_page_num} -->\n"
+                            f"{processed_text.strip()}"
+                        )
                     completed += 1
                     progress = 30 + int(
                         (completed / len(pages_requiring_ocr)) * 40
@@ -332,10 +493,17 @@ def run_pdf_parsing_task(
                         progress=progress,
                         log=(
                             f"视觉转译进度: {completed} / "
-                            f"{len(pages_requiring_ocr)} 页已完成..." +
-                            (f"（局部识别 {len(regional_plans)} 页）" if regional_plans else "")
+                            f"{len(pages_requiring_ocr)} 页已处理..." +
+                            (f"（局部识别 {len(regional_plans)} 页）" if regional_plans else "") +
+                            (f"；{len(page_errors)} 页未完成，已保留其他页面结果。" if page_errors else "")
                         ),
                     )
+                if page_errors:
+                    diagnostics["pdf_failed_pages"] = sorted(page_errors, key=lambda item: item["page_number"])
+                    labels = {"ocr_configuration_required": "需要识图", "ocr_response_timeout": "识图超时"}
+                    raise RuntimeError("；".join(
+                        f"第 {item['page_number']} 页{labels.get(item.get('error_code'), '解析出错')}：{item['error']}"
+                        for item in diagnostics["pdf_failed_pages"]))
             finally:
                 cancelled = dependencies.tasks.is_cancelled(task_id)
                 if cancelled:
@@ -344,6 +512,17 @@ def run_pdf_parsing_task(
                 executor.shutdown(wait=not cancelled, cancel_futures=True)
 
         regional_results = [joint_page_results[target_page_indices[index]] for index in regional_plans]
+        if "pdf_detail_views" in diagnostics:
+            successful_details = [item.get("detail_input", {}) for item in joint_page_results.values()
+                                  if item.get("detail_input", {}).get("status") == "included"]
+            diagnostics["pdf_detail_views"]["successful_input_pages"] = len(successful_details)
+            diagnostics["pdf_detail_views"]["successful_input_images"] = sum(
+                item["detail_count"] for item in successful_details)
+            for index, details in detail_results.items():
+                joint = joint_page_results.get(target_page_indices[index], {})
+                for note in [*details["notes"], *joint.get("detail_input", {}).get("notes", [])]:
+                    if joint.get("layout") is not None:
+                        joint["layout"].setdefault("notes", []).append(note)
         if regional_results:
             diagnostics["pdf_regional_usage"] = {
                 key: sum(item["usage"][key] for item in regional_results)
@@ -371,26 +550,23 @@ def run_pdf_parsing_task(
                     log=message,
                 )
 
-            # Share the existing process-wide paid vision concurrency bound.
-            acquired = False
-            try:
-                while not acquired:
-                    check_layout_cancelled()
-                    acquired = dependencies.ocr_semaphore.acquire(timeout=0.25)
-                layout_result = enrich_pdf_with_figures(
-                    file_bytes, target_page_indices, page_images, page_urls,
-                    ocr_results, {target_page_indices[index] for index in pages_requiring_ocr},
-                    output_dir=Path(dependencies.tmp_upload_dir), url_prefix=f"/{dependencies.upload_dir_rel}/tmp",
-                    task_id=task_id, check_cancelled=check_layout_cancelled,
-                    register_asset=register_figure_asset, report_progress=report_layout_progress,
-                    precomputed_layouts={index: item["layout"] for index, item in joint_page_results.items()},
-                )
-            finally:
-                if acquired:
-                    dependencies.ocr_semaphore.release()
+            # Each independent layout request shares the process-wide vision
+            # bound. Local validation/cropping never occupies an HTTP permit.
+            layout_result = enrich_pdf_with_figures(
+                file_bytes, target_page_indices, page_images, page_urls,
+                ocr_results, {target_page_indices[index] for index in pages_requiring_ocr},
+                output_dir=Path(dependencies.tmp_upload_dir), url_prefix=f"/{dependencies.upload_dir_rel}/tmp",
+                task_id=task_id, check_cancelled=check_layout_cancelled,
+                register_asset=register_figure_asset, report_progress=report_layout_progress,
+                report_attempt=report_pdf_attempt,
+                precomputed_layouts={index: item["layout"] for index, item in joint_page_results.items()},
+                precomputed_page_infos=page_layout_infos,
+                vision_semaphore=dependencies.ocr_semaphore,
+            )
             ocr_results = layout_result["page_texts"]
             diagnostics["pdf_layout"] = layout_result["diagnostics"]
-            diagnostics["pdf_layout"]["regional_visual_calls"] = len(regional_results)
+            diagnostics["pdf_layout"]["joint_visual_calls"] = sum(item.get("visual_calls", 1) for item in joint_page_results.values())
+            diagnostics["pdf_layout"]["regional_visual_calls"] = sum(item.get("visual_calls", 1) for item in regional_results)
             diagnostics["pdf_joint_usage"] = {
                 key: sum(item["usage"][key] for item in joint_page_results.values())
                 for key in ("prompt_tokens", "completion_tokens", "total_tokens")
@@ -402,9 +578,8 @@ def run_pdf_parsing_task(
         # Retain the exact first-pass transcription used for splitting. Later
         # source review can check its ranges without re-running page recognition.
         # Keep complete pages or no page cache; never certify truncated evidence.
-        source_pages = None
+        source_pages = []
         if sum(len(str(text or "")) for text in ocr_results) <= 500_000:
-            source_pages = []
             for local_idx, page_num in enumerate(target_page_indices):
                 page = next((item for item in (layout_result or {}).get("pages", [])
                              if item["page_index"] == page_num), {})
@@ -439,11 +614,50 @@ def run_pdf_parsing_task(
             source_content = re.sub(r"<!-- MATHBANK_PDF_PAGE:\d+ -->", "", full_latex_content)
             locked_source, math_locks = lock_visible_math(source_content, task_id.replace("-", "")[:16])
             diagnostics["math_locks_created"] = len(math_locks)
-            parsed_questions = dependencies.parse_text(
-                locked_source, False, diagnostics=diagnostics, preserve_source_answers=True,
-            )
+            retain_split_input(source_content, locked_source)
+            from mathbank.pdf_hybrid_request import prepare_pdf_task_plan, request_pdf_hybrid
+            from mathbank.pdf_hybrid_plan import pdf_hybrid_plan_diagnostics
+            source_assets = {}
+            for page in layout_result.get("pages", []):
+                for figure in page.get("figures", []):
+                    url = figure.get("image_path")
+                    if isinstance(url, str):
+                        source_assets[url] = str(resolve_upload_asset(url, uploads_dir=Path(dependencies.tmp_upload_dir).parent,
+                            url_prefix=dependencies.upload_dir_rel))
+            pdf_plan = prepare_pdf_task_plan(source_content, diagnostics, source_pages=source_pages,
+                layout_result=layout_result, task_id=task_id, generation=0,
+                source_document_sha256=hashlib.sha256(file_bytes).hexdigest(),
+                native_evidence=inspector_result.get("_native_source_review_evidence"),
+                witnesses={index: value.get("_transcription_witness") for index, value in joint_page_results.items()},
+                transcript_normalizer=process_ocr_illustrations, figure_assets=source_assets)
+            diagnostics["pdf_hybrid"] = pdf_hybrid_plan_diagnostics(pdf_plan)
+            pdf_preserved_indices = frozenset()
+            if pdf_plan["mode"] in {"hybrid", "whole_metadata"}:
+                parse_model = os.getenv("PREFER_PARSE_MODEL") or os.getenv("DEEPSEEK_PARSE_MODEL", "deepseek-flash")
+                hybrid_result = request_pdf_hybrid(pdf_plan, dependencies.get_curriculum(),
+                    provider=dependencies.resolve_provider(parse_model), post=dependencies.post, diagnostics=diagnostics,
+                    normalize_fillin=normalize_fillin_macro, task_id=task_id, generation=0,
+                    check_cancelled=check_pdf_cancelled,
+                    full_source_fallback=lambda: dependencies.parse_text(locked_source, False,
+                        diagnostics=diagnostics, preserve_source_answers=True, pdf_retry=False,
+                        connection_retry=False, check_cancelled=check_pdf_cancelled))
+                parsed_questions = hybrid_result.questions
+                pdf_preserved_indices = hybrid_result.preserved_indices
+                diagnostics["pdf_hybrid"]["partial"] = hybrid_result.partial
+            else:
+                parsed_questions = dependencies.parse_text(
+                    locked_source, False, diagnostics=diagnostics, preserve_source_answers=True,
+                    pdf_retry=True, check_cancelled=check_pdf_cancelled, report_attempt=report_pdf_split_attempt,
+                )
             dependencies.tasks.check_cancelled(task_id)
-            diagnostics.update(dependencies.reconcile_math(parsed_questions, math_locks, source_content))
+            staged = copy.deepcopy(parsed_questions) if pdf_preserved_indices else parsed_questions
+            diagnostics.update(dependencies.reconcile_math(staged, math_locks, source_content))
+            if pdf_preserved_indices:
+                for index, candidate in enumerate(staged):
+                    if index not in pdf_preserved_indices:
+                        parsed_questions[index] = candidate
+                    elif candidate.get("source_review"):
+                        parsed_questions[index]["source_review"] = candidate["source_review"]
             finalize_source_answers(parsed_questions, source_content)
             apply_pdf_layout_reviews(parsed_questions, layout_result, diagnostics)
             isolate_shared_pdf_figures(
@@ -452,10 +666,13 @@ def run_pdf_parsing_task(
                 check_cancelled=check_layout_cancelled,
             )
         else:
+            pdf_preserved_indices = frozenset()
+            retain_split_input(full_latex_content, full_latex_content)
             parsed_questions = dependencies.parse_text(
                 full_latex_content,
                 False,  # Extract original answers only; the frontend solves missing answers.
                 diagnostics=diagnostics,
+                pdf_retry=True, check_cancelled=check_pdf_cancelled, report_attempt=report_pdf_split_attempt,
             )
         dependencies.tasks.check_cancelled(task_id)
         final_questions = dependencies.postprocess(
@@ -463,17 +680,23 @@ def run_pdf_parsing_task(
             paper_title,
             task_id,
             None if layout_result is not None else ocr_results,
+            preserved_indices=pdf_preserved_indices,
         )
         if layout_result is not None:
+            from mathbank.pdf_symbol_risks import annotate_pdf_symbol_risks
+            annotate_pdf_symbol_risks(final_questions, diagnostics)
+            # Refresh explanations only: reapplying layout attachment here
+            # would undo the independently cloned image identity above.
+            refresh_pdf_review_items(final_questions, layout_result, diagnostics)
             if pdf_verify_suspicions and diagnostics.get("source_review_count"):
-                from mathbank.pdf_source_verify import verify_pdf_source_suspicions
                 dependencies.tasks.update(
                     task_id, status="source_verification", progress=90,
-                    log="正在对照原页核验剩余疑点，无法确定的题目仍保留人工核对...",
+                    log="正在对照原页核验疑点，发现明确差异后将尝试修正并复核...",
                     diagnostics=diagnostics,
                 )
                 acquired = False
                 try:
+                    from mathbank.pdf_source_verify import verify_pdf_source_suspicions
                     while not acquired:
                         dependencies.tasks.check_cancelled(task_id)
                         acquired = dependencies.ocr_semaphore.acquire(timeout=0.25)
@@ -483,6 +706,13 @@ def run_pdf_parsing_task(
                         source_pages=source_pages,
                         check_cancelled=lambda: dependencies.tasks.check_cancelled(task_id),
                     )
+                except TaskCancelled:
+                    raise
+                except Exception as exc:
+                    diagnostics["pdf_source_verification"] = {
+                        "status": "failed", "pending": diagnostics.get("source_review_count", 0),
+                        "notes": [f"原页核验未完成（{type(exc).__name__}），已保留拆题结果和原核对提示。"],
+                    }
                 finally:
                     if acquired:
                         dependencies.ocr_semaphore.release()
@@ -495,9 +725,13 @@ def run_pdf_parsing_task(
                 }
         make_source_review_advisory(final_questions, diagnostics)
         dependencies.tasks.check_cancelled(task_id)
+        partial = bool(diagnostics.get("pdf_hybrid", {}).get("partial"))
+        completion_log = (f"PDF 已保留 {len(final_questions)} 道完整题目；部分疑点题组未完成，原文与未匹配题段可展开核对。"
+                          if partial else "拆分完成，可选择题目导入；原文和配图说明可按需展开查看。")
         completed = dependencies.tasks.complete(
             task_id,
-            log="拆分完成，可选择题目导入；原文和配图说明可按需展开查看。",
+            log=completion_log,
+            partial=partial,
             data=final_questions,
             generate_answers=generate_answers,
             page_images=list(page_urls),
@@ -511,18 +745,26 @@ def run_pdf_parsing_task(
     except TaskCancelled:
         dependencies.delete_temp_assets(temp_assets)
     except Exception as ex:
-        dependencies.delete_temp_assets(temp_assets)
-        error_code = (
-            "ocr_configuration_required" if isinstance(ex, OCRConfigurationError)
-            else "parse_configuration_required" if isinstance(ex, ParseConfigurationError)
-            else "ocr_response_timeout" if isinstance(ex, OCRResponseTimeoutError)
-            else None
-        )
+        # Keep source pages and completed transcripts available for inspection
+        # after a failed page. The task's normal expiry owns asset cleanup.
+        evidence = source_pages
+        if evidence is None:
+            evidence = [{"page_number": page_num + 1, "markdown": str(ocr_results[index] or ""),
+                         "status": "completed" if ocr_results[index] else "failed"}
+                        for index, page_num in enumerate(target_page_indices) if index < len(ocr_results)]
+            evidence = evidence if sum(len(item["markdown"]) for item in evidence) <= 500_000 else None
         dependencies.tasks.fail(
             task_id,
             f"PDF 智能拆解解析失败: {str(ex)}",
             document_type="pdf",
-            **({"error_code": error_code} if error_code else {}),
+            error_code=("ocr_configuration_required" if isinstance(ex, OCRConfigurationError)
+                        else "parse_configuration_required" if isinstance(ex, ParseConfigurationError)
+                        else "ocr_response_timeout" if isinstance(ex, OCRResponseTimeoutError)
+                        else next((item["error_code"] for item in diagnostics.get("pdf_failed_pages", [])
+                                   if item.get("error_code")), None)),
+            diagnostics=copy.deepcopy(diagnostics), pdf_source_pages=evidence,
+            page_images=list(page_urls), page_numbers=[number + 1 for number in target_page_indices],
+            temp_assets=list(temp_assets),
         )
     finally:
         tmp_pdf_path.unlink(missing_ok=True)

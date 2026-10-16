@@ -21,6 +21,8 @@ from mathbank.ai_providers import apply_model_thinking_policy, resolve_ocr_provi
 from mathbank.asset_security import resolve_upload_asset
 from mathbank.content_locks import _source_parts, _plain_key, _IMAGE_REFERENCE, _REFERENCE, _NUMBER, _bare_math_spelling
 from mathbank.paths import UPLOADS_DIR, TEST_UPLOADS_DIR
+from mathbank.source_review_images import _visible_text
+from mathbank.content_locks import _formulas
 from mathbank.task_manager import TaskCancelled
 
 MAX_CALLS = 3
@@ -140,12 +142,124 @@ def _source_candidates(questions, diagnostics, source):
     return [item for item in candidates if item['source_number'] not in duplicates], skipped
 
 
+_INCOMPLETE_OUTPUT = re.compile(r"\[(?:公式[^\]\n]{0,80}待核对|特殊字符待核对|插图待补)[^\]\n]*\]")
+
+_LOCATOR_ANSWER_SECTION = re.compile(
+    r'^[ \t]*(?:参考答案(?:与解析)?|答案与解析|试题解析|参考解析)[ \t]*[:：]?[ \t]*$', re.MULTILINE)
+
+
+def _locator_text_anchors(value):
+    """Exact prose anchors locate a field; they never certify its formulas.
+
+    Native-rendered text does not use source LaTeX spelling. Keep only literal
+    Chinese runs outside math, images, diagnostic labels and explicit code.
+    Whitespace may change during native pagination; no punctuation, symbols,
+    characters or formula values are substituted to create a match.
+    """
+    if not isinstance(value, str) or len(value) > 50000:
+        return []
+    visible = _visible_text(value)
+    chars = list(visible)
+    ranges = [(formula.start, formula.end) for formula in _formulas(value)]
+    ranges.extend((match.start(), match.end()) for match in _IMAGE_REFERENCE.finditer(value))
+    ranges.extend((match.start(), match.end()) for match in _INCOMPLETE_OUTPUT.finditer(value))
+    for start, end in ranges:
+        chars[start:end] = '\x00' * (end - start)
+    text = re.sub(r'\s+', '', ''.join(chars))
+    anchors = re.findall(r'[\u3400-\u9fff]{4,}', text)
+    anchors = [anchor for anchor in anchors if anchor not in {
+        '参考答案', '答案与解析', '参考答案与解析', '试题解析', '参考解析',
+    }]
+    return anchors if sum(map(len, anchors)) >= 8 else []
+
+
+def _locator_document(pages):
+    """Build an ordered text index only for complete, consecutive page IDs."""
+    if (not pages or any(not isinstance(page, dict) or type(page.get('page_number')) is not int
+                         or not isinstance(page.get('text'), str) for page in pages)
+            or [page['page_number'] for page in pages] != list(range(1, len(pages) + 1))):
+        return None
+    pieces, offsets, cursor = [], [], 0
+    for page in pages:
+        offsets.append(cursor)
+        pieces.append(page['text'])
+        cursor += len(page['text']) + 1
+    return '\n'.join(pieces), offsets
+
+
+def _locator_field_range(value, number, document, headings):
+    anchors = _locator_text_anchors(value)
+    if not anchors:
+        return None
+    candidates = []
+    for index, heading in enumerate(headings):
+        if heading[0] != number:
+            continue
+        end = len(document)
+        if index + 1 < len(headings):
+            following = headings[index + 1]
+            if following[0] == number + 1:
+                end = following[1]
+            else:
+                # A reset numbering sequence is a boundary only when the
+                # original page text explicitly labels the answer section.
+                section = list(_LOCATOR_ANSWER_SECTION.finditer(document, heading[2], following[1]))
+                if len(section) != 1:
+                    continue
+                end = section[0].start()
+        excerpt = re.sub(r'\s+', '', document[heading[2]:end])
+        cursor = 0
+        for anchor in anchors:
+            found = excerpt.find(anchor, cursor)
+            if found < 0:
+                break
+            cursor = found + len(anchor)
+        else:
+            candidates.append((heading[1], end))
+    return candidates[0] if len(candidates) == 1 else None
+
+
+def _locator_range_pages(span, value, pages, offsets):
+    start, end = span
+    first = max(index for index, offset in enumerate(offsets) if offset <= start)
+    last = max(index for index, offset in enumerate(offsets) if offset <= end)
+    # Text-only fields ending at a heading on the next page do not need that
+    # unrelated page. For image-bearing fields retain it: floating pictures
+    # before the next heading need not appear in the auxiliary page text.
+    if (last > first and not pages[last]['text'][:end - offsets[last]].strip()
+            and not _images(value)):
+        last -= 1
+    return [page['page_number'] for page in pages[first:last + 1]]
+
+
+def _locate_separate_answer_pages(candidate, pages):
+    original = candidate.get('original')
+    indexed = _locator_document(pages)
+    if (not isinstance(original, dict) or not indexed or type(candidate.get('source_number')) is not int
+            or not original.get('content') or not original.get('answer_markdown')):
+        return []
+    document, offsets = indexed
+    headings = [(int(match.group(1) or match.group(2)), match.start(), match.end())
+                for match in _NUMBER.finditer(document)]
+    stem = _locator_field_range(original['content'], candidate['source_number'], document, headings)
+    answer = _locator_field_range(original['answer_markdown'], candidate['source_number'], document, headings)
+    # Separate answers cannot be inferred from an overlapping/same question
+    # segment. Both complete numbered ranges must be independently identified.
+    if stem is None or answer is None or stem[1] > answer[0]:
+        return []
+    numbers = sorted(set(_locator_range_pages(stem, original['content'], pages, offsets))
+                     | set(_locator_range_pages(answer, original['answer_markdown'], pages, offsets)))
+    return numbers if len(numbers) <= MAX_PAGES else []
+
+
 def _locate_pages(candidate, pages):
     # The original DOCX renderer's page text is an independent index. Include
     # all pages from this numbered heading through the next numbered heading;
     # continuation pages are never silently cut off.
     if not candidate.get('inline_answer', False):
-        return [page['page_number'] for page in pages] if len(pages) <= MAX_PAGES else []
+        if len(pages) <= MAX_PAGES:
+            return [page['page_number'] for page in pages]
+        return _locate_separate_answer_pages(candidate, pages)
     headings = []
     for page in pages:
         for match in _NUMBER.finditer(page.get('text', '')):

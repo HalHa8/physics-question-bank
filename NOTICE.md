@@ -1,5 +1,13 @@
 # PhysicsBank notices
 
+The native-source and bounded hybrid PDF/Word import, formula conversion,
+source-evidence and recoverable image lifecycle upgrades selectively adapt
+MathBank code through `1a6e50a4fcd9ce27c39088ba2d08dc231d23f448`, authored by
+JudgePeach and upstream contributors. PhysicsBank retains six physics question
+types, source-content fidelity, visible uncertainty and its no-automatic-paid-
+retry policy. This adaptation does not include schema 11, standalone Markdown
+upload, or the upstream automatic multi-round source-repair workflow.
+
 The single-screenshot figure-slot/crop protocol, manual-crop editor and regression
 tests adapt selected code from MathBank commit
 `3252b7237f3add8f632f00a413a23814ed8882a4`, contributed by JudgePeach.

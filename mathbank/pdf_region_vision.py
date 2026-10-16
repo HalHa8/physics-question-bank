@@ -1,4 +1,4 @@
-"""Transcribe bounded PDF crops once and preserve reliable native text locally.
+"""Transcribe bounded PDF crops and preserve reliable native text locally.
 
 The planner owns text order and crop bounds. The model can fill only region
 slots, never replace native pieces. Geometry is converted back to page space
@@ -23,16 +23,14 @@ from mathbank.ai_http import (
     post_chat_completion,
 )
 from mathbank.ai_json import parse_ai_json
-from mathbank.ai_providers import (
-    OCRConfigurationError, OCRResponseTimeoutError, apply_model_thinking_policy,
-    resolve_ocr_provider,
-)
+from mathbank.ai_providers import OCRConfigurationError, apply_model_thinking_policy, apply_structured_output_policy, resolve_ocr_provider
 from mathbank.pdf_figures import MAX_FIGURES_PER_PAGE, MAX_SOURCE_CHARS, describe_figure_slots
 from mathbank.pdf_layout import normalize_model_bbox
 from mathbank.pdf_page_vision import (
     MAX_OUTPUT_TOKENS, MAX_RESPONSE_CHARS, PDF_VISION_TIMEOUT, _PAGE_FIELDS, _SLOT_LABEL, _finite_number,
     _no_cancel, _prompt_page_info, _require_fields, _validated_page,
 )
+from mathbank.pdf_vision_request import completion_content, request_pdf_vision
 from mathbank.task_manager import TaskCancelled
 
 
@@ -267,10 +265,13 @@ def _merged_result(parsed, page_info: dict, regions: list[dict], pieces: list[di
 def request_pdf_regions(
     image_path: str, page_info: dict, plan: dict, *, include_figures: bool = True,
     check_cancelled: Callable[[], None] = _no_cancel,
+    report_attempt: Callable[[dict], None] = lambda _event: None,
+    include_transcription_evidence: bool = False,
 ) -> dict:
-    """One request for all planned crops; malformed results never trigger retries."""
+    """Recognize all planned crops together, with at most one retry."""
     check_cancelled()
     regions, pieces = _validated_plan(page_info, plan)
+    witness = None
     provider = resolve_ocr_provider(os.getenv("OCR_PREFER_ENGINE", "siliconflow"))
     if not provider.api_key or not provider.chat_completions_url:
         label = getattr(provider, "credential_label", "所选识图平台的 API Key")
@@ -285,61 +286,39 @@ def request_pdf_regions(
     payload = {"model": provider.model_name, "messages": [{"role": "user", "content": content}],
                "max_tokens": MAX_OUTPUT_TOKENS, "stream": True}
     payload = apply_model_thinking_policy(payload, provider=provider, task="ocr")
-    check_cancelled()
-    try:
-        response = post_chat_completion(
-            provider, payload, timeout=PDF_VISION_TIMEOUT,
-            stream=True, check_status=False, retry_connection=False,
-        )
+    payload = apply_structured_output_policy(payload, provider=provider,
+                                            system_instruction=prompts.PDF_STRUCTURED_OUTPUT_INSTRUCTIONS)
+    if include_transcription_evidence:
+        from .pdf_transcription_scopes import begin_pdf_transcription_witness
         try:
-            check_cancelled()
-        except TaskCancelled:
-            response.close()
-            raise
-        if response.status_code != 200:
-            response.close()
-            raise ValueError(f"PDF 局部识别请求失败（HTTP {response.status_code}），未自动重试。")
-        body = collect_streamed_completion(
-            response, max_content_chars=MAX_RESPONSE_CHARS,
-            check_cancelled=check_cancelled,
-        )
-    except TaskCancelled:
-        raise
-    except (requests.exceptions.ReadTimeout, requests.exceptions.ConnectionError) as exc:
-        if is_stream_read_timeout(exc):
-            raise OCRResponseTimeoutError(
-                "PDF 局部识别服务连续 300 秒未返回流式数据；请求可能已计费，未自动重试。"
-            ) from exc
-        raise ValueError(f"PDF 局部识别请求失败（{type(exc).__name__}），未自动重试。") from exc
-    except AIStreamResponseError as exc:
-        raise ValueError(f"PDF 局部识别{exc}，未自动重试。") from exc
-    except ValueError:
-        raise
-    except Exception as exc:
-        raise ValueError(f"PDF 局部识别请求失败（{type(exc).__name__}），未自动重试。") from exc
-    check_cancelled()
-    choices = body.get("choices") if isinstance(body, dict) else None
-    if (not isinstance(choices, list) or not choices or not isinstance(choices[0], dict)
-            or choices[0].get("finish_reason") != "stop"):
-        raise ValueError("PDF 局部识别未正常结束或输出被截断，未接受不完整结果。")
-    message = choices[0].get("message")
-    raw = message.get("content") if isinstance(message, dict) else None
-    if not isinstance(raw, str) or not raw.strip() or len(raw) > MAX_RESPONSE_CHARS:
-        raise ValueError("PDF 局部识别内容为空、格式无效或过长。")
-    try:
-        parsed = parse_ai_json(raw)
-    except Exception as exc:
-        raise ValueError("PDF 局部识别的结构化结果无法解析，未自动重试。") from exc
-    result = _merged_result(parsed, page_info, regions, pieces, include_figures=include_figures)
-    check_cancelled()
-    usage = body.get("usage")
-    result["usage"] = {key: usage[key] for key in ("prompt_tokens", "completion_tokens", "total_tokens")
-                       if isinstance(usage, dict) and isinstance(usage.get(key), int)
-                       and not isinstance(usage[key], bool) and usage[key] >= 0}
+            witness = begin_pdf_transcription_witness(image_path, page_info,
+                request_inputs={"payload": payload, "regions": regions, "pieces": pieces,
+                                "include_figures": include_figures})
+        except (ValueError, OSError):
+            pass
+    def validate(body):
+        raw = completion_content(body, "PDF 局部识别", max_chars=MAX_RESPONSE_CHARS)
+        try:
+            parsed = parse_ai_json(raw)
+        except Exception as exc:
+            raise ValueError("PDF 局部识别的结构化结果无法解析。") from exc
+        return _merged_result(parsed, page_info, regions, pieces, include_figures=include_figures)
+
+    result = request_pdf_vision(
+        provider, payload, post=post_chat_completion, validate=validate,
+        label="PDF 局部识别", stage="regions", page_index=page_info["page_index"],
+        check_cancelled=check_cancelled, report_attempt=report_attempt,
+    )
     result.update(model=provider.model_name,
                   extraction_mode="native_regions" if plan["kind"] == "mixed" else "image_regions",
                   native_characters=sum(len(re.sub(r"\s", "", piece["text"])) for piece in pieces if "text" in piece),
                   region_count=len(regions),
                   image_area_ratio=sum((region["bbox"][2] - region["bbox"][0]) *
                                        (region["bbox"][3] - region["bbox"][1]) / 1_000_000 for region in regions))
+    if witness is not None:
+        from .pdf_transcription_scopes import finish_pdf_transcription_witness
+        try:
+            result["_transcription_witness"] = finish_pdf_transcription_witness(witness, result)
+        except (ValueError, OSError):
+            pass
     return result

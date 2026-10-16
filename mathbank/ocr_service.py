@@ -40,7 +40,7 @@ class OcrServiceDependencies:
     uuid: Any
 
 
-def ocr_via_provider(image_path: str, provider: MultimodalProviderConfig, include_illustration_box: bool=False, *, dependencies: OcrServiceDependencies) -> str:
+def ocr_via_provider(image_path: str, provider: MultimodalProviderConfig, include_illustration_box: bool=False, *, pdf_page: bool=False, check_cancelled=lambda: None, report_attempt=lambda _event: None, page_index=None, dependencies: OcrServiceDependencies) -> str:
     """Use one resolved multimodal provider for formula and text OCR."""
     import base64
 
@@ -96,6 +96,15 @@ def ocr_via_provider(image_path: str, provider: MultimodalProviderConfig, includ
         })
 
     timeout = 240
+    if pdf_page:
+        from mathbank.pdf_vision_request import request_pdf_vision, completion_content
+        result = request_pdf_vision(
+            provider, payload, post=dependencies.post_chat_completion,
+            validate=lambda body: {"markdown": completion_content(body, "PDF 页面识别", max_chars=500_000)},
+            label="PDF 页面识别", stage="page_text", page_index=page_index,
+            check_cancelled=check_cancelled, report_attempt=report_attempt,
+        )
+        return result["markdown"]
     # Chat-completion POSTs are not idempotent: a read timeout can happen after
     # the provider has accepted (and billed) the request.  Do not automatically
     # send the same image two or three times.  The shared transport still
@@ -276,31 +285,13 @@ def ocr_formula(file: UploadFile=File(...), engine: str=Form(None), skip_tikz: b
                 print(f"[OCR Flow Cleanup Error] 无法删除临时文件 {temp_filepath}: {str(e_cleanup)}")
 
 
-def ocr_pdf_page_image(image_path: str, *, dependencies: OcrServiceDependencies) -> str:
-    """自动选择已配置的 VLM 识别引擎进行单页识别，支持故障转移（Fallback）与兜底识别"""
-    errors = []
+def ocr_pdf_page_image(image_path: str, *, check_cancelled=lambda: None,
+                       report_attempt=lambda _event: None, page_index: int = None, dependencies: OcrServiceDependencies) -> str:
+    """PDF pages share the configured provider's bounded retry budget."""
+    check_cancelled()
     prefer_engine = dependencies.os.getenv("OCR_PREFER_ENGINE", "siliconflow")
-    providers_to_try = dependencies.resolve_ocr_fallbacks(prefer_engine)
-
-    if not providers_to_try:
-        raise dependencies.OCRConfigurationError("未配置任何识图 Key，请在系统设置中配置所选识图平台的 DeepSeek、硅基流动、阿里百炼或中转站 API 密钥。")
-
-    for ocr_provider in providers_to_try:
-        label = ocr_provider.provider_label
-        try:
-            print(f"[PDF OCR Flow] 正在尝试调用识图引擎: {label}...")
-            return dependencies.ocr_via_provider(image_path, ocr_provider)
-        except dependencies.requests.exceptions.ReadTimeout as e_single:
-            # The first provider may already have accepted the image.  Sending
-            # it immediately to another provider can create a duplicate bill.
-            raise RuntimeError(
-                f"{label} 读取超时，请求是否已被处理尚不确定。"
-                "为避免重复计费，本次未自动切换到下一家模型，请稍后手动重试。"
-            ) from e_single
-        except Exception as e_single:
-            err_msg = f"{label} 出错: {str(e_single)}"
-            print(f"[PDF OCR Flow Warning] {err_msg}")
-            errors.append(err_msg)
-
-    # 如果全部都失败了，抛出包含所有尝试错误细节的汇总异常
-    raise RuntimeError("所有配置的识图引擎均尝试失败。详情:\n" + "\n".join(errors))
+    provider = dependencies.resolve_ocr_provider(prefer_engine)
+    if not provider.api_key or not provider.chat_completions_url:
+        raise dependencies.OCRConfigurationError("PDF 页面识别所用的识图服务未配置，请在系统设置中配置所选平台。")
+    return dependencies.ocr_via_provider(image_path, provider, pdf_page=True, check_cancelled=check_cancelled,
+                            report_attempt=report_attempt, page_index=page_index)

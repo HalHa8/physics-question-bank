@@ -18,6 +18,8 @@ from mathbank.application_bindings import ApplicationBindings
 from mathbank.application_state import RuntimeState
 from mathbank.domain_registry import DOMAINS
 from mathbank.task_manager import TaskManager
+from mathbank.asset_lifecycle import register_asset_store, RetainedUploadStaticFiles, serialize_asset_lifecycle
+from mathbank.paths import RETAINED_UPLOADS_DIR
 
 
 def create_application(*, initialize=True, state=None):
@@ -37,7 +39,12 @@ def create_application(*, initialize=True, state=None):
     bindings = ApplicationBindings(state, defaults)
     for module, contract, names in DOMAINS:
         for name in names:
-            bindings.services[name] = bindings.bind(getattr(module, name), contract)
+            function = getattr(module, name)
+            if name in {"create_question", "update_question", "delete_question", "clean_orphaned_images",
+                        "promote_question_temp_assets", "rollback_question_asset_promotions",
+                        "delete_unreferenced_question_assets", "_delete_task_temp_assets"}:
+                function = serialize_asset_lifecycle(function)
+            bindings.services[name] = bindings.bind(function, contract)
 
     state.TMP_UPLOAD_DIR = os.path.join(state.UPLOAD_DIR, "tmp")
     state._SHUTDOWN_SCHEDULED = threading.Event()
@@ -67,7 +74,8 @@ def create_application(*, initialize=True, state=None):
     )
     app.middleware("http")(bindings.resolve("security_and_heartbeat_middleware"))
     register_routes(app, bindings.resolve)
-    app.mount("/static", StaticFiles(directory=str(defaults.STATIC_DIR)), name="static")
+    app.mount("/static", RetainedUploadStaticFiles(directory=str(defaults.STATIC_DIR),
+        uploads_dir=state.UPLOAD_DIR, url_prefix=state.UPLOAD_DIR_REL), name="static")
     return bindings
 
 
@@ -87,6 +95,7 @@ def initialize_runtime(bindings):
         defaults.init_db()
         os.makedirs(state.UPLOAD_DIR, exist_ok=True)
         os.makedirs(state.TMP_UPLOAD_DIR, exist_ok=True)
+        register_asset_store(state.UPLOAD_DIR, RETAINED_UPLOADS_DIR / ("test" if state.IS_TESTING else "uploads"))
         state.LOCAL_TOKEN = bindings.resolve("load_or_create_local_token")()
         bindings.resolve("load_or_init_metadata")()
         bindings.resolve("print_startup_diagnostics")()

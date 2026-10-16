@@ -26,7 +26,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from dotenv import load_dotenv
-from mathbank.database import FIGURE_ALIGN_VALUES, FIGURE_SIZE_VALUES, Question, QuestionCurriculum, QuestionFingerprint as StoredQuestionFingerprint, Paper, PaperQuestion, engine, get_db, init_db, normalize_figure_size
+from mathbank.database import FIGURE_ALIGN_VALUES, FIGURE_SIZE_VALUES, Question, QuestionCurriculum, QuestionFingerprint as StoredQuestionFingerprint, Paper, PaperQuestion, SessionLocal, engine, get_db, init_db, normalize_figure_size
 from mathbank.question_duplicates import QuestionDuplicateInput, build_question_fingerprint
 from mathbank.import_review import make_source_review_advisory
 from mathbank.question_duplicate_service import batch_local_matches, exact_duplicate_ids, find_indexed_candidates, fingerprint_for_question, index_status as duplicate_index_status, rebuild_all_missing_fingerprints, select_answer_images, select_visible_question_images, tikz_signatures as build_tikz_signatures, upsert_question_fingerprint, visible_image_signatures as build_visible_image_signatures
@@ -63,3 +63,46 @@ from mathbank.pdf_layout import inspect_pdf_page
 from mathbank.paths import DATABASE_PATH, DATA_BACKUP_DIR, ENV_FILE, PROJECT_ROOT, STATIC_CSS_DIR, STATIC_DIR, STATIC_JS_DIR, SYSTEM_GENERATED_DIR, TEST_UPLOADS_DIR, UPLOADS_DIR
 from mathbank.asset_security import AssetSecurityError, InvalidImageError, MAX_OCR_IMAGE_BYTES, MAX_PDF_BYTES, MAX_SINGLE_IMAGE_BYTES, UploadTooLargeError, harden_private_path, normalize_answer_tikz_assets, normalize_content_tikz_assets, normalize_optional_upload_asset_reference, normalize_raster_image, normalize_upload_asset_reference, normalize_upload_asset_references, read_stream_limited, resolve_upload_asset, write_private_text_atomic
 from mathbank.application_errors import PaperExportValidationError
+
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks, Request, Response, Header, Query
+
+from mathbank.paper_parse import (
+    PAPER_SPLIT_TIMEOUT_SECONDS, PAPER_SPLIT_CACHE_MAX_CHARACTERS,
+    parse_paper_completion, finalize_source_answers, request_pdf_paper_completion,
+)
+
+from mathbank.asset_lifecycle import (
+    AssetLifecycleError,
+    RetainedUploadStaticFiles,
+    quarantine_asset,
+    register_asset_store,
+    serialize_asset_lifecycle,
+)
+
+from mathbank.question_assets import (
+    embedded_question_assets,
+    markdown_literal_ranges,
+    rewrite_image_layout_paths,
+    rewrite_question_asset_paths,
+    rewrite_structured_asset_paths,
+    structured_question_assets,
+)
+
+from mathbank.asset_security import (
+    AssetSecurityError,
+    InvalidImageError,
+    MAX_OCR_IMAGE_BYTES,
+    MAX_PDF_BYTES,
+    MAX_SINGLE_IMAGE_BYTES,
+    UploadTooLargeError,
+    harden_private_path,
+    normalize_answer_tikz_assets,
+    normalize_content_tikz_assets,
+    normalize_optional_upload_asset_reference,
+    normalize_raster_image,
+    normalize_upload_asset_reference,
+    normalize_upload_asset_references,
+    read_stream_limited,
+    resolve_upload_asset,
+    write_private_text_atomic,
+)

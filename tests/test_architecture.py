@@ -120,7 +120,7 @@ def test_multimodal_ai_routes_use_shared_provider_resolvers():
 
     assert "def ocr_via_provider" in main_source
     assert "resolve_ocr_provider(engine)" in main_source
-    assert "resolve_ocr_fallbacks(prefer_engine)" in main_source
+    assert "resolve_ocr_provider(prefer_engine)" in main_source
     assert main_source.count("resolve_draw_provider(prefer_draw)") == 2
 
 

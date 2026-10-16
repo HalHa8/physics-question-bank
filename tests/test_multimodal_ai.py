@@ -130,11 +130,11 @@ def test_ocr_read_timeout_is_not_retried(tmp_path):
 def test_pdf_ocr_does_not_fallback_after_ambiguous_read_timeout():
     providers = [MagicMock(provider_label="first"), MagicMock(provider_label="second")]
 
-    with patch("main.resolve_ocr_fallbacks", return_value=providers), patch(
+    with patch("main.resolve_ocr_provider", return_value=providers[0]), patch(
         "main.ocr_via_provider",
         side_effect=requests.exceptions.ReadTimeout("unknown provider state"),
     ) as mock_ocr:
-        with pytest.raises(RuntimeError, match="避免重复计费"):
+        with pytest.raises(requests.exceptions.ReadTimeout):
             ocr_pdf_page_image("/tmp/page.png")
 
     mock_ocr.assert_called_once()

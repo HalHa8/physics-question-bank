@@ -147,7 +147,7 @@ const scenarios = {
     assert.equal(selected.checked, true);
     assert.equal(selected.disabled, false);
     assert.equal(card.querySelector('.card-source-review-confirm'),null);
-    assert.equal(card.querySelector('.card-source-review-status').textContent,'查看原文与提取说明（可选）');
+    assert.equal(card.querySelector('.card-source-review-status').textContent,'未完成视觉核验 · 查看提取说明');
     const panel=card.querySelector('.card-source-review-panel');
     assert.equal(panel.tagName,'details'); assert.equal(panel.open,false);
     assert.equal(card.querySelector('script'), null, 'source text must never become HTML');

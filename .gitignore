@@ -68,6 +68,7 @@ Release_Output/
 
 # 9. 忽略组卷导出的本地 PDF 与 ZIP 归档文件（防误保存至项目目录）
 *.pdf
+!tests/fixtures/pdf_source_scopes/supported_cm_script.pdf
 *.zip
 *.tar.gz
 

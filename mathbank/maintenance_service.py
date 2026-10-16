@@ -4,12 +4,15 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from mathbank.application_state import RuntimeState
+from mathbank.asset_lifecycle import quarantine_asset
+from pathlib import Path
 from fastapi import BackgroundTasks
 
 
 @dataclass(frozen=True)
 class MaintenanceServiceDependencies:
     state: RuntimeState
+    _referenced_question_assets: Callable
     DATABASE_PATH: Any
     PROJECT_ROOT: Any
     Question: Any
@@ -178,23 +181,13 @@ def heal_database_curriculum_names(*, dependencies: MaintenanceServiceDependenci
         db.close()
 
 
-def clean_orphaned_images(*, dependencies: MaintenanceServiceDependencies):
-    """扫描 static/uploads 目录及其 tmp 子目录，安全彻底擦除未被数据库引用的孤儿图片与旧残留临时图片"""
+def clean_orphaned_images( *, dependencies: MaintenanceServiceDependencies):
+    """Retain unregistered images recoverably; old browser drafts remain usable."""
     try:
         from mathbank.database import SessionLocal, Question
         db = SessionLocal()
         try:
-            # 1. 搜集数据库中所有题目引用的图片路径
-            questions = db.query(Question._image_paths).all()
-            referenced_images = set()
-            for (img_paths_str,) in questions:
-                if img_paths_str:
-                    try:
-                        paths = dependencies.json.loads(img_paths_str)
-                        for path in paths:
-                            referenced_images.add(path.lstrip("/").lower())
-                    except Exception:
-                        pass
+            referenced_images = dependencies._referenced_question_assets(db)
 
             # 2. 遍历本地图片目录及 tmp 子目录
             upload_dir = dependencies.state.UPLOAD_DIR
@@ -209,13 +202,14 @@ def clean_orphaned_images(*, dependencies: MaintenanceServiceDependencies):
             for filename in dependencies.os.listdir(upload_dir):
                 full_path = dependencies.os.path.join(upload_dir, filename)
                 if dependencies.os.path.isfile(full_path) and not filename.startswith("."):
-                    local_rel_path = f"{dependencies.state.UPLOAD_DIR_REL}/{filename}".lower()
-                    if local_rel_path not in referenced_images:
+                    if Path(full_path).resolve() not in referenced_images:
                         try:
                             mtime = dependencies.os.path.getmtime(full_path)
                             if now - mtime > one_hour_seconds:
-                                dependencies.os.remove(full_path)
-                                cleaned_count += 1
+                                cleaned_count += int(quarantine_asset(
+                                    f"/{dependencies.state.UPLOAD_DIR_REL}/{filename}", uploads_dir=dependencies.state.UPLOAD_DIR,
+                                    url_prefix=dependencies.state.UPLOAD_DIR_REL, reason="startup-unregistered",
+                                ))
                         except Exception:
                             pass
 
@@ -225,18 +219,19 @@ def clean_orphaned_images(*, dependencies: MaintenanceServiceDependencies):
                 for filename in dependencies.os.listdir(tmp_dir):
                     full_path = dependencies.os.path.join(tmp_dir, filename)
                     if dependencies.os.path.isfile(full_path) and not filename.startswith("."):
-                        local_rel_path = f"{dependencies.state.UPLOAD_DIR_REL}/tmp/{filename}".lower()
-                        if local_rel_path not in referenced_images:
+                        if Path(full_path).resolve() not in referenced_images:
                             try:
                                 mtime = dependencies.os.path.getmtime(full_path)
                                 if now - mtime > 600:  # 超过 10 分钟未被使用的 tmp 切片立即清理
-                                    dependencies.os.remove(full_path)
-                                    cleaned_count += 1
+                                    cleaned_count += int(quarantine_asset(
+                                        f"/{dependencies.state.UPLOAD_DIR_REL}/tmp/{filename}", uploads_dir=dependencies.state.UPLOAD_DIR,
+                                        url_prefix=dependencies.state.UPLOAD_DIR_REL, reason="startup-temporary",
+                                    ))
                             except Exception:
                                 pass
 
             if cleaned_count > 0:
-                print(f"[Storage Cleanup] 成功检测并清除 {cleaned_count} 个残留的旧临时图片与孤儿文件，磁盘无痕瘦身成功！")
+                print(f"[Storage Retention] 已将 {cleaned_count} 个暂未登记图片移入可恢复保留区；原地址访问时自动恢复，未永久删除。")
         finally:
             db.close()
     except Exception as e:

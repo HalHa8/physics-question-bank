@@ -472,6 +472,8 @@ def test_asset_cleanup_loads_question_references_only_once(
     monkeypatch.setattr(main, "UPLOAD_DIR", str(upload_dir))
     monkeypatch.setattr(main, "UPLOAD_DIR_REL", "static/uploads")
     monkeypatch.setattr(main, "_referenced_question_assets", count_reference_load)
+    from mathbank.asset_lifecycle import register_asset_store
+    register_asset_store(upload_dir, tmp_path / 'retained')
 
     removed = main.delete_unreferenced_question_assets(
         db_session,

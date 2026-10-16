@@ -152,16 +152,22 @@ def test_mixed_word_keeps_positions_and_individual_alignment(tmp_path):
 
 
 def test_api_saves_image_layout_and_rejects_invalid_update(client):
+    import main
     from main import LOCAL_TOKEN
     headers={'X-Local-Token':LOCAL_TOKEN}
-    # References need not exist to test layout metadata; no user assets are touched.
-    payload={'content':SOURCE,'question_type':'detailed_answer','difficulty':'medium',
-             'image_layouts': json.dumps({'a.png':{'align':'right','size':'large'}})}
+    # New imports validate every embedded path, so use real isolated test assets.
+    for name in ('a.png', 'b.png'):
+        Image.new('RGB', (12,12), 'white').save(Path(main.UPLOAD_DIR) / name)
+    source = SOURCE.replace('static/uploads/', main.UPLOAD_DIR_REL + '/')
+    key = '/' + main.UPLOAD_DIR_REL + '/a.png'
+    payload={'content':source,'question_type':'detailed_answer','difficulty':'medium',
+             'image_layouts': json.dumps({key:{'align':'right','size':'large'}})}
     response=client.post('/api/questions',data=payload,headers=headers)
     assert response.status_code == 200, response.text
     item=response.json()['question']
     qid=item['id']
-    assert item['image_layouts']['a.png']['size']=='large'
+    from mathbank.image_layout import image_key
+    assert item['image_layouts'][image_key(key)]['size']=='large'
     assert client.get(f'/api/questions/{qid}').json()['image_layouts'] == item['image_layouts']
     bad={**payload,'image_layouts':json.dumps({'a.png':{'align':'floating','size':'large'}})}
     response=client.put(f'/api/questions/{qid}',data=bad,headers=headers)

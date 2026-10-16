@@ -494,8 +494,13 @@
             return { maxWidth: 200, maxHeight: 170 };
         }
 
+        function editorFigureDisplaySource(sourceText) {
+            const type = document.getElementById('editQType');
+            return window.ImageLayoutTools.normalizeImageChoices(sourceText, type ? type.value : '');
+        }
+
         function hasDetachedEditorFigureGroup(sourceText) {
-            const source = String(sourceText || '');
+            const source = editorFigureDisplaySource(sourceText);
             if (window.ImageLayoutTools) return Boolean(window.ImageLayoutTools.split(source).tail);
             const imagePattern = /!\[.*?\]\(([^)]+)\)/g;
             const matches = [...source.matchAll(imagePattern)];
@@ -507,7 +512,7 @@
         function applyEditorFigureLayoutPreview(targetContainer = null, sourceText = null) {
             const textarea = document.getElementById('editContent');
             if (!textarea && sourceText === null) return;
-            const source = String(sourceText === null ? (textarea && textarea.value || '') : sourceText);
+            const source = editorFigureDisplaySource(sourceText === null ? (textarea && textarea.value || '') : sourceText);
             const imagePattern = /!\[.*?\]\(([^)]+)\)/g;
             const matches = [...source.matchAll(imagePattern)];
             const parts = window.ImageLayoutTools ? window.ImageLayoutTools.split(source) : null;
@@ -770,7 +775,7 @@
             let layoutChipRendered = false;
             const textarea = document.getElementById('editContent');
             const allowLayoutControls = hasDetachedEditorFigureGroup(textarea ? textarea.value : '');
-            const parts = window.ImageLayoutTools.split(textarea ? textarea.value : '');
+            const parts = window.ImageLayoutTools.split(editorFigureDisplaySource(textarea ? textarea.value : ''));
             const anchoredKeys = new Set(parts.matches.filter(m => m.index < parts.tailStart).map(m => window.ImageLayoutTools.key(m[1])));
 
             uploadedImages.forEach((path, idx) => {

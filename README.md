@@ -22,11 +22,20 @@ PhysicsBank 是一个运行在自己电脑上的高中物理备课工具。您�
 
 裁图本身不调用 AI，也不需要 LaTeX；首次识别仍使用您配置的识图服务。请核对裁框是否包含全部图形、标注、坐标轴和电路连接。系统不额外自动调用模型核验；取消「原图抠图」会按图调用 AI 重绘，可能额外计费。
 
-**此功能当前在 [解耦分支](https://github.com/HalHa8/physics-question-bank/tree/codex/refactor-backend-modules)，尚未更新旧 Windows 便携包。** 使用源码时请切换到该分支；无需搬动题库或分享配置文件。
+上述功能与三阶段后端解耦现已整合到 `main` 源码。旧 Windows 便携包不会随本地源码更新；请核对所下载构建的提交，不要直接覆盖个人数据。
 
 公式预览现支持正体常数 `\iu` / `\upi`（虚数单位）和 `\eu` / `\upe`（自然常数）；普通电流变量 `i`、电荷符号 `e` 不会被改写。兼容旧题库时，启动清理也会保留自定义知识点，不再自动清空。
 
 PDF、Word 等试卷的**自动拆题需要配置试卷拆解模型的 API Key**；如果某页文字或公式无法可靠提取，还需要配置支持图片输入的识图模型。系统不会把识别不可靠的页面当作正确原文直接导入。
+
+### PDF／Word 导入有什么改进？
+
+- **尽量保留原文**：可靠的题干、公式和原答案直接保留；只有不能可靠提取的部分才进入识别与拆分流程。
+- **核对更有依据**：保留相关原页、插图和公式诊断。出现「待核对」时，请对照原稿修正，不表示题目已完整识别。
+- **减少图片意外丢失**：导入卡片保存时复制临时图片，避免同图被多题使用后失效；被清理的图片进入本机保留区，可按原引用恢复。保留区不自动过期，会占用磁盘空间，也不是完整备份的替代品。
+- **费用由您控制**：额外原卷核验默认关闭；识图或拆题失败不会自动重复付费请求。系统保留可用结果和错误原因，是否重试由您决定。
+
+升级源码前请先完整备份，并在自己的 Python 环境中重新安装 `requirements.txt`；本次 PDF 提取组件已升级。
 
 ## Windows 用户：如何开始？
 
@@ -46,7 +55,7 @@ PDF、Word 等试卷的**自动拆题需要配置试卷拆解模型的 API Key**
 需要电脑已安装 [Python 3.10 或更新版本](https://www.python.org/downloads/)；以下示例使用 Conda 隔离环境。
 
 ```powershell
-git clone --branch codex/refactor-backend-modules https://github.com/HalHa8/physics-question-bank.git
+git clone https://github.com/HalHa8/physics-question-bank.git
 cd physics-question-bank
 conda create -n physicsbank-py310 python=3.10 -y
 conda activate physicsbank-py310
