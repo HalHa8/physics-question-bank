@@ -1949,7 +1949,7 @@
                     <span class="import-workspace-heading-icon" aria-hidden="true"><i class="fa-solid fa-file-import"></i></span>
                     <div>
                         <h3 id="importWorkspaceTitle" class="font-bold text-lg text-slate-800">导入中心</h3>
-                        <p>PDF、Word 与 LaTeX 试卷的拆解、审查和批量入库</p>
+                        <p>截图、图片与试卷文件，识别后核对入库</p>
                     </div>
                 </div>
             </div>
@@ -1965,6 +1965,27 @@
             <div id="importWorkspaceContent" class="import-workspace-content flex-1 flex overflow-hidden">
                 <!-- Left Pane: Inputs (LaTeX and Images) -->
                 <div id="importInputPane" class="import-source-pane w-5/12 border-r border-slate-200 p-6 overflow-y-auto space-y-4 bg-white/50 flex flex-col">
+                    <div class="import-input-types" role="group" aria-label="选择录题方式">
+                        <button type="button" id="importDocumentMode" aria-pressed="true"><i class="fa-solid fa-file-lines" aria-hidden="true"></i> PDF／Word／TeX</button>
+                        <button type="button" id="importImageMode" aria-pressed="false"><i class="fa-solid fa-camera" aria-hidden="true"></i> 截图／图片录题</button>
+                    </div>
+                    <section id="importImagePanel" class="import-image-panel" hidden aria-labelledby="importImageHeading">
+                        <h4 id="importImageHeading">截图／图片录题</h4>
+                        <div class="import-image-modes" role="group" aria-label="图片识别方式">
+                            <button type="button" id="importImageSingle" aria-pressed="true">单题截图</button>
+                            <button type="button" id="importImageMultiple" aria-pressed="false">整页／多题拆分</button>
+                        </div>
+                        <p id="importImageModeHint">一张截图录入一道题。识别后在题目编辑器核对文字、选项和配图，再保存入库。</p>
+                        <div id="importImageDropzone" class="import-image-dropzone" role="button" tabindex="0" aria-label="上传或粘贴题目截图" aria-describedby="importImageLimits">
+                            <i class="fa-solid fa-images" aria-hidden="true"></i>
+                            <strong>点击上传、拖入图片，或按 Ctrl／⌘ + V 粘贴截图</strong>
+                            <span id="importImageLimits">PNG、JPEG、WebP、GIF；单张 10MB，最多 20 张，总计 50MB。多张图片会切换到多题拆分。</span>
+                        </div>
+                        <input type="file" id="importImageFiles" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden>
+                        <ol id="importImageList" class="import-image-list" aria-label="待识别图片，按此顺序拆题"></ol>
+                        <p id="importImageStatus" role="status" aria-live="polite"></p>
+                        <p class="import-image-note">选择图片仅作本机预览；点击下方按钮后才调用已配置的识图服务，可能计费。请保留完整题干、选项、图注及坐标轴。</p>
+                    </section>
                     <!-- Step 1: Title -->
                     <div class="import-config-card space-y-1.5 shrink-0">
                         <label for="importPaperTitle" class="block text-xs font-bold text-slate-500">试卷标题（可选，用作题目来源）</label>
@@ -1973,13 +1994,13 @@
                     </div>
 
                     <!-- Step 2: LaTeX code drag & drop / text area -->
-                    <div class="import-config-card space-y-1.5 flex-1 flex flex-col min-h-[220px]">
+                    <div class="import-config-card space-y-1.5 flex-1 flex flex-col min-h-[220px]" data-import-document>
                         <label class="block text-xs font-bold text-slate-500 shrink-0">上传试卷文件</label>
                         <div id="texDropzone" class="border-2 border-dashed border-slate-200 hover:border-brand-500/80 rounded-xl p-3.5 text-center cursor-pointer transition-all duration-200 bg-white hover:bg-brand-50/20 flex flex-col justify-center items-center shrink-0 mb-2">
                             <i class="fa-solid fa-file-lines text-slate-400 text-xl mb-1.5" id="texFileIcon"></i>
-                            <span class="text-xs text-slate-600 font-medium" id="texFileName">点击或拖放 .tex / .pdf / .docx 试卷文件</span>
+                            <span class="text-xs text-slate-600 font-medium" id="texFileName">点击或拖放 .tex / .pdf / .docx；题目图片请选“截图／图片录题”</span>
                         </div>
-                        <input id="texFileInput" type="file" accept=".tex,.pdf,.docx,application/x-tex,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" class="hidden">
+                        <input id="texFileInput" type="file" accept=".tex,.pdf,.docx,image/png,image/jpeg,image/webp,image/gif,application/x-tex,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" class="hidden">
                         <details id="importSourceDetails" class="import-source-details"><summary>粘贴或编辑 LaTeX 源码</summary>
                         <textarea id="importLatexContent" placeholder="在此粘贴试卷的 LaTeX 源代码..." 
                                   class="w-full flex-1 p-3.5 border border-slate-200 rounded-xl outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 font-mono text-xs bg-slate-50/50 resize-none"></textarea>
@@ -1987,8 +2008,8 @@
                     </div>
 
                     <!-- Step 3: Optional assets referenced by single-file TeX -->
-                    <div class="import-config-card space-y-1.5 shrink-0" id="texImagesSection" hidden>
-                        <label class="block text-xs font-bold text-slate-500">TeX 配套图片（可选）</label>
+                    <div class="import-config-card space-y-1.5 shrink-0" id="texImagesSection" data-import-document hidden>
+                        <label class="block text-xs font-bold text-slate-500">TeX 配套插图（不是题目截图识别）</label>
                         <div id="imagesDropzone" class="border-2 border-dashed border-slate-200 hover:border-brand-500/80 rounded-xl p-3 text-center cursor-pointer transition-all duration-200 bg-white hover:bg-brand-50/20 flex flex-col justify-center items-center">
                             <i class="fa-solid fa-images text-slate-400 text-xl mb-1.5" id="imagesFileIcon"></i>
                             <span class="text-xs text-slate-600 font-medium" id="imagesCountName">点击或多选拖入试卷引用的所有图片</span>
@@ -2006,7 +2027,7 @@
                         </div>
                     </div>
 
-                    <div id="docxVerificationContainer" hidden class="import-config-card hidden p-3 bg-slate-50/80 border border-slate-200/60 rounded-xl shrink-0">
+                    <div id="docxVerificationContainer" data-import-document hidden class="import-config-card hidden p-3 bg-slate-50/80 border border-slate-200/60 rounded-xl shrink-0">
                         <label class="flex items-start gap-2 text-xs text-slate-700 cursor-pointer">
                             <input type="checkbox" id="docxVerifySuspicions" class="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500">
                             <span><span class="font-semibold">额外模型核验（可选）</span><span class="block mt-1 text-[10px] text-slate-500 leading-normal">开启后可能额外调用识图模型对照 Word 原文；关闭不影响正常导入。</span></span>
@@ -2014,7 +2035,7 @@
                     </div>
 
                     <!-- PDF Advanced Parsing Options (Visible only when PDF selected) -->
-                    <div id="pdfPageRangeContainer" class="import-config-card hidden space-y-2.5 p-3 bg-indigo-50/40 border border-indigo-100 rounded-xl shrink-0">
+                    <div id="pdfPageRangeContainer" data-import-document class="import-config-card hidden space-y-2.5 p-3 bg-indigo-50/40 border border-indigo-100 rounded-xl shrink-0">
                         <div class="flex flex-wrap gap-2 items-center justify-between">
                             <label class="block text-xs font-bold text-indigo-950 flex items-center space-x-1.5">
                                 <i class="fa-solid fa-microchip text-brand-600"></i>
@@ -2081,7 +2102,7 @@
                         <div>
                             <h4 class="ui-state-title font-bold text-slate-700 text-sm">等待拆解</h4>
                             <p class="ui-state-description text-xs text-slate-500 max-w-sm mt-1.5 leading-relaxed">
-                                上传 PDF、Word 或 TeX 文件，或展开源码输入区粘贴内容，再点击“开始解析”。
+                                单题截图可上传或粘贴后录入；整页、多题图片可按顺序拆分。也支持 PDF、Word、TeX 试卷，识别后请逐题核对。
                             </p>
                         </div>
                     </div>
@@ -2252,6 +2273,7 @@
     <script src="/static/js/editor.js"></script>
     <script src="/static/js/ocr.js"></script>
     <script src="/static/js/import.js"></script>
+    <script src="/static/js/image-import.js"></script>
     <script src="/static/js/paper.js"></script>
     <script src="/static/js/dashboard.js"></script>
     <script src="/static/js/qa-data.js"></script>

@@ -721,7 +721,8 @@ window.normalizeEditorFractions = normalizeEditorFractions;
         }
 
         function openNewQuestionEditor() {
-            checkAndSwitch(() => {
+            const options = arguments[0] || {};
+            return checkAndSwitch(() => {
                 const returnQuestionId = Number(EditorState.questionId || 0);
                 // The list refresh performed by startNewQuestion must not
                 // auto-select the first question again and overwrite the new
@@ -740,8 +741,9 @@ window.normalizeEditorFractions = normalizeEditorFractions;
                     }
                 }
                 openQuestionEditorModal('content');
-                if (typeof switchContentTab === 'function') switchContentTab('manual');
+                if (typeof switchContentTab === 'function') switchContentTab(options.sourceTab === 'ocr' ? 'ocr' : 'manual');
                 setQuestionDetailEditAvailability(false);
+                if (typeof options.onReady === 'function') options.onReady();
             });
         }
 

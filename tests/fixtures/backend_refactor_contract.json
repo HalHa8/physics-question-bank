@@ -274,6 +274,11 @@
       "name": "upload_docx_task"
     },
     {
+      "path": "/api/upload/image-task",
+      "method": "POST",
+      "name": "upload_image_task"
+    },
+    {
       "path": "/api/upload/pdf-task",
       "method": "POST",
       "name": "upload_pdf_task"
@@ -354,6 +359,15 @@
         "name": "retain_document_task"
       },
       "reason": "Keep unsaved import result images available while the import workspace is active; protected by the existing local-token middleware."
+    },
+    {
+      "date": "2026-10-16",
+      "route": {
+        "path": "/api/upload/image-task",
+        "method": "POST",
+        "name": "upload_image_task"
+      },
+      "reason": "Image-page uploads reuse the PDF pipeline, local token and existing task cancellation/status endpoints."
     }
   ]
 }

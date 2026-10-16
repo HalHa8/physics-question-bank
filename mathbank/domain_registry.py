@@ -4,6 +4,7 @@ from mathbank import maintenance_service
 from mathbank import runtime_service
 from mathbank import system_routes
 from mathbank import image_upload_service
+from mathbank import image_import_service
 from mathbank import ocr_service
 from mathbank import drawing_service
 from mathbank import solve_service
@@ -20,6 +21,7 @@ from mathbank import paper_record_service
 from mathbank import paper_export_service
 
 DOMAINS = (
+    (image_import_service, image_import_service.ImageImportServiceDependencies, ('upload_image_task',)),
     (
         maintenance_service,
         maintenance_service.MaintenanceServiceDependencies,

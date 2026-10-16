@@ -4,6 +4,14 @@
 
 # PhysicsBank: Local High-School Physics Question Bank
 
+The Import Center now has a **Screenshot / Image** entry: upload, drop or paste
+images. Single-question mode opens the existing OCR editor for review and saving.
+Whole-page / multiple-question mode accepts up to 20 ordered images (10MB each,
+50MB total), with move-up/down and remove controls, then uses the existing paper
+splitting and question-review workflow. Choosing/reordering images stays local;
+recognition starts only when requested. Multi-question mode needs both image OCR
+and paper-parsing models. TeX companion illustrations remain a separate input.
+
 Screenshot OCR now crops figures directly from the original image, preserving
 their text, option or table positions. Original-image mode is enabled by default.
 Unresolved or inaccurate figures can be manually cropped or re-cropped from the

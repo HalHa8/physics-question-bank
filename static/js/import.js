@@ -3048,6 +3048,10 @@
             });
 
             texDrop.addEventListener('drop', (e) => {
+                if (window.PhysicsBankImageImport && Array.from(e.dataTransfer.files).some(window.PhysicsBankImageImport.isImage)) {
+                    window.PhysicsBankImageImport.addFiles(e.dataTransfer.files);
+                    return;
+                }
                 const file = e.dataTransfer.files[0];
                 const lowerFileName = file ? file.name.toLowerCase() : '';
                 if (file && (lowerFileName.endsWith('.tex') || lowerFileName.endsWith('.pdf') || lowerFileName.endsWith('.docx'))) {
@@ -3124,6 +3128,12 @@
 
             function handleTexFileSelect(file) {
                 if (!file) return;
+                if (window.PhysicsBankImageImport?.isImage(file)) {
+                    window.PhysicsBankImageImport.addFiles([file]);
+                    texInput.value = '';
+                    return;
+                }
+                if (window.PhysicsBankImageImport?.isActive()) window.PhysicsBankImageImport.select(false);
                 const lowerFileName = file.name.toLowerCase();
                 if (!lowerFileName.endsWith('.tex') && !lowerFileName.endsWith('.pdf') && !lowerFileName.endsWith('.docx')) {
                     showToast('仅支持 .tex、.pdf 或 .docx 试卷文件。', 'warning');
@@ -3384,13 +3394,20 @@
         }
 
         function runAIPaperParse() {
+            const imageEntry = window.PhysicsBankImageImport;
+            if (imageEntry?.isSingle()) return imageEntry.openSingle();
+            const imageFiles = imageEntry?.filesForSplit() || [];
+            if (imageEntry?.isActive() && !imageFiles.length) {
+                showToast('请先上传或粘贴题目图片。', 'warning');
+                return;
+            }
             const titleInput = document.getElementById('importPaperTitle');
             const title = titleInput.value.trim();
             const latex = document.getElementById('importLatexContent').value.trim();
             const sourceFormat = 'tex';
             const sourceLabel = 'TeX';
 
-            if (!latex && !window.currentPdfFile && !window.currentDocxFile) {
+            if (!imageFiles.length && !latex && !window.currentPdfFile && !window.currentDocxFile) {
                 showToast('请粘贴或上传 LaTeX 试卷内容，或拖入 PDF、Word 文件！', 'warning');
                 return;
             }
@@ -3436,7 +3453,7 @@
             const generateAnswers = generateAnswersCheckbox ? generateAnswersCheckbox.checked : false;
 
             // Handle Word (.docx) branch
-            if (window.currentDocxFile) {
+            if (!imageFiles.length && window.currentDocxFile) {
                 document.getElementById('importLoadingText').textContent = '正在上传 Word 试卷并安全提取物理公式与高清插图...';
                 appendImportLog('开始上传 Word (.docx) 试卷文件...', 'current');
                 document.getElementById('importProgressBarContainer').classList.remove('hidden');
@@ -3502,26 +3519,32 @@
             }
 
             // Handle PDF branch
-            if (window.currentPdfFile) {
-                document.getElementById('importLoadingText').textContent = '正在上传 PDF 试卷并创建处理任务...';
-                appendImportLog('开始上传 PDF 试卷文件...', 'current');
+            if (imageFiles.length || window.currentPdfFile) {
+                document.getElementById('importLoadingText').textContent = imageFiles.length ? '正在按所选顺序上传图片并创建拆题任务...' : '正在上传 PDF 试卷并创建处理任务...';
+                appendImportLog(imageFiles.length ? `开始上传 ${imageFiles.length} 张题目图片；将按当前页序识别并拆题。` : '开始上传 PDF 试卷文件...', 'current');
                 document.getElementById('importProgressBarContainer').classList.remove('hidden');
                 document.getElementById('importProgressBar').style.width = '0%';
 
                 const pdfFormData = new FormData();
-                pdfFormData.append('file', window.currentPdfFile);
+                if (imageFiles.length) {
+                    imageFiles.forEach(file => pdfFormData.append('files', file));
+                    pdfFormData.append('paper_title', title);
+                }
+                else pdfFormData.append('file', window.currentPdfFile);
                 pdfFormData.append('generate_answers', generateAnswers ? "true" : "false");
                 
                 const pdfPageRangeInput = document.getElementById('pdfPageRange');
                 const pageRange = pdfPageRangeInput ? pdfPageRangeInput.value.trim() : '';
-                if (pageRange) {
+                if (pageRange && !imageFiles.length) {
                     pdfFormData.append('page_range', pageRange);
                 }
 
-                pdfFormData.append('pdf_strategy', selectedPdfStrategy());
-                pdfFormData.append('pdf_verify_suspicions', selectedPdfSourceVerification() ? 'true' : 'false');
+                if (!imageFiles.length) {
+                    pdfFormData.append('pdf_strategy', selectedPdfStrategy());
+                    pdfFormData.append('pdf_verify_suspicions', selectedPdfSourceVerification() ? 'true' : 'false');
+                }
 
-                fetch('/api/upload/pdf-task', {
+                fetch(imageFiles.length ? '/api/upload/image-task' : '/api/upload/pdf-task', {
                     method: 'POST',
                     headers: {
                         'X-Local-Token': localStorage.getItem('local_token') || ''
@@ -3556,7 +3579,7 @@
                         loadingIcon.classList.remove('fa-spinner', 'animate-spin');
                         loadingIcon.classList.add('fa-circle-exclamation', 'text-red-500');
                     }
-                    document.getElementById('importLoadingText').textContent = 'PDF 上传解析出错！';
+                    document.getElementById('importLoadingText').textContent = imageFiles.length ? '图片上传拆题出错！' : 'PDF 上传解析出错！';
 
                     const loadingState = document.getElementById('importLoadingState');
                     let resetBtn = document.getElementById('resetImportBtn');
@@ -3616,7 +3639,7 @@
                     let parseBrand = 'AI';
                     document.getElementById('importLoadingText').textContent = `${parseBrand} 正在智能分析并拆解试卷，请稍候...`;
                     appendImportLog(`正在调用 ${parseModelFriendly} 教研大模型进行试题智能分割与属性匹配...`, 'current');
-                    appendImportLog('大纲映射范围：高中人教版A 必修一至选择性必修三。请耐心等候...', 'info');
+                    appendImportLog('大纲映射范围：人教版高中物理（2019）。请耐心等候...', 'info');
 
                     const parseFormData = new FormData();
                     parseFormData.append('latex_content', latex);
@@ -4004,6 +4027,7 @@
             invalidateImportTextRead();
             setImportTextSourceFormat('tex');
             updateImportSourceView('empty');
+            if (window.PhysicsBankImageImport) window.PhysicsBankImageImport.reset();
             // 清空左侧输入栏
             const titleInput = document.getElementById('importPaperTitle');
             if (titleInput) titleInput.value = '';
@@ -4024,7 +4048,7 @@
             const texFileName = document.getElementById('texFileName');
             const texFileIcon = document.getElementById('texFileIcon');
             if (texFileName) {
-                texFileName.textContent = "点击或拖放 .tex / .pdf / .docx 试卷文件";
+                texFileName.textContent = "点击或拖放 .tex / .pdf / .docx；题目图片请选“截图／图片录题”";
                 texFileName.className = "text-xs text-slate-600 font-medium";
             }
             if (texFileIcon) {

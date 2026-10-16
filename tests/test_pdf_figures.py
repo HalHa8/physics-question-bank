@@ -531,7 +531,7 @@ def test_cancel_after_crop_cleans_registered_files_and_never_splits(monkeypatch,
         assert recorded
         assert all(not (Path(main.TMP_UPLOAD_DIR) / Path(path).name).exists() for path in state["temp_assets"]), (main.UPLOAD_DIR_REL, state['temp_assets'], list(uploads.rglob('*')), list(retained.rglob('*')))
         for path in state['temp_assets']:
-            kept = retained / 'files' / 'tmp' / Path(path).name
+            kept = asset_lifecycle._filesystem_path(retained / 'files' / 'tmp' / Path(path).name)
             assert kept.is_file(), 'Cancelled images remain recoverable after public-path cleanup'
             with Image.open(kept) as picture:
                 picture.verify()

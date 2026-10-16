@@ -196,6 +196,13 @@
       "previous_body_sha256": null,
       "new_body_sha256": "6a2bd58686223cee3fcf34c4c1da3fd21b43e0dfd2f7820965010863fa986658",
       "behavior_regressions": "tests/test_physics_import_upgrade.py"
+    },
+    "upload_image_task": {
+      "date": "2026-10-16",
+      "previous_body_sha256": null,
+      "new_body_sha256": "7cb36140e4d06acfa982fe16898cc5c2e02919696d341beb8f4ec871730b26e3",
+      "reason": "New ordered-image adapter: validated local PDF conversion delegates to the existing queue and layout-aware importer, optional verification off. Forward the bounded optional source title to PDF question postprocessing.",
+      "behavior_regressions": "tests/test_image_import.py; tests/test_image_import_browser.py"
     }
   },
   "functions": {
@@ -302,7 +309,8 @@
     "export_paper_pdf": "paper_export_service",
     "export_paper_word": "paper_export_service",
     "retain_document_task": "document_task_service",
-    "validate_import_knowledge": "paper_parse_service"
+    "validate_import_knowledge": "paper_parse_service",
+    "upload_image_task": "image_import_service"
   },
   "body_sha256": {
     "schedule_database_export": "0e9019607f89682e0a4d3c94984855252060b9c2ed6d1f5f9eee3f68c67fa7c2",
@@ -408,6 +416,7 @@
     "export_paper_pdf": "904b66a1540d305cfbc3b88443388ab3dfd672bef30eeae5e5cd5ea4523002bd",
     "export_paper_word": "b429ff42557b7069c504378c7dab94ba72373e78d0b1691482912700bc7bb6c1",
     "retain_document_task": "fd8c895adf398efc5ef8d4d62cea8c971a5064b00191ab492792e4d8703fc944",
-    "validate_import_knowledge": "6a2bd58686223cee3fcf34c4c1da3fd21b43e0dfd2f7820965010863fa986658"
+    "validate_import_knowledge": "6a2bd58686223cee3fcf34c4c1da3fd21b43e0dfd2f7820965010863fa986658",
+    "upload_image_task": "7cb36140e4d06acfa982fe16898cc5c2e02919696d341beb8f4ec871730b26e3"
   }
 }
