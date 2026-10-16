@@ -1503,6 +1503,70 @@ header, main {
     width: 100%;
 }
 
+/* Paper controls float outside pagination; the bank gets its own preview toolbar. */
+.paper-image-scale-control,
+.bank-image-scale-control {
+    position: absolute;
+    z-index: 12;
+    right: 8px;
+    top: 38px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    max-width: calc(100% - 16px);
+    min-height: 44px;
+    margin: 0 !important;
+    padding: 0 8px;
+    border: 1px solid var(--workspace-border);
+    border-radius: 10px;
+    background: var(--workspace-surface);
+    box-shadow: var(--apple-shadow-sm);
+    font: 12px sans-serif;
+    color: inherit;
+    white-space: nowrap;
+    cursor: default;
+    opacity: 0;
+    pointer-events: none;
+}
+.bank-image-scale-host { position: relative; }
+.bank-image-scale-control {
+    position: relative;
+    top: auto;
+    right: auto;
+    width: max-content;
+    max-width: 100%;
+    margin: 0 0 8px auto !important;
+    opacity: 1;
+    pointer-events: auto;
+}
+.paper-q-item:hover > .paper-image-scale-control,
+.paper-q-item:focus-within > .paper-image-scale-control,
+.bank-image-scale-host:hover > .bank-image-scale-control,
+.bank-image-scale-host:focus-within > .bank-image-scale-control {
+    opacity: 1;
+    pointer-events: auto;
+}
+.paper-q-item:focus-within > .paper-canvas-toolbar { opacity: 1; }
+.paper-image-scale-control input,
+.bank-image-scale-control input {
+    width: 120px;
+    min-width: 40px;
+    height: 44px;
+    accent-color: rgb(var(--brand-500-rgb));
+    cursor: pointer;
+    touch-action: pan-y;
+}
+.paper-image-scale-value,
+.bank-image-scale-value { min-width: 38px; font-variant-numeric: tabular-nums; }
+.paper-q-item[data-image-scale] img,
+.bank-image-scale-host img { transition: none; }
+@media (hover: none), (pointer: coarse) {
+    .paper-image-scale-control, .bank-image-scale-control { opacity: 1; pointer-events: auto; }
+}
+@media print {
+    .paper-image-scale-control, .bank-image-scale-control { display: none !important; }
+}
+
 .preview-box img {
     max-width: 100%;
     height: auto;
@@ -2842,6 +2906,40 @@ td img.mb-inline-image-size-large { max-height: 160px; }
 .qa-guide details { border-top: 1px solid var(--workspace-border); padding: 8px 0; }
 .qa-guide summary { cursor: pointer; min-height: 44px; padding: 10px 0; font-weight: 600; }
 .qa-guide code { word-break: break-all; }
+
+/* Import corrections are local actions; explicit missing content stays visible. */
+.card-correction-panel {
+    min-width: 0;
+    padding: 12px;
+    border: 1px solid var(--workspace-border);
+    border-radius: 12px;
+    background: rgba(var(--brand-500-rgb), .06);
+    color: var(--text-primary);
+    font-size: 12px;
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+}
+.card-correction-title { font-weight: 650; margin-bottom: 6px; }
+.card-correction-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; margin-top: 6px; }
+.card-correction-action, .parsed-image-control {
+    min-height: 44px;
+    max-width: 100%;
+    padding: 8px 10px;
+    border: 1px solid var(--workspace-border);
+    border-radius: 8px;
+    background: var(--apple-bg-elevated);
+    color: var(--text-primary);
+    font-size: 12px;
+    cursor: pointer;
+}
+.card-correction-action:focus-visible, .parsed-image-control:focus-visible { outline: 2px solid rgb(var(--brand-500-rgb)); outline-offset: 2px; }
+.card-correction-action:disabled, .parsed-image-control:disabled { cursor: not-allowed; opacity: .5; }
+.card-correction-note { color: var(--text-secondary); font-size: 12px; margin-top: 6px; }
+.parsed-image-control { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; cursor: default; }
+.dark .editor-formula-diagnostics { background: rgba(245, 158, 11, .09); color: var(--text-primary); }
+.dark .editor-formula-diagnostics summary,
+.dark .editor-formula-diagnostics button { color: #fcd34d; }
+.dark .editor-formula-diagnostics p { color: var(--text-secondary); }
 
 .bank-management-header {
     min-width: 0;
@@ -5483,7 +5581,7 @@ button[aria-disabled="true"]:hover,
 #importInputPane #texDropzone { min-height: 130px; }
 #importInputPane :is(label, input, button), #texFileName { font-size: 14px !important; }
 .parsed-card-footer { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; min-width: 0; }
-.parsed-card-image-badges { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; max-width: 100%; max-height: 64px; overflow: auto; }
+.parsed-card-image-badges { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; max-width: 100%; max-height: 144px; overflow: auto; }
 .parsed-card-image-badges:empty { display: none; }
 .parsed-card-image-badge { flex: 0 1 auto; min-width: 0; max-width: 140px; }
 .parsed-card-image-badge > i { flex: 0 0 auto; }

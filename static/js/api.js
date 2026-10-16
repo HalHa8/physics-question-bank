@@ -521,6 +521,28 @@
         window.TikzState = TikzState;
         // Image references remain at their authored anchors; only the final cluster detaches.
         window.ImageLayoutTools = {
+            imageScale(value) {
+                const number = Number(value);
+                return (typeof value === 'number' || typeof value === 'string') && value !== ''
+                    && Number.isInteger(number) && number >= 20 && number <= 150 ? number : 70;
+            },
+            normalizeImageChoices(content, questionType) {
+                const source = String(content || '');
+                if (!['single_choice', 'multi_choice'].includes(questionType)
+                    || source.includes('\\begin{choices}') || source.includes('~~~') || source.includes(String.fromCharCode(96))) return source;
+                const image = '(!\\[[^\\]\\r\\n]*\\]\\([^)\\r\\n]+\\))';
+                const pattern = new RegExp('^[ \\t]*A[.．、][ \\t\\r\\n]*' + image
+                    + '[ \\t\\r\\n]+B[.．、][ \\t\\r\\n]*' + image
+                    + '[ \\t\\r\\n]+C[.．、][ \\t\\r\\n]*' + image
+                    + '[ \\t\\r\\n]+D[.．、][ \\t\\r\\n]*' + image + '[ \\t\\r\\n]*$', 'm');
+                const match = pattern.exec(source);
+                if (!match || source.slice(match.index + match[0].length).trim()) return source;
+                const prefix = source.slice(0, match.index);
+                if ((prefix.match(/\\begin\{/g) || []).length !== (prefix.match(/\\end\{/g) || []).length) return source;
+                return prefix + '\\begin{choices}\n'
+                    + match.slice(1).map(value => '\\item ' + value).join('\n') + '\n\\end{choices}';
+            },
+
             key(path) { return String(path || '').trim().replace(/^\/?(?:static\/)?uploads\//, ''); },
             split(raw) {
                 const source = String(raw || '');

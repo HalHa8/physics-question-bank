@@ -32,6 +32,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from dotenv import load_dotenv
 
+from mathbank.paper_image_layout import normalize_image_scale
 from mathbank.database import (
     FIGURE_ALIGN_VALUES,
     FIGURE_SIZE_VALUES,
@@ -6132,6 +6133,9 @@ def save_paper(payload: dict, background_tasks: BackgroundTasks, db: Session = D
         meta = payload.get("metadata", {})
         if not isinstance(meta, dict):
             meta = {}
+        meta = dict(meta)
+        meta["image_scales"] = {str(qid): normalize_image_scale(item.get("image_scale"))
+                                for (qid, _score), item in zip(normalized_items, questions_payload)}
         meta["show_secret"] = payload.get("show_secret", True)
         meta["show_notice"] = payload.get("show_notice", True)
         meta["section_order"] = normalize_section_order(payload.get("section_order", meta.get("section_order")))
@@ -6207,10 +6211,14 @@ def get_paper_detail(paper_id: int, db: Session = Depends(get_db)):
             .all()
         )
 
+        scales = json.loads(paper.metadata_json or "{}").get("image_scales", {})
+        if not isinstance(scales, dict):
+            scales = {}
         questions_list = [
             {
                 "id": question.id,
                 "score": paper_question.score,
+                "image_scale": normalize_image_scale(scales.get(str(question.id))),
                 "question": question.to_dict(),
             }
             for paper_question, question in rows
@@ -6298,6 +6306,10 @@ def _prepare_paper_export_questions(questions_input, db: Session) -> list[dict]:
     questions_data = []
     for item, question_id in normalized_items:
         question_data = dict(question_map[question_id])
+        try:
+            question_data["paper_image_scale"] = normalize_image_scale(item.get("image_scale"))
+        except ValueError as exc:
+            raise PaperExportValidationError(str(exc)) from exc
         if item.get("figure_align"):
             question_data["figure_align"] = item.get("figure_align")
         if isinstance(item.get("figure_align_custom"), bool):
@@ -6474,11 +6486,24 @@ def export_paper_pdf(payload: dict, db: Session = Depends(get_db)):
             })
         else:
             diagnostic = explain_latex_compile_error(log_or_err, tex_content)
+            # The model may explain an error, but original evidence always
+            # comes from the same locally validated export snapshot.
+            source_question = next((
+                item.get("question", {}) for item in questions_data
+                if str(item.get("question", {}).get("id")) == str(diagnostic.get("question_id", ""))
+            ), None)
+            if source_question:
+                source_field = "answer_markdown" if diagnostic.get("question_part") == "answer" else "content"
+                original = str(source_question.get(source_field) or "")
+                diagnostic["original_excerpt"] = original[:1600]
+                diagnostic["original_excerpt_truncated"] = len(original) > 1600
             return JSONResponse(
                 content={
                     "status": "error",
                     "message": diagnostic.get("summary", "PDF 编译失败"),
                     "diagnostic": diagnostic,
+                    "tex_source": tex_content,
+                    "tex_filename": "answer-sheet.tex" if target == "sheet" else "paper.tex",
                 },
                 status_code=400,
             )

@@ -1112,7 +1112,9 @@ def test_shared_question_preview_pipeline_is_used_by_editor_and_duplicate_review
     update_start = editor_source.index("const updateContentPreview = () =>")
     update_end = editor_source.index("const updateAnswerPreview = () =>", update_start)
     update_source = editor_source[update_start:update_end]
-    assert "const preparedHtml = renderQuestionPreviewContent(previewContainer, text, { imageLayouts: FigureLayoutState.imageLayouts })" in update_source
+    assert "const displayText = window.ImageLayoutTools.normalizeImageChoices(text, document.getElementById('editQType').value)" in update_source
+    assert "const preparedHtml = renderQuestionPreviewContent(previewContainer, displayText, { imageLayouts: FigureLayoutState.imageLayouts })" in update_source
+    assert "editContent.value =" not in update_source
     assert "renderQuestionPreviewContent(paperContainer, text, { preparedHtml: preparedHtml })" in update_source
     assert "renderMathInElement(" not in update_source
 

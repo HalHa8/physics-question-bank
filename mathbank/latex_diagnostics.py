@@ -39,6 +39,15 @@ def _first_error_block(log_text: str) -> tuple[str, int | None, str]:
         line_text = source_line.group(1).strip() if source_line else ""
         return file_error.group(2).strip(), line_number, line_text
 
+    # A package/template file's line number is not a line in paper.tex.
+    external_error = re.search(
+        r"(?m)^[^\r\n]+\.(?:tex|sty|cls):(\d+):\s*(.+)$", log,
+    )
+    if external_error:
+        nearby = log[external_error.end():external_error.end() + 2000]
+        source_line = re.search(rf"(?m)^l\.{external_error.group(1)}\s*(.*)$", nearby)
+        return external_error.group(2).strip(), None, source_line.group(1).strip() if source_line else ""
+
     error_match = re.search(r"(?m)^!\s*(.+)$", log)
     error = error_match.group(1).strip() if error_match else "LaTeX 编译器返回了错误"
 
@@ -52,25 +61,53 @@ def _first_error_block(log_text: str) -> tuple[str, int | None, str]:
     return error, int(line_match.group(1)), line_match.group(2).strip()
 
 
-def _source_context(tex_content: str, line_number: int | None, radius: int = 3) -> tuple[str, str]:
+def _source_context(tex_content: str, line_number: int | None, radius: int = 3) -> tuple[str, dict[str, Any]]:
     if not line_number:
-        return "", ""
+        return "", {}
     lines = str(tex_content or "").splitlines()
-    if not lines:
-        return "", ""
-    line_index = min(max(line_number - 1, 0), len(lines) - 1)
+    if not 1 <= line_number <= len(lines):
+        return "", {}
+    line_index = line_number - 1
     start = max(0, line_index - radius)
     end = min(len(lines), line_index + radius + 1)
     context = "\n".join(f"{index + 1}: {lines[index]}" for index in range(start, end))
 
-    question_id = ""
+    # New documents have closed ranges: a later template error must not be
+    # attributed to the nearest previous question. Only complete ranges count.
+    begin = re.compile(r"^% MathBank-Question-Begin: id=(\d+|-); number=(\d+); part=(content|answer|figure)$")
+    end_marker = "% MathBank-Question-End"
+    source = {}
+    active = None
+    has_ranges = False
+    for index, line in enumerate(lines):
+        match = begin.fullmatch(line.strip())
+        if match:
+            has_ranges = True
+            active = (index, match)
+        elif line.strip() == end_marker:
+            if active and active[0] < line_index < index:
+                match = active[1]
+                source = {
+                    "question_id": "" if match.group(1) == "-" else match.group(1),
+                    "paper_question_number": int(match.group(2)),
+                    "question_part": match.group(3),
+                }
+            active = None
+    if has_ranges:
+        return context[:3000], source
+
+    # Compatibility for older generated source: stop at a known boundary
+    # instead of walking across sections or beyond a closed question.
     marker = re.compile(r"^%\s*MathBank-Question-ID:\s*(\d+)\s*$")
     for index in range(line_index, -1, -1):
+        if re.match(r"\\(?:section\b|end\{(?:document|question|problem|solution)\})", lines[index].strip()):
+            if index != line_index:
+                break
         match = marker.match(lines[index].strip())
         if match:
-            question_id = match.group(1)
+            source = {"question_id": match.group(1)}
             break
-    return context[:3000], question_id
+    return context[:3000], source
 
 
 def _find_command(error: str, line_text: str, context: str, line_number: int | None) -> str:
@@ -91,12 +128,20 @@ def _find_command(error: str, line_text: str, context: str, line_number: int | N
 def build_local_latex_diagnostic(log_text: str, tex_content: str) -> dict[str, Any]:
     """Return an immediately useful diagnosis without requiring an AI service."""
     error, line_number, line_text = _first_error_block(log_text)
-    context, question_id = _source_context(tex_content, line_number)
+    context, source = _source_context(tex_content, line_number)
+    question_id = source.get("question_id", "")
+    paper_number = source.get("paper_question_number")
+    question_part = source.get("question_part", "")
     command = _find_command(error, line_text, context, line_number)
     package = _COMMAND_PACKAGES.get(command, "")
 
     location = "试卷模板或公式源码"
-    if question_id:
+    if paper_number:
+        part_label = {"content": "题干", "answer": "解析", "figure": "答题卡配图"}.get(question_part, "")
+        location = f"卷面第 {paper_number} 题 · {part_label}"
+        if question_id:
+            location += f"（题库题目 ID {question_id}）"
+    elif question_id:
         location = f"题库题目 ID {question_id} 附近"
     elif line_number:
         location = f"生成的 LaTeX 第 {line_number} 行附近"
@@ -115,7 +160,7 @@ def build_local_latex_diagnostic(log_text: str, tex_content: str) -> dict[str, A
         shown_command = f"\\{command}" if command else "某个 LaTeX 命令"
         summary = f"公式中存在当前模板不认识的命令 {shown_command}"
         if package:
-            cause = f"{shown_command} 通常由 {package} 宏包提供，但当前试卷模板没有加载它。"
+            cause = f"{shown_command} 通常由 {package} 宏包提供；请核对宏包是否正确加载及命令的使用方式。"
             fixes = [
                 f"在确认环境已内置该宏包后加载 \\usepackage{{{package}}}。",
                 "也可以把该命令替换为当前 KaTeX 与 XeLaTeX 都支持的等价写法。",
@@ -149,6 +194,8 @@ def build_local_latex_diagnostic(log_text: str, tex_content: str) -> dict[str, A
         "command": f"\\{command}" if command else "",
         "line_number": line_number,
         "question_id": question_id,
+        "paper_question_number": paper_number,
+        "question_part": question_part,
         "source_context": context,
         "technical_error": technical[:1600],
         "ai_used": False,
@@ -160,7 +207,8 @@ def merge_ai_latex_diagnostic(local: dict[str, Any], ai_value: Any) -> dict[str,
     if not isinstance(ai_value, dict):
         return local
     merged = dict(local)
-    for key in ("summary", "cause", "location", "package", "command"):
+    # Source identity and location are local evidence, never model assertions.
+    for key in ("summary", "cause", "package", "command"):
         value = ai_value.get(key)
         if isinstance(value, str) and value.strip():
             merged[key] = value.strip()[:1000]

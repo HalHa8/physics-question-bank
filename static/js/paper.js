@@ -55,6 +55,104 @@
         activeWorkspace: 'dashboard'
     };
 
+    // Paper-only presentation; the question-bank content and assets stay intact.
+    function paperImageScale(value) {
+        return window.ImageLayoutTools.imageScale(value);
+    }
+
+    function normalizePaperImageChoices(content, questionType) {
+        return window.ImageLayoutTools.normalizeImageChoices(content, questionType);
+    }
+
+    function applyPaperImageScale(block) {
+        if (!block) return;
+        const scale = paperImageScale(block.dataset.imageScale) / 100;
+        block.querySelectorAll('img').forEach(img => {
+            if (!img.naturalWidth || !img.naturalHeight) return;
+            let dimensions = { maxWidth: 360, maxHeight: 240 };
+            if (img.closest('.choices-content')) {
+                dimensions = { maxWidth: 120, maxHeight: 120 };
+            } else if (img.classList.contains('paper-figure-image')) {
+                dimensions = getFigureDimensions(img.dataset.figureSize, img.dataset.figureAlign, img.dataset.figureImageCount);
+                if (img.dataset.figureSize === 'auto' && img.dataset.figureAlign !== 'right'
+                    && img.dataset.figureImageCount === '1' && img.naturalWidth / img.naturalHeight >= 1.6) {
+                    dimensions = { maxWidth: 420, maxHeight: 300 };
+                }
+            } else {
+                for (const [size, width, height] of [['small', 200, 168], ['medium', 320, 240], ['large', 420, 300]]) {
+                    if (img.classList.contains('mb-inline-image-size-' + size)) dimensions = { maxWidth: width, maxHeight: height };
+                }
+                if (img.closest('td')) dimensions.maxHeight = Math.min(dimensions.maxHeight, 160);
+            }
+            const ratio = img.naturalWidth / img.naturalHeight;
+            const width = Math.min(img.naturalWidth, dimensions.maxWidth, dimensions.maxHeight * ratio) * scale;
+            img.style.width = width + 'px';
+            img.style.height = 'auto';
+            img.style.maxWidth = '100%';
+            img.style.maxHeight = (dimensions.maxHeight * scale) + 'px';
+        });
+        const zone = block.querySelector('.solution-space-zone');
+        const embedded = zone && zone.querySelector('[data-paper-embedded-figure]');
+        if (embedded) {
+            const height = Math.max(Number(zone.dataset.paperSpacePx) || 0, embedded.offsetHeight + 16);
+            zone.style.minHeight = height + 'px';
+            zone.style.height = height + 'px';
+        }
+    }
+
+    function initializePaperImageScales(scope) {
+        scope.querySelectorAll('.paper-q-item[data-image-scale]').forEach(block => {
+            applyPaperImageScale(block);
+            block.querySelectorAll('img').forEach(img => {
+                if (!img.complete) img.addEventListener('load', () => {
+                    if (!block.isConnected) return;
+                    applyPaperImageScale(block);
+                    if (window.adaptChoicesGridLayout) window.adaptChoicesGridLayout(block);
+                    if (window.scheduleActiveA4Repagination) window.scheduleActiveA4Repagination();
+                }, { once: true });
+            });
+        });
+    }
+
+
+    // Native range gestures must never become HTML5 card drags. Keep pagination
+    // still until release as well, so the thumb cannot move to another page.
+    let paperImageScaleGesture = null;
+    function endPaperImageScaleGesture(event) {
+        const gesture = paperImageScaleGesture;
+        if (!gesture || (event && event.pointerId !== undefined && event.pointerId !== gesture.pointerId)) return;
+        paperImageScaleGesture = null;
+        gesture.card.draggable = gesture.draggable;
+        document.removeEventListener('pointerup', endPaperImageScaleGesture, true);
+        document.removeEventListener('pointercancel', endPaperImageScaleGesture, true);
+        window.removeEventListener('blur', endPaperImageScaleGesture);
+        if (window.scheduleActiveA4Repagination) window.scheduleActiveA4Repagination();
+    }
+    window.beginPaperImageScale = function (event) {
+        if (event.button !== 0 || paperImageScaleGesture) return;
+        const card = event.currentTarget.closest('.paper-q-item');
+        if (!card) return;
+        event.stopPropagation();
+        paperImageScaleGesture = { card, pointerId: event.pointerId, draggable: card.draggable };
+        card.draggable = false;
+        document.addEventListener('pointerup', endPaperImageScaleGesture, true);
+        document.addEventListener('pointercancel', endPaperImageScaleGesture, true);
+        window.addEventListener('blur', endPaperImageScaleGesture);
+    };
+
+    window.updatePaperImageScale = function (input) {
+        const block = input.closest('.paper-q-item');
+        const item = block && window.PaperStore.cart.find(value => value.id === Number(block.dataset.qid));
+        if (!item) return;
+        item.image_scale = paperImageScale(input.value);
+        block.dataset.imageScale = String(item.image_scale);
+        block.querySelector('.paper-image-scale-value').textContent = item.image_scale + '%';
+        saveCartToStorage();
+        applyPaperImageScale(block);
+        if (window.adaptChoicesGridLayout) window.adaptChoicesGridLayout(block);
+        if (window.scheduleActiveA4Repagination) window.scheduleActiveA4Repagination();
+    };
+
     // Load State from LocalStorage
     function loadStateFromStorage() {
         try {
@@ -543,7 +641,8 @@
             questions: window.PaperStore.cart.map(item => [
             parseInt(item.id, 10) || 0,
             parseInt(item.score, 10) || 0,
-            item.solution_space === undefined ? null : String(item.solution_space)
+            item.solution_space === undefined ? null : String(item.solution_space),
+            item.image_scale === undefined ? 70 : item.image_scale
         ])});
     }
 
@@ -1817,6 +1916,8 @@
             } catch (e) { }
         }
         initializeAutoFigureSizing(sheet);
+        initializePaperImageScales(sheet);
+        if (window.adaptChoicesGridLayout) window.adaptChoicesGridLayout(sheet);
         if (sheet && !cartIncomplete) {
             rebalanceA4PaperPages(sheet, meta, totalCount, totalScore);
 
@@ -1831,12 +1932,12 @@
                 }
                 // The drag placeholder changes block heights. Keep pages still
                 // until drop/cancel removes it and renders the final cart.
-                if (draggedItemData) return;
+                if (draggedItemData || paperImageScaleGesture) return;
                 if (window.activeA4PaginationFrame) return;
                 if (typeof requestAnimationFrame === 'function') {
                     const frame = requestAnimationFrame(() => {
                         if (window.activeA4PaginationFrame === frame) window.activeA4PaginationFrame = null;
-                        if (sheet.isConnected && !draggedItemData
+                        if (sheet.isConnected && !draggedItemData && !paperImageScaleGesture
                                 && window.scheduleActiveA4Repagination === repaginateAfterLayoutChange) {
                             rebalanceA4PaperPages(sheet, meta, totalCount, totalScore);
                         }
@@ -1919,7 +2020,7 @@
                     placeholder="+ 点击在此直接添加主标题"
                     class="canvas-meta-title text-2xl font-bold tracking-normal text-slate-900 font-serif mb-1.5 outline-none hover:bg-amber-50/60 focus:bg-white focus:ring-2 focus:ring-brand-200/80 rounded-lg px-3 py-0.5 transition-all cursor-text inline-block min-w-[200px]"
                     spellcheck="false">${(meta.title && meta.title.trim()) ? escapeHtml(meta.title) : ''}</h1>
-                <div class="text-xl font-bold text-slate-900 font-serif my-2 select-none">数 学</div>
+                <div class="text-xl font-bold text-slate-900 font-serif my-2 select-none">物 理</div>
                 <div contenteditable="true"
                      oninput="updatePaperMeta('subtitle', this.innerText)"
                      onblur="saveMetaToStorage()"
@@ -2230,7 +2331,7 @@
 
             items.forEach((item, subIdx) => {
                 const q = window.PaperStore.questionsMap[item.id];
-                let rawContent = q ? q.content : '';
+                let rawContent = q ? normalizePaperImageChoices(q.content, qType) : '';
                 const figAlign = getQuestionFigAlign(q);
                 const figSize = getQuestionFigSize(q);
                 const figureMetrics = getDetachedFigureMetrics(rawContent, figAlign, figSize);
@@ -2254,7 +2355,11 @@
                 const choiceContentParts = isChoiceQuestion
                     ? splitChoiceContentForPaperPreview(rawContent)
                     : { stemRaw: rawContent, choicesRaw: '' };
-                let contentRes = q ? formatQuestionContentHtml(choiceContentParts.stemRaw, q.id, figAlign, isSolSpaceEmbedded, true, figSize, q.image_layouts || {}) : '';
+                const keepChoiceStemAnchors = choiceContentParts.choicesRaw && window.ImageLayoutTools
+                    && !window.ImageLayoutTools.split(rawContent).tail;
+                let contentRes = q ? (keepChoiceStemAnchors
+                    ? window.parseMarkdownWithMath(choiceContentParts.stemRaw, q.image_layouts || {})
+                    : formatQuestionContentHtml(choiceContentParts.stemRaw, q.id, figAlign, isSolSpaceEmbedded, true, figSize, q.image_layouts || {})) : '';
                 const separatedChoicesHtml = q && choiceContentParts.choicesRaw
                     ? formatQuestionContentHtml(choiceContentParts.choicesRaw, q.id, figAlign, false, false, figSize, q.image_layouts || {})
                     : '';
@@ -2307,7 +2412,7 @@
                             ? 'left-1/2 -translate-x-1/2'
                             : (renderedFigAlign === 'bottom_left' ? 'left-3' : 'right-3');
                         embeddedImgContainer = `
-                            <div class="absolute ${posClass} top-2 z-10">
+                            <div class="absolute ${posClass} top-2 z-10" data-paper-embedded-figure>
                                 ${embeddedImgHtml}
                             </div>
                         `;
@@ -2321,7 +2426,7 @@
                         : (isZero ? 'min-height: 20px;' : `height: ${spacePx}px;`);
 
                     solutionBlankHtml = `
-                        <div class="solution-space-zone group/blank relative mt-2 mb-1 ${isZero ? 'py-1 border-b border-dashed border-slate-200 hover:border-sky-300' : 'rounded-lg border border-dashed border-sky-300/80 bg-sky-50/20'} transition-all" data-solution-space-zone-qid="${q ? q.id : 0}" style="${minHeightStyle}">
+                        <div class="solution-space-zone group/blank relative mt-2 mb-1 ${isZero ? 'py-1 border-b border-dashed border-slate-200 hover:border-sky-300' : 'rounded-lg border border-dashed border-sky-300/80 bg-sky-50/20'} transition-all" data-solution-space-zone-qid="${q ? q.id : 0}" data-paper-space-px="${spacePx}" style="${minHeightStyle}">
                             ${embeddedImgContainer}
                             <!-- Anchor controls to the zone's top edge. They stay out
                                  of document flow, so preview pagination remains stable. -->
@@ -2354,6 +2459,7 @@
                     <div class="paper-q-item group relative text-[13px] leading-normal font-serif p-2 rounded-xl border border-transparent hover:border-brand-200 hover:bg-brand-50/30 transition-all duration-200 cursor-grab active:cursor-grabbing mb-2"
                         draggable="true"
                         data-qid="${q ? q.id : ''}"
+                        data-image-scale="${paperImageScale(item.image_scale)}"
                         data-qtype="${safeType}"
                         data-sub-index="${subIdx}"
                         ondragstart="onPaperCanvasDragStart(event, ${q ? q.id : 0}, ${subIdx}, this.dataset.qtype)"
@@ -2384,6 +2490,13 @@
                                 ${solutionBlankHtml}
                             </div>
                         </div>
+                        ${/!\[[^\]]*\]\([^)]+\)/.test(rawContent) ? `
+                        <label class="paper-image-scale-control print:hidden" title="仅影响当前试卷；图片保持比例，并受栏宽限制" onpointerdown="window.beginPaperImageScale(event)" ondragstart="event.preventDefault(); event.stopPropagation()" onclick="event.stopPropagation()">
+                            <span>图片大小</span>
+                            <input type="range" min="20" max="150" step="5" value="${paperImageScale(item.image_scale)}"
+                                aria-label="第 ${globalQIndex} 题图片大小" oninput="window.updatePaperImageScale(this)">
+                            <output class="paper-image-scale-value">${paperImageScale(item.image_scale)}%</output>
+                        </label>` : ''}
                     </div>
                 `;
 
@@ -2522,6 +2635,10 @@
     window.onPaperCanvasDragStart = function (e, qid, subIndex, qType) {
         const card = e.currentTarget.closest('.paper-q-item');
         if (!card) return;
+        if (paperImageScaleGesture || e.target.closest('input, label, button, select, textarea, a, [contenteditable="true"]')) {
+            e.preventDefault();
+            return;
+        }
 
         draggedItemData = { 
             qid: parseInt(qid, 10),
@@ -2752,6 +2869,7 @@
                 figure_align: getQuestionFigAlign(q),
                 figure_align_custom: Boolean(q.figure_align_custom || q.custom_figure_align),
                 figure_size: getQuestionFigSize(q),
+                image_scale: paperImageScale(item.image_scale),
                 solution_space: item.solution_space !== undefined ? item.solution_space.toString() : defaultSpace
             };
         });
@@ -2820,7 +2938,7 @@
                     if (errData.message) errLog = errData.message;
                 } catch (e) {}
                 if (tab && !tab.closed) {
-                    setPdfTabErrorState(tab, `${targetName} PDF 编译失败`, errData.diagnostic, errLog);
+                    setPdfTabErrorState(tab, `${targetName} PDF 编译失败`, errData.diagnostic, errLog, errData.tex_source);
                 }
                 if (window.showToast) window.showToast(errLog, 'error');
             }
@@ -2915,7 +3033,7 @@
         } catch(e) {}
     }
 
-    function setPdfTabErrorState(tab, title, diagnostic, fallbackMessage) {
+    function setPdfTabErrorState(tab, title, diagnostic, fallbackMessage, texSource = '') {
         if (!tab) return;
         const report = diagnostic || {};
         const fixes = Array.isArray(report.fixes) && report.fixes.length
@@ -2927,6 +3045,9 @@
             : '';
         const technicalHtml = report.technical_error
             ? `<details><summary>查看编译器技术信息</summary><pre>${escapeHtml(report.technical_error)}</pre></details>`
+            : '';
+        const originalHtml = report.original_excerpt
+            ? `<details><summary>对照题库原文（未改写${report.original_excerpt_truncated ? '，仅显示前 1600 字' : ''}）</summary><pre>${escapeHtml(report.original_excerpt)}</pre></details>`
             : '';
         try {
             tab.document.open();
@@ -2953,7 +3074,8 @@
                         details { margin-top: 14px; border: 1px solid #e2e8f0; border-radius: 10px; padding: 10px 12px; }
                         summary { cursor: pointer; color: #475569; font-size: 13px; font-weight: 600; }
                         pre { margin: 10px 0 0; padding: 12px; border-radius: 8px; overflow: auto; background: #0f172a; color: #e2e8f0; font-size: 12px; line-height: 1.55; white-space: pre-wrap; }
-                        button { margin-top: 22px; border: 0; border-radius: 9px; padding: 10px 16px; background: #334155; color: white; cursor: pointer; }
+                        button { margin: 16px 8px 0 0; min-height: 44px; border: 0; border-radius: 9px; padding: 10px 16px; background: #334155; color: white; cursor: pointer; }
+                        textarea { width: 100%; min-height: 170px; margin-top: 12px; }
                     </style>
                 </head>
                 <body>
@@ -2969,14 +3091,59 @@
                         <section class="section"><h2>为什么会这样</h2><p>${escapeHtml(report.cause || fallbackMessage || 'LaTeX 编译没有完成。')}</p></section>
                         <section class="section"><h2>建议如何修复</h2><ol>${fixesHtml}</ol></section>
                         ${sourceHtml}
+                        ${originalHtml}
                         ${technicalHtml}
+                        <div><button id="copyPdfDiagnostic" type="button">复制诊断</button>${texSource ? '<button id="downloadFailedTex" type="button">下载本次源码 (.tex)</button>' : ''}</div>
+                        <p id="pdfDiagnosticStatus" role="status" aria-live="polite"></p>
+                        <textarea id="pdfDiagnosticCopyFallback" aria-label="诊断文本，可手动复制" readonly hidden></textarea>
+                        <p>分享前请检查诊断中的题目内容与私人信息。含配图的完整工程仍可从组卷页「LaTeX 打包」导出。</p>
                         <button onclick="window.close()">关闭此页并返回修改</button>
                     </main>
                 </body>
                 </html>
             `);
             tab.document.close();
+            bindPdfDiagnosticActions(tab, report, fallbackMessage || title, texSource);
         } catch (e) {}
+    }
+
+    function bindPdfDiagnosticActions(tab, report, fallbackMessage, texSource) {
+        const diagnosticText = [
+            report.summary || fallbackMessage, report.location, report.cause,
+            ...(Array.isArray(report.fixes) ? report.fixes : []),
+            report.original_excerpt ? '题库原文：\n' + report.original_excerpt : '',
+            report.source_context ? '生成源码：\n' + report.source_context : '',
+            report.technical_error
+        ].filter(Boolean).join('\n\n');
+        const status = tab.document.getElementById('pdfDiagnosticStatus');
+        const copy = tab.document.getElementById('copyPdfDiagnostic');
+        if (copy) copy.onclick = async () => {
+            try {
+                await tab.navigator.clipboard.writeText(diagnosticText);
+                if (status) status.textContent = '诊断已复制，分享前请检查私人信息。';
+            } catch (_) {
+                const fallback = tab.document.getElementById('pdfDiagnosticCopyFallback');
+                if (fallback) {
+                    fallback.value = diagnosticText;
+                    fallback.hidden = false;
+                    fallback.focus();
+                    fallback.select();
+                }
+                if (status) status.textContent = '浏览器未允许自动复制，请复制下方已选中的诊断文本。';
+            }
+        };
+        const download = tab.document.getElementById('downloadFailedTex');
+        if (download && typeof texSource === 'string' && texSource) download.onclick = () => {
+            const url = tab.URL.createObjectURL(new Blob([texSource], { type: 'text/plain;charset=utf-8' }));
+            const link = tab.document.createElement('a');
+            link.href = url;
+            link.download = 'physicsbank-failed-paper.tex';
+            tab.document.body.appendChild(link);
+            link.click();
+            link.remove();
+            tab.setTimeout(() => tab.URL.revokeObjectURL(url), 1000);
+            if (status) status.textContent = '已下载本次编译的原始源码，不会改写题库内容。';
+        };
     }
 
     function setPandocModalVisible(visible) {
@@ -3667,7 +3834,8 @@
                         window.PaperStore.questionsMap[qObj.id] = qObj;
                         window.PaperStore.cart.push({
                             id: qObj.id,
-                            score: item.score || 5
+                            score: item.score || 5,
+                            image_scale: paperImageScale(item.image_scale)
                         });
                     });
                 }
@@ -3730,7 +3898,8 @@
                     score: item.score,
                     figure_align: getQuestionFigAlign(item.question),
                     figure_align_custom: Boolean(item.question.figure_align_custom || item.question.custom_figure_align),
-                    figure_size: getQuestionFigSize(item.question)
+                    figure_size: getQuestionFigSize(item.question),
+                    image_scale: paperImageScale(item.image_scale)
                 }));
 
                 const tab = window.open('', '_blank');
@@ -3759,7 +3928,7 @@
                     let errorData = {};
                     try { errorData = await pdfRes.json(); } catch (e) {}
                     if (tab && !tab.closed) {
-                        setPdfTabErrorState(tab, '试卷 PDF 编译失败', errorData.diagnostic, errorData.message || '编译 PDF 失败');
+                        setPdfTabErrorState(tab, '试卷 PDF 编译失败', errorData.diagnostic, errorData.message || '编译 PDF 失败', errorData.tex_source);
                     }
                     if (window.showToast) window.showToast(errorData.message || '编译 PDF 失败', 'error');
                 }
@@ -4254,8 +4423,13 @@
         }
 
         const choicesEnd = endIndex + endMarker.length;
+        let stemRaw = `${source.slice(0, beginIndex)}\n${source.slice(choicesEnd)}`.trim();
+        if (window.ImageLayoutTools && window.cleanChoiceStemParentheses) {
+            const parts = window.ImageLayoutTools.split(stemRaw);
+            if (parts.tail) stemRaw = window.cleanChoiceStemParentheses(parts.body) + '\n\n' + parts.tail;
+        }
         return {
-            stemRaw: `${source.slice(0, beginIndex)}\n${source.slice(choicesEnd)}`.trim(),
+            stemRaw,
             choicesRaw: source.slice(beginIndex, choicesEnd).trim()
         };
     }

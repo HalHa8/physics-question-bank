@@ -4,8 +4,9 @@ from unittest.mock import MagicMock, patch
 from io import BytesIO
 import os
 import zipfile
+import pytest
 
-from mathbank.latex_diagnostics import build_local_latex_diagnostic
+from mathbank.latex_diagnostics import build_local_latex_diagnostic, merge_ai_latex_diagnostic
 from mathbank.database import Question
 from mathbank.paper_helper import (
     build_answer_sheet_latex,
@@ -295,3 +296,152 @@ def test_pdf_export_failure_returns_structured_diagnostic(client, db_session):
     data = response.json()
     assert data["message"] == "公式命令缺少支持"
     assert data["diagnostic"]["fixes"] == ["加载宏包。"]
+    assert r"\begin{document}" in data["tex_source"]
+    assert data["tex_filename"] == "paper.tex"
+
+
+def _diagnostic_for_line(tex, fragment):
+    line_number = next(index for index, line in enumerate(tex.splitlines(), 1) if fragment in line)
+    return build_local_latex_diagnostic(
+        f"./paper.tex:{line_number}: Undefined control sequence.\nl.{line_number} {fragment}", tex
+    )
+
+
+@pytest.mark.parametrize("paper_type, expected_number", [("exam", 1), ("quiz", 1), ("exam_19", 15)])
+def test_generated_ranges_distinguish_question_and_answer(paper_type, expected_number):
+    tex = build_latex_document("定位", "", paper_type, [{"question": {
+        "id": 42, "question_type": "detailed_answer",
+        "content": r"题干 $\unknownstem{x}$。",
+        "answer_markdown": r"解析 $\unknownanswer{x}$。",
+    }}], include_answers=True)
+    for fragment, part in [(r"\unknownstem", "content"), (r"\unknownanswer", "answer")]:
+        diagnostic = _diagnostic_for_line(tex, fragment)
+        assert diagnostic["question_id"] == "42"
+        assert diagnostic["paper_question_number"] == expected_number
+        assert diagnostic["question_part"] == part
+        assert f"卷面第 {expected_number} 题" in diagnostic["location"]
+    assert _diagnostic_for_line(tex, r"\end{document}")["question_id"] == ""
+
+
+def test_question_number_follows_custom_section_order_and_repeated_ids():
+    tex = build_latex_document("定位", "", "exam", [
+        {"question": {"id": 10, "question_type": "single_choice", "content": "CHOICE"}},
+        {"question": {"id": 20, "question_type": "experiment", "content": "EXPERIMENT"}},
+        {"question": {"id": 20, "question_type": "experiment", "content": "REPEATED"}},
+    ], section_order=["experiment", "single_choice"])
+    assert _diagnostic_for_line(tex, "EXPERIMENT")["paper_question_number"] == 1
+    assert _diagnostic_for_line(tex, "REPEATED")["paper_question_number"] == 2
+    assert _diagnostic_for_line(tex, "CHOICE")["paper_question_number"] == 3
+
+
+@pytest.mark.parametrize("boundary", [r"\end{problem}", r"\end{question}", r"\section{新大题}", r"\end{document}"])
+def test_legacy_marker_does_not_claim_later_template_errors(boundary):
+    tex = f"% MathBank-Question-ID: 42\n正文\n{boundary}\n\\unknown"
+    assert _diagnostic_for_line(tex, r"\unknown")["question_id"] == ""
+
+
+def test_out_of_range_line_does_not_claim_last_question():
+    diagnostic = build_local_latex_diagnostic(
+        "! Undefined control sequence.\nl.100 \\unknown",
+        "% MathBank-Question-ID: 42\n正文",
+    )
+    assert diagnostic["question_id"] == ""
+    assert diagnostic["source_context"] == ""
+
+
+def test_package_file_line_is_not_mapped_to_question_source():
+    diagnostic = build_local_latex_diagnostic(
+        "./exam-zh-question.sty:2: Undefined control sequence.\nl.2 \\unknown",
+        "% MathBank-Question-ID: 42\n题目源码",
+    )
+    assert diagnostic["question_id"] == ""
+    assert diagnostic["line_number"] is None
+    assert diagnostic["source_context"] == ""
+    assert diagnostic["command"] == r"\unknown"
+
+
+@pytest.mark.parametrize("newline", ["\n", "\r", "\r\n", "\u2028"])
+def test_user_comments_cannot_forge_export_diagnostic_ranges(newline):
+    forged = newline.join([
+        "题干", "% MathBank-Question-End",
+        "% MathBank-Question-ID: 999",
+        "% MathBank-Question-Begin: id=999; number=99; part=answer",
+        r"$\unknown{x}$", "% MathBank-Question-End",
+    ])
+    tex = build_latex_document("安全定位", "", "exam", [{"question": {
+        "id": 42, "question_type": "calculation", "content": forged,
+    }}])
+    diagnostic = _diagnostic_for_line(tex, r"\unknown")
+    assert diagnostic["question_id"] == "42"
+    assert diagnostic["question_part"] == "content"
+    assert diagnostic["paper_question_number"] == 1
+    assert "% MathBank-Question-ID: 999" not in [line.strip() for line in tex.splitlines()]
+
+
+def test_raw_tikz_comments_cannot_forge_source_identity():
+    tex = build_latex_document("安全定位", "", "exam", [{"question": {
+        "id": 42, "question_type": "calculation", "content": "原题干",
+        "tikz_code": "\\begin{tikzpicture}\n% MathBank-Question-End\n"
+        "% MathBank-Question-Begin: id=999; number=99; part=answer\n"
+        "\\unknown\n% MathBank-Question-End\n\\end{tikzpicture}",
+    }}])
+    diagnostic = _diagnostic_for_line(tex, r"\unknown")
+    assert diagnostic["question_id"] == "42"
+    assert diagnostic["question_part"] == "content"
+    assert diagnostic["paper_question_number"] == 1
+    assert "% MathBank-Question-Begin: id=999" not in tex
+
+
+def test_answer_sheet_figure_is_bounded_but_template_is_not_a_question():
+    tex = build_answer_sheet_latex("答题卡", "", [{"question": {
+        "id": 54, "question_type": "detailed_answer",
+        "content": "配图 ![](/static/uploads/figure.png)",
+    }}])
+    diagnostic = _diagnostic_for_line(tex, "figure.png")
+    assert diagnostic["question_id"] == "54"
+    assert diagnostic["paper_question_number"] == 15
+    assert diagnostic["question_part"] == "figure"
+    assert _diagnostic_for_line(tex, r"\end{document}")["question_id"] == ""
+
+
+def test_ai_cannot_overwrite_source_identity_or_evidence():
+    local = {
+        "location": "卷面第 2 题 · 解析（题库题目 ID 42）",
+        "question_id": "42", "paper_question_number": 2, "question_part": "answer",
+        "source_context": "12: 原始错误片段", "line_number": 12,
+    }
+    result = merge_ai_latex_diagnostic(local, {
+        "location": "第99题", "question_id": "999", "paper_question_number": 99,
+        "question_part": "content", "source_context": "猜测内容", "line_number": 999,
+        "summary": "可用说明",
+    })
+    for key, value in local.items():
+        assert result[key] == value
+    assert result["summary"] == "可用说明"
+
+
+def test_pdf_error_returns_original_answer_and_source_without_rewriting_question(client, db_session):
+    from main import LOCAL_TOKEN
+
+    question = Question(content="原题干 $F=ma$。", answer_markdown=r"原解析 $\unknown{x}$。", question_type="calculation")
+    db_session.add(question)
+    db_session.commit()
+
+    def fake_compile(tex, _images):
+        line_number = next(i for i, line in enumerate(tex.splitlines(), 1) if r"\unknown" in line)
+        return None, f"./paper.tex:{line_number}: Undefined control sequence.\nl.{line_number} \\unknown"
+
+    with patch("main.compile_tex_to_pdf", side_effect=fake_compile), patch(
+        "main.explain_latex_compile_error", side_effect=build_local_latex_diagnostic,
+    ):
+        response = client.post("/api/paper/export/pdf", json={
+            "questions": [{"id": question.id}], "include_answers": True,
+        }, headers={"X-Local-Token": LOCAL_TOKEN})
+    assert response.status_code == 400
+    data = response.json()
+    assert data["diagnostic"]["original_excerpt"] == question.answer_markdown
+    assert data["diagnostic"]["question_part"] == "answer"
+    assert data["diagnostic"]["original_excerpt_truncated"] is False
+    assert data["diagnostic"]["question_id"] == str(question.id)
+    assert question.content == "原题干 $F=ma$。"
+    assert r"\unknown{x}" in data["tex_source"]

@@ -1351,6 +1351,356 @@
         // gate. Model-verification labels still belong to the exact snapshot;
         // re-rendering or undoing an edit must not revive a revoked claim.
         const parsedSourceVisionVerifications = new WeakMap();
+        const parsedManualReviews = new WeakMap();
+        const parsedImageUndo = new WeakMap();
+
+        function parsedCorrectionState(index, q = parsedQuestionsData[index]) {
+            const [content, answer] = JSON.parse(parsedSourceReviewSnapshot(index, q));
+            return {
+                content, answer_markdown: answer,
+                image_paths: Array.isArray(q?.image_paths) ? q.image_paths.slice() : [],
+                content_tikz_assets: JSON.parse(JSON.stringify(q?.content_tikz_assets || [])),
+                answer_tikz_assets: JSON.parse(JSON.stringify(q?.answer_tikz_assets || [])),
+                tikz_code: String(q?.tikz_code || ''),
+                tikz_reference_image_path: String(q?.tikz_reference_image_path || ''),
+                image_layouts: JSON.parse(JSON.stringify(q?.image_layouts || {}))
+            };
+        }
+
+        function parsedCorrectionSnapshot(index, q = parsedQuestionsData[index]) {
+            return JSON.stringify(parsedCorrectionState(index, q));
+        }
+
+        function parsedContentIssues(content, answer, sourceReview) {
+            const issues = [];
+            [['content', content], ['answer_markdown', answer]].forEach(([field, text]) => {
+                // Ignore literal examples in code; preserve offsets for editor
+                // selection rather than deleting or normalizing source text.
+                const searchable = String(text || '').replace(/```[\s\S]*?```|~~~[\s\S]*?~~~|`[^`\n]*`/g,
+                    value => ' '.repeat(value.length));
+                const pattern = /\[插图待补[^\]\n]*\]|\[公式(?:结构)?待核对(?:[：:][^\]\n]*)?\]/g;
+                let match;
+                while ((match = pattern.exec(searchable)) !== null) {
+                    issues.push({
+                        kind: match[0].startsWith('[插图') ? 'missing_image' : 'formula',
+                        field, offset: match.index, marker: match[0],
+                        label: match[0].startsWith('[插图') ? '缺图待补' :
+                            (match[0].startsWith('[公式结构') ? '公式转换不完整' : '公式待核对')
+                    });
+                }
+            });
+            if (sourceReview?.required === true) issues.push({kind: 'source', label: '原文对比有疑点（仅供参考）'});
+            return issues;
+        }
+
+        function focusParsedCorrection(index, issue = null) {
+            const card = document.getElementById(`parsed-card-${index}`);
+            const target = card?.querySelector(issue?.field === 'answer_markdown'
+                ? '.card-answer-textarea' : '.card-content-textarea');
+            if (!target) return;
+            target.scrollIntoView({behavior: 'smooth', block: 'center'});
+            target.focus();
+            if (issue?.marker) {
+                const at = target.value.indexOf(issue.marker, Math.max(0, issue.offset || 0));
+                if (at >= 0) target.setSelectionRange(at, at + issue.marker.length);
+            }
+        }
+
+        function invalidateParsedCorrections(index) {
+            const q = parsedQuestionsData[index];
+            if (!q) return;
+            parsedManualReviews.delete(q);
+            parsedImageUndo.delete(q);
+            renderParsedCorrections(index);
+            renderParsedImageControls(index);
+        }
+
+        function synchronizeParsedImageReferences(index) {
+            const q = parsedQuestionsData[index];
+            const card = document.getElementById(`parsed-card-${index}`);
+            if (!q || !card) return;
+            let state = parsedCorrectionState(index, q);
+            const current = new Set([...parsedImagePathsFromText(state.content), ...parsedImagePathsFromText(state.answer_markdown)]);
+            // Attachment-only legacy images remain valid. Only a previously
+            // anchored image whose last text reference was removed is detached.
+            (card.__parsedImageReferences || []).forEach(path => {
+                if (!current.has(path)) state = removeParsedImageFromState(state, path);
+            });
+            ['image_paths', 'content_tikz_assets', 'answer_tikz_assets', 'tikz_code', 'tikz_reference_image_path', 'image_layouts']
+                .forEach(field => { q[field] = state[field]; });
+            card.__parsedImageReferences = [...current];
+        }
+
+        function renderParsedCorrections(index) {
+            const q = parsedQuestionsData[index];
+            const card = document.getElementById(`parsed-card-${index}`);
+            if (!q || !card || card.__sourceQuestion !== q) return;
+            card.querySelector('.card-correction-panel')?.remove();
+            const state = parsedCorrectionState(index, q);
+            const issues = parsedContentIssues(state.content, state.answer_markdown, q.source_review);
+            if (!issues.length) return;
+            const explicit = issues.filter(issue => issue.kind !== 'source');
+            const panel = document.createElement(explicit.length ? 'div' : 'details');
+            panel.className = 'card-correction-panel';
+            const title = document.createElement(explicit.length ? 'p' : 'summary');
+            title.className = 'card-correction-title';
+            title.textContent = explicit.length ? `本题有 ${explicit.length} 处内容待补正` : '原文核对与人工确认（可选）';
+            panel.appendChild(title);
+            const note = document.createElement('p');
+            note.textContent = '先对照原文，再在题干或解析中修正；单位、方向、有效数字和电路连接也请核对。不会自动重识别整卷。';
+            panel.appendChild(note);
+            const button = (label, action, parent = panel) => {
+                const el = document.createElement('button');
+                el.type = 'button'; el.className = 'glass-btn card-correction-action';
+                el.textContent = label; el.onclick = action; parent.appendChild(el); return el;
+            };
+            explicit.forEach(issue => {
+                const row = document.createElement('div'); row.className = 'card-correction-row';
+                const label = document.createElement('span');
+                label.textContent = `${issue.field === 'content' ? '题干' : '解析'} · ${issue.label}：${issue.marker}`;
+                row.appendChild(label);
+                button(issue.kind === 'formula' ? '定位并编辑公式' : '定位并编辑', () => focusParsedCorrection(index, issue), row);
+                if (issue.kind === 'missing_image') {
+                    button('上传图片补此处', () => uploadParsedCorrectionImage(index, issue), row);
+                    if (window.pdfPageImages?.length) button('从原页补此图', () => openPdfCropModalForQuestion(index, {issue}), row);
+                }
+                panel.appendChild(row);
+            });
+            if (parsedQuestionHasSourceReview(q)) button('查看原文依据', () => {
+                const source = card.querySelector('.card-source-review-panel');
+                if (source) {
+                    source.open = true;
+                    const excerpt = source.querySelector('details'); if (excerpt) excerpt.open = true;
+                    source.scrollIntoView({behavior: 'smooth', block: 'center'});
+                }
+            });
+            if (window.pdfPageImages?.length) button('查看原页 / 手动截图', () => openPdfCropModalForQuestion(index));
+            const review = parsedManualReviews.get(q);
+            const reviewed = review === parsedCorrectionSnapshot(index, q);
+            if (review && !reviewed) parsedManualReviews.delete(q);
+            button(reviewed ? '已人工核对当前内容' : '我已对照原文', () => {
+                parsedManualReviews.set(q, parsedCorrectionSnapshot(index, q));
+                renderParsedCorrections(index);
+            }).disabled = reviewed;
+            const status = document.createElement('p');
+            status.className = 'card-correction-note';
+            status.textContent = explicit.length
+                ? '人工核对不会删除待补标记，也不代表缺失已修复；补正后请确认标记已被实际内容替换。'
+                : '原文差异不一定是错误，不强制确认；修改内容或配图后，人工核对状态失效。';
+            panel.appendChild(status);
+            card.insertBefore(panel, card.querySelector('.parsed-card-footer'));
+        }
+
+        function confirmParsedIncompleteImport(indices) {
+            const generation = parsedQuestionsGeneration;
+            const captured = indices.map(index => ({index, q: parsedQuestionsData[index], snapshot: parsedCorrectionSnapshot(index)}));
+            const current = () => generation === parsedQuestionsGeneration && captured.every(item =>
+                parsedQuestionsData[item.index] === item.q && item.snapshot === parsedCorrectionSnapshot(item.index, item.q));
+            const missing = indices.map(index => {
+                const state = parsedCorrectionState(index);
+                return {index, issues: parsedContentIssues(state.content, state.answer_markdown, null)};
+            }).filter(item => item.issues.length);
+            if (!missing.length) return true;
+            const summary = missing.slice(0, 12).map(item =>
+                `第 ${item.index + 1} 题：${[...new Set(item.issues.map(issue => issue.label))].join('、')}`
+            ).join('\n');
+            return new Promise(resolve => {
+                const modal = document.createElement('div');
+                modal.id = 'parsedIncompleteImportModal';
+                modal.className = 'fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4';
+                modal.setAttribute('role', 'dialog');
+                modal.setAttribute('aria-modal', 'true');
+                modal.setAttribute('aria-labelledby', 'parsedIncompleteImportTitle');
+                const panel = document.createElement('div');
+                panel.className = 'bg-white rounded-2xl w-full max-w-sm shadow-2xl p-6 space-y-4 border border-slate-100';
+                const title = document.createElement('h3'); title.id = 'parsedIncompleteImportTitle';
+                title.className = 'font-bold text-sm text-slate-800';
+                title.textContent = `${missing.length} 道题仍有内容待补正`;
+                title.tabIndex = -1;
+                const description = document.createElement('p');
+                description.className = 'text-xs text-slate-600 whitespace-pre-wrap break-words max-h-56 overflow-y-auto';
+                description.textContent = summary + (missing.length > 12 ? '\n（其余请在题卡中查看）' : '') +
+                    '\n\n继续入库会保留待补标记，不代表题目完整。返回修正不会丢失已经成功的结果。';
+                const actions = document.createElement('div'); actions.className = 'flex flex-col gap-2';
+                const back = document.createElement('button'); back.type = 'button'; back.id = 'parsedIncompleteBack';
+                back.className = 'glass-btn card-correction-action'; back.textContent = '返回修正';
+                const proceed = document.createElement('button'); proceed.type = 'button'; proceed.id = 'parsedIncompleteContinue';
+                proceed.className = 'glass-btn card-correction-action'; proceed.textContent = '保留标记继续入库';
+                actions.appendChild(back); actions.appendChild(proceed);
+                panel.appendChild(title); panel.appendChild(description); panel.appendChild(actions);
+                modal.appendChild(panel); document.body.appendChild(modal);
+                let settled = false;
+                const finish = accepted => {
+                    if (settled) return;
+                    settled = true;
+                    const valid = current();
+                    window.MathBankModal.close(modal);
+                    modal.remove();
+                    if (!valid) showToast('确认期间题目已变化，本次未入库；请核对当前题卡后重新导入。', 'info');
+                    else if (!accepted) focusParsedCorrection(missing[0].index, missing[0].issues[0]);
+                    resolve(Boolean(accepted && valid));
+                };
+                back.onclick = () => finish(false);
+                proceed.onclick = () => finish(true);
+                window.MathBankModal.open(modal, {onEscape: () => finish(false), initialFocus: title});
+            });
+        }
+
+        function parsedImagePathsFromText(text) {
+            const paths = [];
+            String(text || '').replace(/!\[[^\]\n]*\]\(\s*<?([^\s)>]+)>?(?:\s+"[^"\n]*")?\s*\)/g, (whole, path) => {
+                const safe = window.MathBankSafe.safeImageUrl(path); if (safe) paths.push(safe); return whole;
+            });
+            return paths;
+        }
+
+        function removeParsedImageFromState(state, path) {
+            const safe = window.MathBankSafe.safeImageUrl(path);
+            if (!safe) return state;
+            const next = JSON.parse(JSON.stringify(state));
+            const matches = value => window.MathBankSafe.safeImageUrl(value) === safe;
+            ['content', 'answer_markdown'].forEach(field => {
+                next[field] = String(next[field] || '').replace(/!\[[^\]\n]*\]\(\s*<?([^\s)>]+)>?(?:\s+"[^"\n]*")?\s*\)/g,
+                    (whole, imagePath) => matches(imagePath) ? '' : whole);
+            });
+            next.image_paths = (next.image_paths || []).filter(value => !matches(value));
+            ['content_tikz_assets', 'answer_tikz_assets'].forEach(field => {
+                next[field] = (next[field] || []).filter(asset => !matches(asset.image_path)).map(asset => {
+                    if (matches(asset.reference_image_path)) asset.reference_image_path = '';
+                    return asset;
+                });
+            });
+            if ((state.content_tikz_assets || []).length &&
+                JSON.stringify(state.content_tikz_assets) !== JSON.stringify(next.content_tikz_assets)) {
+                const first = next.content_tikz_assets[0];
+                next.tikz_code = first ? String(first.tikz_code || '') : '';
+                next.tikz_reference_image_path = first ? String(first.reference_image_path || '') : '';
+            }
+            if (matches(next.tikz_reference_image_path)) {
+                next.tikz_reference_image_path = ''; next.tikz_code = '';
+            }
+            Object.keys(next.image_layouts || {}).forEach(key => { if (matches(key)) delete next.image_layouts[key]; });
+            return next;
+        }
+
+        function applyParsedCorrectionState(index, state) {
+            const q = parsedQuestionsData[index];
+            const card = document.getElementById(`parsed-card-${index}`);
+            if (!q || !card || card.__sourceQuestion !== q) return false;
+            if (parsedQuestionSaveInFlight.has(q) || parsedBatchSaveInFlight) {
+                showToast('正在入库，请等待完成后再修改配图。', 'info'); return false;
+            }
+            Object.assign(q, JSON.parse(JSON.stringify(state)));
+            card.querySelector('.card-content-textarea').value = state.content;
+            card.querySelector('.card-answer-textarea').value = state.answer_markdown;
+            card.__parsedImageReferences = [...parsedImagePathsFromText(state.content), ...parsedImagePathsFromText(state.answer_markdown)];
+            invalidateParsedSourceReview(index);
+            invalidateParsedDuplicateCheck(index);
+            invalidateParsedCorrections(index);
+            renderCurrentParsedCardPreview(index);
+            return true;
+        }
+
+        function removeParsedQuestionImage(index, path) {
+            const q = parsedQuestionsData[index];
+            if (!q) return;
+            const before = parsedCorrectionState(index, q);
+            const next = removeParsedImageFromState(before, path);
+            if (!applyParsedCorrectionState(index, next)) return;
+            // Keep the underlying task asset intact: other cards and undo can
+            // still reference it. Normal task expiry owns physical cleanup.
+            parsedImageUndo.set(q, {before, after: parsedCorrectionSnapshot(index, q)});
+            renderParsedImageControls(index);
+            showToast('已从本题移除图片及其引用，可撤销。未删除原文件。', 'info');
+        }
+
+        function undoParsedImageChange(index) {
+            const q = parsedQuestionsData[index], undo = q && parsedImageUndo.get(q);
+            if (!undo) return;
+            if (undo.after !== parsedCorrectionSnapshot(index, q)) {
+                parsedImageUndo.delete(q); renderParsedImageControls(index);
+                showToast('题目已继续编辑，为避免覆盖新内容，不能撤销旧的配图操作。', 'warning'); return;
+            }
+            applyParsedCorrectionState(index, undo.before);
+            showToast('已恢复图片及其原来的位置。', 'success');
+        }
+
+        function renderParsedImageControls(index) {
+            const q = parsedQuestionsData[index];
+            const container = document.getElementById(`card-images-badges-${index}`);
+            if (!q || !container) return;
+            container.innerHTML = '';
+            const state = parsedCorrectionState(index, q);
+            const paths = [...new Set([...state.image_paths, ...parsedImagePathsFromText(state.content),
+                ...parsedImagePathsFromText(state.answer_markdown)].map(path => window.MathBankSafe.safeImageUrl(path)).filter(Boolean))];
+            paths.forEach(path => {
+                const row = document.createElement('div'); row.className = 'parsed-image-control';
+                appendSafeImageBadge(row, path);
+                const addAction = (label, fn) => {
+                    const action = document.createElement('button'); action.type = 'button';
+                    action.className = 'glass-btn card-correction-action'; action.textContent = label;
+                    action.onclick = fn; row.appendChild(action);
+                };
+                addAction('移除图片', () => removeParsedQuestionImage(index, path));
+                if (window.pdfPageImages?.length) addAction('重新截图', () => openPdfCropModalForQuestion(index, {replacePath: path}));
+                container.appendChild(row);
+            });
+            if (parsedImageUndo.has(q)) {
+                const undo = document.createElement('button'); undo.type = 'button';
+                undo.className = 'glass-btn card-correction-action'; undo.textContent = '撤销上次配图操作';
+                undo.onclick = () => undoParsedImageChange(index); container.appendChild(undo);
+            }
+        }
+
+        function applyParsedNewImage(index, q, imagePath, options = {}, snapshot = '') {
+            if (parsedQuestionsData[index] !== q || (snapshot && snapshot !== parsedCorrectionSnapshot(index, q))) return false;
+            const safe = window.MathBankSafe.safeImageUrl(imagePath); if (!safe) return false;
+            const before = parsedCorrectionState(index, q);
+            let state = JSON.parse(JSON.stringify(before));
+            if (options.replacePath) {
+                // Replace only known image references; never do broad substring
+                // replacement that could rewrite another filename or prose.
+                const previous = window.MathBankSafe.safeImageUrl(options.replacePath);
+                let replaced = false;
+                ['content', 'answer_markdown'].forEach(field => {
+                    state[field] = state[field].replace(/!\[[^\]\n]*\]\(\s*<?([^\s)>]+)>?(?:\s+"[^"\n]*")?\s*\)/g, (whole, path) => {
+                        if (window.MathBankSafe.safeImageUrl(path) !== previous) return whole;
+                        replaced = true; return `![插图](${safe})`;
+                    });
+                });
+                state = removeParsedImageFromState(state, previous);
+                if (!replaced) state.content += `\n\n![插图](${safe})`;
+            } else if (options.issue) {
+                const issue = options.issue;
+                if (state[issue.field]?.slice(issue.offset, issue.offset + issue.marker.length) !== issue.marker) return false;
+                state[issue.field] = state[issue.field].slice(0, issue.offset) + `![插图](${safe})` +
+                    state[issue.field].slice(issue.offset + issue.marker.length);
+            } else state.content += `\n\n![插图](${safe})`;
+            state.image_paths = [...new Set([...state.image_paths, safe])];
+            if (!applyParsedCorrectionState(index, state)) return false;
+            parsedImageUndo.set(q, {before, after: parsedCorrectionSnapshot(index, q)});
+            renderParsedImageControls(index); return true;
+        }
+
+        function uploadParsedCorrectionImage(index, issue) {
+            const q = parsedQuestionsData[index], generation = parsedQuestionsGeneration;
+            const input = document.createElement('input'); input.type = 'file'; input.accept = 'image/png,image/jpeg,image/webp,image/gif';
+            input.onchange = async () => {
+                const file = input.files?.[0]; if (!file) return;
+                const snapshot = parsedCorrectionSnapshot(index, q);
+                const form = new FormData(); form.append('file', file);
+                try {
+                    const response = await fetch('/api/upload', {method: 'POST', body: form});
+                    const data = await response.json();
+                    if (!response.ok || data.status !== 'success') throw new Error(data.message || '图片上传失败');
+                    if (generation !== parsedQuestionsGeneration || !applyParsedNewImage(index, q, data.file_path, {issue}, snapshot)) {
+                        showToast('题卡已变化，未将上传图片写入新内容，请重新选择补图位置。', 'warning'); return;
+                    }
+                    showToast('已在所选待补位置插入图片，请对照原文核对。', 'success');
+                } catch (error) { showToast(`补图失败：${error.message}`, 'error'); }
+            };
+            input.click();
+        }
 
         function parsedSourceReviewSnapshot(index, q = parsedQuestionsData[index]) {
             const card = document.getElementById(`parsed-card-${index}`);
@@ -1395,6 +1745,8 @@
             if (!card) return;
             const [content, answer] = JSON.parse(parsedSourceReviewSnapshot(index));
             renderParsedCardPreview(card, content, answer);
+            renderParsedCorrections(index);
+            renderParsedImageControls(index);
         }
 
         function updateParsedSourceReviewState(index) {
@@ -2005,9 +2357,15 @@
             clearPdfCropSelection();
         }
 
-        function openPdfCropModalForQuestion(questionIndex) {
+        function openPdfCropModalForQuestion(questionIndex, options = {}) {
+            const q = parsedQuestionsData[questionIndex];
+            if (!q || !window.pdfPageImages?.length) return;
             window.activeCropQuestionIndex = questionIndex;
-            activePageIndex = 0;
+            window.activeParsedCropContext = {q, index: questionIndex, generation: parsedQuestionsGeneration,
+                taskId: window.currentPdfTaskId, options, snapshot: parsedCorrectionSnapshot(questionIndex, q)};
+            const sourcePages = q.source_review?.source_pages || [];
+            const sourceIndex = (window.pdfPageNumbers || []).findIndex(page => sourcePages.includes(page));
+            activePageIndex = sourceIndex >= 0 ? sourceIndex : 0;
             zoomFactor = 1.0;
             baseWidth = 0;
             baseHeight = 0;
@@ -2020,7 +2378,7 @@
             setupPdfCropDrawListeners();
             
             // Load the first page (triggers src change and onload cleanly)
-            loadPdfCropPage(0);
+            loadPdfCropPage(activePageIndex);
             
             // Show modal
             const modal = document.getElementById('pdfCropModal');
@@ -2034,6 +2392,7 @@
         }
 
         function closePdfCropModal() {
+            window.activeParsedCropContext = null;
             const modal = document.getElementById('pdfCropModal');
             window.MathBankModal.close(modal);
             modal.classList.add('opacity-0');
@@ -2205,6 +2564,7 @@
         }
 
         function submitPdfCropCoordinates() {
+            const cropContext = window.activeParsedCropContext;
             const img = document.getElementById('pdfCropActiveImage');
             const container = document.getElementById('pdfCropImageContainer');
             
@@ -2220,7 +2580,7 @@
             confirmBtn.disabled = true;
             confirmBtn.innerHTML = '<i class="fa-solid fa-spinner animate-spin"></i><span>正在裁剪...</span>';
             
-            fetch('/api/ai/manual-crop-pdf', {
+            return fetch('/api/ai/manual-crop-pdf', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -2241,38 +2601,17 @@
             })
             .then(data => {
                 if (data.status === 'success') {
-                    showToast("裁剪并生成配图成功！已自动关联至此题卡。");
-                    
                     const croppedUrl = window.MathBankSafe.safeImageUrl(data.image_path);
                     if (!croppedUrl) throw new Error('裁剪接口返回了无效的图片路径');
-                    window.tempCroppedPathsThisSession.push(croppedUrl);
-                    
-                    const qIdx = window.activeCropQuestionIndex;
-                    if (qIdx !== null && parsedQuestionsData[qIdx]) {
-                        const q = parsedQuestionsData[qIdx];
-                        if (!q.image_paths) q.image_paths = [];
-                        
-                        if (!q.image_paths.includes(croppedUrl)) {
-                            q.image_paths.push(croppedUrl);
-                        }
-                        
-                        // Append the image tag to content textarea to render in card preview
-                        const card = document.getElementById(`parsed-card-${qIdx}`);
-                        if (card) {
-                            const textarea = card.querySelector('.card-content-textarea');
-                            if (textarea) {
-                                textarea.value = textarea.value.trim() + `\n\n![插图](${croppedUrl})\n\n`;
-                                textarea.dispatchEvent(new Event('input'));
-                            }
-                        }
-                        
-                        const badgesContainer = document.getElementById(`card-images-badges-${qIdx}`);
-                        if (badgesContainer) {
-                            badgesContainer.innerHTML = '';
-                            q.image_paths.forEach(path => appendSafeImageBadge(badgesContainer, path));
-                        }
+                    if (!cropContext || window.activeParsedCropContext !== cropContext ||
+                        cropContext.generation !== parsedQuestionsGeneration || cropContext.taskId !== window.currentPdfTaskId ||
+                        !applyParsedNewImage(cropContext.index, cropContext.q, croppedUrl, cropContext.options, cropContext.snapshot)) {
+                        showToast('题卡或截图目标已变化，未把旧截图写入其他题目。请重新截图。', 'warning');
+                        return;
                     }
-                    
+                    if (!Array.isArray(window.tempCroppedPathsThisSession)) window.tempCroppedPathsThisSession = [];
+                    window.tempCroppedPathsThisSession.push(croppedUrl);
+                    showToast('截图已关联至指定题卡，可移除或撤销；请核对图片内容与位置。');
                     closePdfCropModal();
                 } else {
                     throw new Error(data.message || "裁剪错误");
@@ -2283,7 +2622,10 @@
                 showToast(`手动截图报错: ${err.message}`, 'error');
             })
             .finally(() => {
-                confirmBtn.innerHTML = '<i class="fa-solid fa-crop-simple mr-1.5"></i><span>确认截取配图</span>';
+                if (!cropContext || window.activeParsedCropContext === cropContext || !window.activeParsedCropContext) {
+                    confirmBtn.innerHTML = '<i class="fa-solid fa-crop-simple mr-1.5"></i><span>确认截取配图</span>';
+                    confirmBtn.disabled = !(rectWidth > 15 && rectHeight > 15);
+                }
             });
         }
 
@@ -3405,7 +3747,10 @@
             } catch (error) { }
             filename = window.MathBankSafe.sanitizePlainText(filename);
 
-            const badge = document.createElement('div');
+            const badge = document.createElement('button');
+            badge.type = 'button';
+            badge.title = `查看图片：${filename}`;
+            badge.onclick = () => window.open(safePath, '_blank', 'noopener,noreferrer');
             badge.className = 'parsed-card-image-badge flex items-center space-x-1 px-2 py-0.5 bg-slate-100 border rounded-full text-[9px] font-semibold text-slate-500 hover:bg-white transition-colors cursor-pointer select-none';
             const icon = document.createElement('i');
             icon.className = 'fa-solid fa-image text-slate-400';
@@ -4386,6 +4731,7 @@
                 card.querySelector('.card-source').value = window.MathBankSafe.sanitizePlainText(q.source || '');
                 card.querySelector('.card-content-textarea').value = String(q.content || '');
                 card.querySelector('.card-answer-textarea').value = String(q.answer_markdown || '');
+                card.__parsedImageReferences = [...parsedImagePathsFromText(q.content), ...parsedImagePathsFromText(q.answer_markdown)];
 
                 container.appendChild(card);
                 renderParsedSourceReview(card, q, index);
@@ -4397,7 +4743,8 @@
                     ? q.image_paths.map(path => window.MathBankSafe.safeImageUrl(path)).filter(Boolean)
                     : [];
                 q.image_paths = Array.from(new Set(mappedImgs));
-                q.image_paths.forEach(path => appendSafeImageBadge(badgesContainer, path));
+                renderParsedImageControls(index);
+                renderParsedCorrections(index);
 
                 // Set up checkbox listener
                 const selectCb = card.querySelector('.card-select-checkbox');
@@ -4415,12 +4762,16 @@
                 const debouncedPreview = debounce(triggerPreview, 200);
 
                 textInput.addEventListener('input', () => {
+                    synchronizeParsedImageReferences(index);
                     invalidateParsedSourceReview(index);
+                    invalidateParsedCorrections(index);
                     invalidateParsedDuplicateCheck(index);
                     debouncedPreview();
                 });
                 ansInput.addEventListener('input', () => {
+                    synchronizeParsedImageReferences(index);
                     invalidateParsedSourceReview(index);
+                    invalidateParsedCorrections(index);
                     invalidateParsedDuplicateCheck(index);
                     debouncedPreview();
                 });
@@ -4521,13 +4872,15 @@
                     }
                     let html = parseMarkdownWithMath(processedContent);
                     
-                    // Automatically append associated image thumbnails to preview if not already rendered in markdown HTML
+                    // Do not move answer-only figures back into the stem.
+                    const answerImagePaths = new Set(parsedImagePathsFromText(answerText));
+                    // Automatically append truly unanchored attachments only.
                     if (q && q.image_paths && q.image_paths.length > 0) {
                         let hasUnrenderedImage = false;
                         let imgHtml = '<div class="flex flex-wrap gap-2 mt-3 pt-2.5 border-t border-dashed border-slate-200/60">';
                         q.image_paths.forEach(p => {
                             const safePath = window.MathBankSafe.safeImageUrl(p);
-                            if (safePath && !html.includes(safePath)) {
+                            if (safePath && !html.includes(safePath) && !answerImagePaths.has(safePath)) {
                                 hasUnrenderedImage = true;
                                 imgHtml += `
                                     <div class="relative group border border-slate-200 rounded-lg overflow-hidden bg-white max-w-[120px] aspect-[4/3] flex items-center justify-center shadow-sm hover:shadow-sm transition-all duration-300">
@@ -4644,6 +4997,13 @@
 
             const saveOperation = (async () => {
                 if (!validateParsedQuestionBeforeImport(index)) return false;
+                const incompleteSnapshot = options.incompleteSnapshot || parsedCorrectionSnapshot(index, q);
+                if (!options.incompleteDecisionResolved) {
+                    const decision = confirmParsedIncompleteImport([index]);
+                    if (decision !== true && !(await decision)) return false;
+                }
+                if (!isParsedQuestionSaveContextCurrent(saveGeneration, index, q) ||
+                    incompleteSnapshot !== parsedCorrectionSnapshot(index, q)) return false;
                 let duplicateOverride = options.duplicateOverride || '';
                 let duplicateSnapshotHash = options.duplicateSnapshotHash || '';
                 let expectedLocalSnapshot = options.localSnapshot || '';
@@ -4686,6 +5046,10 @@
 
                 if (!isParsedQuestionSaveContextCurrent(saveGeneration, index, q)) return false;
                 if (!validateParsedQuestionBeforeImport(index)) return false;
+                if (incompleteSnapshot !== parsedCorrectionSnapshot(index, q)) {
+                    showToast(`第 ${index + 1} 题在入库确认期间已修改，请重新点击导入。`, 'info');
+                    return false;
+                }
                 if (expectedLocalSnapshot) {
                     const currentItem = buildParsedQuestionDuplicateItem(index, saveGeneration);
                     if (!currentItem || serializeQuestionDuplicateItem(currentItem) !== expectedLocalSnapshot) {
@@ -4763,6 +5127,7 @@
                     formData.append('duplicate_override', 'independent');
                 }
 
+                const submittedCorrectionSnapshot = parsedCorrectionSnapshot(index, q);
                 const response = await fetch('/api/questions', {
                     method: 'POST',
                     body: formData
@@ -4789,6 +5154,12 @@
                 // index. The backend save remains valid, but stale callbacks
                 // must never mutate the new import session or its card.
                 if (!isParsedQuestionSaveContextCurrent(saveGeneration, index, q)) return true;
+                if (submittedCorrectionSnapshot !== parsedCorrectionSnapshot(index, q)) {
+                    q.saved = false;
+                    showToast(`第 ${index + 1} 题的提交版本已入库，但等待期间有新编辑；当前题卡已保留，请核对后再决定是否再次导入。`, 'warning');
+                    loadCategories(); loadQuestions();
+                    return false;
+                }
                 q.saved = true;
                 q.duplicateIndexWarning = String(data.warning || '');
                 const statusBadge = card.querySelector('.card-status-badge');
@@ -5010,6 +5381,13 @@
             const originalIconClass = icon ? icon.className : 'fa-solid fa-cloud-arrow-up';
 
             const operation = (async () => {
+                const incompleteSnapshots = new Map(selectedIndices.map(index => [index, parsedCorrectionSnapshot(index)]));
+                const incompleteQuestions = new Map(selectedIndices.map(index => [index, parsedQuestionsData[index]]));
+                const decision = confirmParsedIncompleteImport(selectedIndices);
+                if (decision !== true && !(await decision)) return false;
+                if (batchGeneration !== parsedQuestionsGeneration || selectedIndices.some(index =>
+                    parsedQuestionsData[index] !== incompleteQuestions.get(index) ||
+                    parsedCorrectionSnapshot(index) !== incompleteSnapshots.get(index))) return false;
                 mainBtn.disabled = true;
                 document.querySelectorAll('.card-save-btn').forEach(button => {
                     button.disabled = true;
@@ -5073,6 +5451,8 @@
                         suppressRefresh: true,
                         suppressToast: true,
                         duplicateDecisionResolved: true,
+                        incompleteDecisionResolved: true,
+                        incompleteSnapshot: incompleteSnapshots.get(index),
                         duplicateOverride: independentOverrideIndices.has(index) ? 'independent' : '',
                         duplicateSnapshotHash: String(result && result.snapshot_hash || ''),
                         localSnapshot: outcome.ok ? (parsedDuplicateSnapshots.get(index) || '') : ''

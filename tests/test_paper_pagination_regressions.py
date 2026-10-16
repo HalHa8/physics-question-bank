@@ -71,6 +71,7 @@ def test_late_callbacks_keep_new_observer_and_pause_during_drag():
 const assert = require('node:assert/strict');
 global.window = {};
 global.draggedItemData = null;
+global.paperImageScaleGesture = null;
 const observers = [], frames = [], fontCallbacks = [];
 let rebalances = 0;
 global.rebalanceA4PaperPages = () => { rebalances++; };
@@ -106,6 +107,10 @@ draggedItemData = {};
 currentCallback();
 assert.equal(frames.length, 1, 'placeholder changes must not repaginate mid-drag');
 draggedItemData = null;
+paperImageScaleGesture = {};
+currentCallback();
+assert.equal(frames.length, 1, 'range pointer gestures must not repaginate');
+paperImageScaleGesture = null;
 currentCallback();
 frames[1]();
 assert.equal(rebalances, 2);
