@@ -145,3 +145,53 @@ def test_fraction_buttons_preserve_compact_contexts_and_unsaved_state(browser, t
     assert browser.evaluate("isEditorModified()")
     assert persisted_question() == original
     print(f"Fraction visual QA: {content_screenshot}\nFraction visual QA: {answer_screenshot}")
+
+
+def test_physics_constant_fraction_button_preserves_authored_variables_and_database(browser):
+    # The module fixture is shared; the preceding test deliberately leaves an
+    # unsaved editor open. Reload only the disposable test app, not user data.
+    browser.command("open", browser.evaluate("location.href"))
+    browser.command("wait", "--fn", "typeof window.renderPaperCanvas === 'function'")
+    content = r"电流 $i(t)=-2.00\,\mathrm{mA}\,\eu^{-\frac{t}{\tau}}+\frac{U}{R}$；电荷 $e=1.60\times10^{-19}\,\mathrm{C}$。"
+    expected = content.replace(r"\frac{U}{R}", r"\dfrac{U}{R}")
+    question_id = browser.evaluate("""
+    (async () => {
+        selectWorkspace('bank', '题库研讨工作台');
+        const form = new FormData();
+        form.set('content', %s);
+        form.set('question_type', 'calculation');
+        form.set('difficulty', 'normal');
+        const response = await fetch('/api/questions', {method: 'POST', body: form});
+        const data = await response.json();
+        if (!response.ok || !data.question) throw new Error(JSON.stringify(data));
+        loadQuestions();
+        return data.question.id;
+    })()
+    """ % json.dumps(content))
+    browser.command("wait", "--fn", f"!!document.querySelector('#questionsList [data-id=\"{question_id}\"]')")
+    browser.command("click", f'#questionsList [data-id="{question_id}"]')
+    browser.command("wait", "--fn", f"EditorState.questionId === {question_id} && !questionDetailLoading && !isEditorModified()")
+    browser.command("click", "#editQuestionFromPreviewBtn")
+    browser.command("click", '[data-editor-panel-target="content"]')
+    browser.command("wait", "--fn", "document.querySelectorAll('#contentPreview .katex').length === 2")
+    browser.command("scrollintoview", "#normalizeContentFractionsBtn")
+    browser.settle()
+    browser.command("click", "#normalizeContentFractionsBtn")
+    browser.command("wait", "--fn", (
+        "!document.getElementById('normalizeContentFractionsBtn').disabled && "
+        "document.getElementById('editContent').value === " + json.dumps(expected)
+    ))
+    browser.command("wait", "--fn", (
+        "document.querySelector('#contentPreview annotation').textContent === "
+        + json.dumps(r"i(t)=-2.00\,\mathrm{mA}\,\eu^{-\frac{t}{\tau}}+\dfrac{U}{R}")
+    ))
+    browser.settle()
+    metrics = _preview_metrics(browser, "contentPreview")
+    assert not metrics["errors"]
+    assert [formula["tex"] for formula in metrics["formulas"]] == [
+        r"i(t)=-2.00\,\mathrm{mA}\,\eu^{-\frac{t}{\tau}}+\dfrac{U}{R}",
+        r"e=1.60\times10^{-19}\,\mathrm{C}",
+    ]
+    assert browser.evaluate("isEditorModified()")
+    persisted = browser.evaluate(f"fetch('/api/questions/{question_id}').then(response => response.json())")
+    assert persisted["content"] == content

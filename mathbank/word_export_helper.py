@@ -279,6 +279,42 @@ def _normalize_formula(formula: str) -> str:
     return value.strip()
 
 
+_WORD_EXAMZH_CONSTANTS = {"iu": "i", "upi": "i", "eu": "e", "upe": "e"}
+_WORD_FORMULA_COMMAND = re.compile(r"\\(?:[A-Za-z@]+|[^\n])|%")
+_WORD_FORMULA_LITERAL_COMMANDS = {
+    "string", "detokenize", "unexpanded", "noexpand", "meaning", "verb", "Verb", "lstinline", "texttt",
+    "url", "path", "href", "includegraphics", "label", "tikz",
+    "def", "gdef", "edef", "xdef", "let", "futurelet", "newcommand",
+    "renewcommand", "providecommand", "DeclareRobustCommand", "DeclareMathOperator",
+    "NewDocumentCommand", "RenewDocumentCommand", "ProvideDocumentCommand", "DeclareDocumentCommand",
+    "newenvironment", "renewenvironment", "catcode", "makeatletter", "makeatother",
+    "csname", "endcsname",
+}
+
+
+def _prepare_word_formula(formula: str) -> str:
+    r"""Adapt four known zero-argument atoms in a conversion copy only.
+
+    Keep the authored formula as the OMML/fallback cache key and diagnostic.
+    Full control tokens consume escaped backslash pairs before aliases; braces
+    keep each expansion one atom even in ``\frac\iu\eu`` or ``x^\iu``.
+    Literal/definition-bearing input stays intact rather than guessing TeX.
+    """
+    if not formula or not any("\\" + name in formula for name in _WORD_EXAMZH_CONSTANTS):
+        return formula
+    if ("`" in formula or re.search(r"https?://|/static/|<\s*(?:code|pre|mathbank-math)\b|\[\[MBM_", formula)
+            or re.search(r"\\begin\s*\{(?:verbatim\*?|Verbatim|lstlisting|minted|tikzpicture|pgfpicture|axis)\}", formula)):
+        return formula
+    commands = list(_WORD_FORMULA_COMMAND.finditer(formula))
+    if any(match.group() == "%" or match.group()[1:] in _WORD_FORMULA_LITERAL_COMMANDS
+           for match in commands):
+        return formula
+    return _WORD_FORMULA_COMMAND.sub(
+        lambda match: "{\\mathrm{" + _WORD_EXAMZH_CONSTANTS[match.group()[1:]] + "}}"
+        if match.group()[1:] in _WORD_EXAMZH_CONSTANTS else match.group(), formula,
+    )
+
+
 def _consume_math(text: str, start: int) -> tuple[MathToken | None, int]:
     if text.startswith("$$", start):
         end = text.find("$$", start + 2)
@@ -388,7 +424,7 @@ class PandocOmmlConverter:
         for index, formula in enumerate(formulas):
             marker = f"MBFORMULA{index:06d}"
             markers[marker] = formula
-            markdown_parts.extend((marker, "", f"$${formula}$$", ""))
+            markdown_parts.extend((marker, "", f"$${_prepare_word_formula(formula)}$$", ""))
         with tempfile.TemporaryDirectory(prefix="mathbank_word_math_") as temp_dir:
             temp_path = Path(temp_dir)
             source_path = temp_path / "formulas.md"
@@ -687,13 +723,14 @@ def _append_omml(paragraph, xml_bytes: bytes) -> None:
 
 
 def _formula_fallback_png(formula: str) -> bytes | None:
+    prepared_formula = _prepare_word_formula(formula)
     xelatex = shutil.which("xelatex")
     if not xelatex:
         return None
     tex = rf"""\documentclass[preview,border=2pt]{{standalone}}
 \usepackage{{amsmath,amssymb,mathtools,cancel,extarrows,yhmath}}
 \begin{{document}}
-$\displaystyle {formula}$
+$\displaystyle {prepared_formula}$
 \end{{document}}
 """
     with tempfile.TemporaryDirectory(prefix="mathbank_word_fallback_") as temp_dir:

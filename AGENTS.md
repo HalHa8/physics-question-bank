@@ -210,6 +210,7 @@
 
 ### 3.12 可编辑 Word 试卷导出
 - **解耦与原生 OMML**：`mathbank.word_export_helper` 使用 python-docx 生成试卷结构，公式批量由 Pandoc 转为 Word 原生 OMML (`m:oMath`)，导出默认返回包含试卷正文与含答案解析两份文档的 `.zip` 打包。
+- **显式正体常数与物理变量**：仅对完整控制词 `\eu` / `\upe` / `\iu` / `\upi`，在 Word 转换副本中保留其正体 e/i 语义，支持无花括号的分式与上下标；Pandoc 和 PNG 兜底共用转换，缓存键和失败诊断仍保留原公式。不推断普通 `i`（电流）、`e`（电荷）或改变单位大小写、矢量、正负号和有效数字；未知宏、定义、代码、路径、TikZ 与公式锁不猜改。`fraction_style` 将这四个已知常数视为零参数原子，保留上下标/嵌套分式紧凑规则。专项为 `tests/test_fraction_style.py` 与 `tests/test_word_examzh_constants.py`，后者须用真实 Pandoc 验证可编辑 OMML 和原文不变。
 - **图片选项导出**：`choices` 内图片必须按原选项顺序写入带 A/B/C/D 标号的 Word 单元格，不能抽到题干旁或作为题末图片重复输出。纯图片选项使用无边框的标号/图片双单元格，让标号位于图片正左侧垂直居中，不能落在图片底部。选项渲染须传入题目图片资源与独立布局设置，图片路径不计入选项文字长度；四个纯图片或短文字图片选项优先一行四列，较长文字按内容转为两列或一列，图片始终按单元格可用宽高等比例缩放。
 - **复杂表格与图片锚点**：Word 导出必须先在完整题干中提取 `tabular`，再拆分普通段落，禁止因单元格图片周围空行而泄漏原始 LaTeX。正文与表格内 Markdown 图片按原锚点写入；只有题末可分离图片簇使用 `figure_align`，前面含正文或表格图片时也必须独立生效。三列比较表总宽固定为 9000 DXA，短标签首列窄于两列正文，`tblW`、`tblGrid` 与 `tcW` 必须一致，单元格图片同时受最大宽高约束。`\multicolumn` 与 `\multirow` 必须分别生成原生 Word 横向和纵向合并，不得以源码文字或重复空单元格代替。
 - **Pandoc 按需运行组件**：Word 导出前先复用通过启动校验的用户指定、MathBank 管理或系统 Pandoc；缺失时须由用户一次确认后，由 `mathbank.runtime_components` 按 Windows x64 / macOS arm64 / macOS x86_64 下载固定版本。下载顺序为 Pandoc 官方 GitHub Release 后 SourceForge 备用镜像，两者必须通过同一份固定 SHA-256、大小、安全解压、`pandoc --version` 与真实 OMML DOCX smoke 后才能原子安装到 `.system_generated/runtime/pandoc/`；安装完成后必须自动续接原 Word 导出，不得要求用户选路径、配 PATH 或重启服务。
