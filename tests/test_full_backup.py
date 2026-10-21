@@ -300,6 +300,8 @@ def test_schema_v6_backup_rejects_malformed_fingerprint_table(tmp_path):
 
 def test_restore_rejects_future_schema_before_replacing_current_database(tmp_path):
     from mathbank.db_migrations import LATEST_SCHEMA_VERSION
+    from mathbank.database import KnowledgePoint, KnowledgePointCurriculum, QuestionKnowledgePoint
+    from sqlalchemy import create_engine
 
     future_database = tmp_path / "future.db"
     current_database = tmp_path / "current.db"
@@ -313,6 +315,14 @@ def test_restore_rejects_future_schema_before_replacing_current_database(tmp_pat
             "question_id INTEGER NOT NULL, fingerprint_version INTEGER NOT NULL, "
             "PRIMARY KEY(question_id, fingerprint_version))"
         )
+    # A future fixture must still contain the known v11 tables; otherwise the
+    # new incomplete-backup guard correctly fails before the downgrade check.
+    future_engine = create_engine(f"sqlite:///{future_database}")
+    try:
+        for model in (KnowledgePoint, KnowledgePointCurriculum, QuestionKnowledgePoint):
+            model.__table__.create(future_engine)
+    finally:
+        future_engine.dispose()
     archive = create_full_backup(
         output_dir=tmp_path / "snapshots",
         database_path=future_database,

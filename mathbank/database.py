@@ -19,7 +19,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 from mathbank.paths import DATABASE_FILE, sqlite_url
 from mathbank.question_types import normalize_section_order
 
@@ -146,6 +146,12 @@ class Question(Base):
     usage_count = Column(Integer, default=0, index=True)  # 组卷引用次数
     created_at = Column(DateTime, default=_utcnow_naive)
 
+    knowledge_points = relationship(
+        "QuestionKnowledgePoint", back_populates="question",
+        cascade="all, delete-orphan", order_by="QuestionKnowledgePoint.position",
+        lazy="selectin",
+    )
+
     @property
     def image_layouts(self):
         from .image_layout import normalize_image_layouts
@@ -223,6 +229,7 @@ class Question(Base):
     def to_dict(self):
         return {
             "id": self.id,
+            "knowledge_points": [row.to_dict() for row in self.knowledge_points],
             "content": self.content,
             "question_type": self.question_type,
             "category_compulsory": self.category_compulsory,
@@ -251,6 +258,7 @@ class Question(Base):
     def to_summary_dict(self):
         return {
             "id": self.id,
+            "knowledge_points": [row.to_summary_dict() for row in self.knowledge_points],
             "content": self.content,
             "question_type": self.question_type,
             "category_compulsory": self.category_compulsory,
@@ -302,6 +310,107 @@ class QuestionCurriculum(Base):
             "compulsory": self.compulsory,
             "chapter": self.chapter,
             "knowledge": self.knowledge
+        }
+
+
+class KnowledgePoint(Base):
+    """A stable, textbook-independent point identity and its searchable names."""
+
+    __tablename__ = "knowledge_points"
+    code = Column(String(100), primary_key=True)
+    name = Column(String(200), nullable=False, index=True)
+    original_name = Column(String(200), nullable=False)
+    source = Column(String(50), nullable=False)
+    _aliases = Column(Text, nullable=False, default="[]", server_default="[]", name="aliases")
+    curriculum_paths = relationship(
+        "KnowledgePointCurriculum", back_populates="point",
+        cascade="all, delete-orphan", lazy="selectin",
+        order_by="KnowledgePointCurriculum.id",
+    )
+
+    @property
+    def aliases(self):
+        return json.loads(self._aliases or "[]")
+
+    @aliases.setter
+    def aliases(self, value):
+        self._aliases = json.dumps(value, ensure_ascii=False)
+
+    def to_dict(self):
+        return {
+            "code": self.code, "name": self.name,
+            "original_name": self.original_name, "source": self.source,
+            "aliases": self.aliases,
+            "curriculum_paths": [row.to_dict() for row in self.curriculum_paths],
+        }
+
+
+class KnowledgePointCurriculum(Base):
+    """Textbook recommendations; these never assign a question's chapter."""
+
+    __tablename__ = "knowledge_point_curriculums"
+    __table_args__ = (
+        UniqueConstraint("point_code", "version_code", "compulsory", "chapter", "knowledge", "reference_section", "level", name="uq_knowledge_point_curriculum_path"),
+        CheckConstraint("level IN ('leaf', 'parent', 'chapter')", name="ck_knowledge_point_curriculum_level"),
+        Index("idx_knowledge_point_curriculums_lookup", "version_code", "compulsory", "chapter", "knowledge", "point_code"),
+    )
+    id = Column(Integer, primary_key=True)
+    point_code = Column(String(100), ForeignKey("knowledge_points.code", ondelete="CASCADE"), nullable=False, index=True)
+    version_code = Column(String(50), nullable=False)
+    compulsory = Column(String(100), nullable=False)
+    chapter = Column(String(100), nullable=False)
+    knowledge = Column(String(100), nullable=False, default="", server_default="")
+    reference_section = Column(String(200), nullable=False, default="", server_default="")
+    level = Column(String(20), nullable=False)
+    point = relationship("KnowledgePoint", back_populates="curriculum_paths")
+
+    def to_dict(self):
+        return {field: getattr(self, field) for field in (
+            "version_code", "compulsory", "chapter", "knowledge",
+            "reference_section", "level",
+        )}
+
+
+class QuestionKnowledgePoint(Base):
+    """Confirmed selections and suggestions, with their evidence kept intact."""
+
+    __tablename__ = "question_knowledge_points"
+    __table_args__ = (
+        UniqueConstraint("question_id", "point_code", name="uq_question_knowledge_point"),
+        CheckConstraint("position >= 0", name="ck_question_knowledge_point_position"),
+        CheckConstraint("role IN ('main', 'auxiliary')", name="ck_question_knowledge_point_role"),
+        CheckConstraint("status IN ('confirmed', 'suggested')", name="ck_question_knowledge_point_status"),
+        Index("idx_question_knowledge_points_filter", "point_code", "role", "status", "question_id"),
+    )
+    id = Column(Integer, primary_key=True)
+    question_id = Column(Integer, ForeignKey("questions.id", ondelete="CASCADE"), nullable=False, index=True)
+    point_code = Column(String(100), ForeignKey("knowledge_points.code", ondelete="CASCADE"), nullable=False)
+    role = Column(String(20), nullable=False, default="main", server_default="main")
+    status = Column(String(20), nullable=False, default="confirmed", server_default="confirmed")
+    position = Column(Integer, nullable=False, default=0, server_default="0")
+    # JSON supports legacy string evidence and structured research evidence.
+    scope = Column(Text, nullable=False, default="null", server_default="null")
+    evidence_source = Column(Text, nullable=False, default="null", server_default="null")
+    evidence = Column(Text, nullable=False, default="null", server_default="null")
+    reason = Column(Text, nullable=False, default="null", server_default="null")
+    origin = Column(Text, nullable=False, default="null", server_default="null")
+    question = relationship("Question", back_populates="knowledge_points")
+    point = relationship("KnowledgePoint", lazy="joined")
+
+    def to_summary_dict(self):
+        """Only the fields needed by a question-list label, with no audit JSON."""
+        return {
+            "code": self.point_code, "name": self.point.name,
+            "role": self.role, "status": self.status,
+        }
+
+    def to_dict(self):
+        return {
+            "code": self.point_code, "name": self.point.name,
+            "role": self.role, "status": self.status,
+            **{field: json.loads(getattr(self, field) or "null") for field in (
+                "scope", "evidence_source", "evidence", "reason", "origin",
+            )},
         }
 
 
@@ -737,6 +846,10 @@ def init_db():
     migration_result = migrate_database(
         engine, pre_migration_backup=pre_migration_backup
     )
+    from mathbank.knowledge_points import seed_catalog
+    with sessionmaker(bind=engine)() as catalog_session:
+        seed_catalog(catalog_session)
+        catalog_session.commit()
     configure_sqlite_wal(engine)
     if migration_result.get("from_version") != migration_result.get("to_version"):
         print(f"[Database] Schema migration complete: {migration_result}")

@@ -175,6 +175,8 @@ def _snapshot_database(source_path: Path, target_path: Path) -> dict[str, Any]:
         ]
         if schema_version >= 6:
             required_count_tables.append("question_fingerprints")
+        if schema_version >= 11:
+            required_count_tables.extend(("knowledge_points", "knowledge_point_curriculums", "question_knowledge_points"))
         missing_required_tables = set(required_count_tables) - table_names
         if missing_required_tables:
             raise RuntimeError(
@@ -730,6 +732,8 @@ def verify_full_backup(archive_path: Path) -> dict[str, Any]:
                 }
                 if schema_version >= 6:
                     required_tables.add("question_fingerprints")
+                if schema_version >= 11:
+                    required_tables.update(("knowledge_points", "knowledge_point_curriculums", "question_knowledge_points"))
                 if not isinstance(row_counts, dict) or set(row_counts) != required_tables:
                     raise RuntimeError("备份数据库行数清单无效")
                 if not required_tables.issubset(table_names):
@@ -782,6 +786,9 @@ def verify_full_backup(archive_path: Path) -> dict[str, Any]:
                                     )
                                 ),
                             )
+                            if schema_version >= 11:
+                                from mathbank.db_migrations import _validate_knowledge_point_schema
+                                _validate_knowledge_point_schema(validation_connection)
                     finally:
                         validation_engine.dispose()
                 referenced_uploads = _database_upload_references(connection)

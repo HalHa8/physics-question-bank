@@ -5757,3 +5757,21 @@ button[aria-disabled="true"]:hover,
     #paperCanvasSection .paper-export-actions button { gap: 4px; font-size: 12px; }
 }
 .records-filters.workspace-command-bar #savedPaperResultCount { padding: 0; }
+/* Independent physics points: bounded offline controls, desktop and 375px. */
+.kp-panel { margin-top: 0.75rem; padding: 0.75rem; border: 1px solid currentColor; border-radius: 0.75rem; min-width: 0; }
+.kp-panel h4, .kp-panel summary { font-size: 0.8rem; font-weight: 600; }
+.kp-panel summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; }
+.kp-filter-panel { grid-column: 1 / -1; width: 100%; }
+.kp-search-row { display: flex; gap: 0.5rem; align-items: center; margin-top: 0.5rem; min-width: 0; }
+.kp-search-row input { flex: 1; min-width: 0; width: 100%; min-height: 44px; padding: 0.5rem; font-size: 0.8rem; }
+.kp-button { min-height: 44px; min-width: 44px; padding: 0.5rem 0.65rem; white-space: normal; font-size: 0.75rem; overflow-wrap: anywhere; }
+.kp-results { display: flex; gap: 0.4rem; flex-wrap: wrap; max-height: 12rem; overflow-y: auto; margin-top: 0.5rem; }
+.kp-results .kp-button { max-width: 100%; text-align: left; }
+.kp-hint { font-size: 0.72rem; line-height: 1.6; opacity: 0.8; overflow-wrap: anywhere; margin-top: 0.4rem; }
+.kp-selection { display: grid; gap: 0.35rem; font-size: 0.75rem; }
+.kp-selected-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(5.5rem, auto) auto; gap: 0.35rem; align-items: center; }
+.kp-selected-row span { overflow-wrap: anywhere; }
+.kp-selected-row select, .kp-filter-options select { min-height: 44px; max-width: 100%; font-size: 0.75rem; }
+.kp-filter-options { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; font-size: 0.75rem; margin-top: 0.4rem; }
+.kp-filter-options label { display: flex; align-items: center; gap: 0.4rem; min-height: 44px; }
+.kp-panel details > .glass-input { width: 100%; min-height: 44px; padding: 0.5rem; margin-top: 0.5rem; }

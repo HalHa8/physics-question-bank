@@ -4,6 +4,16 @@
 
 # PhysicsBank: Local High-School Physics Question Bank
 
+Independent physics points are now separate from textbook placement and personal
+tags. The editor supports manual main/auxiliary labels, 80 starter points,
+aliases, teacher-created points and draft persistence. Bank filters support
+ANY/ALL, main-only and unlabeled questions. This stage makes no AI calls.
+The refactor branch upgrades its own schema from v10 to v11, with a database
+snapshot before migration; existing questions are not automatically relabeled.
+Make a full backup and close the service before upgrading. Older programs cannot
+open the upgraded database; rollback requires the pre-upgrade full backup and
+separate preservation of any newly added data. Portable packages are unchanged.
+
 Screenshot OCR now crops figures directly from the original image, preserving
 their text, option or table positions. Original-image mode is enabled by default.
 Unresolved or inaccurate figures can be manually cropped or re-cropped from the

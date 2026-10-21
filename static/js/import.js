@@ -644,6 +644,7 @@
                         }
                     }
                     EditorState.useQuestion(fullItem);
+                    if (window.KnowledgePointState) window.KnowledgePointState.hydrate(fullItem);
                     document.getElementById('editorTitle').textContent = '编辑物理题';
 
                     // Clear previous OCR state only after the question switch commits.
@@ -819,6 +820,7 @@
                     : '';
                 const rawTags = document.getElementById('editTags') ? document.getElementById('editTags').value : '';
                 const tags = rawTags.trim();
+                const knowledgePointsSnapshot = window.KnowledgePointState ? window.KnowledgePointState.snapshot() : [];
                 const figureLayout = FigureLayoutState.snapshot();
                 
                 const editorModal = document.getElementById('editorSection');
@@ -896,6 +898,7 @@
                     category_compulsory: compulsory,
                     category_chapter: chapter,
                     category_knowledge: knowledge,
+                    knowledge_points: JSON.stringify(knowledgePointsSnapshot),
                     related_question_id: relatedQuestionId,
                     image_paths: JSON.stringify(Array.from(uploadedImages)),
                     tikz_code: tikzCode,
@@ -937,6 +940,7 @@
                     figureLayout.figure_align_custom ? 'true' : 'false'
                 );
                 formData.append('tags', tags);
+                formData.append('knowledge_points', JSON.stringify(knowledgePointsSnapshot));
                 const combinedImages = Array.from(new Set([
                     ...uploadedImages,
                     ...(typeof uploadedAnswerImages !== 'undefined' ? uploadedAnswerImages : []),

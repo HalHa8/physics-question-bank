@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import datetime as dt
 import hashlib
+import json
 import sqlite3
 from contextlib import closing
 from pathlib import Path
@@ -18,14 +19,16 @@ from sqlalchemy.engine import Engine
 from mathbank.paths import SCHEMA_SNAPSHOT_DIR
 
 
-LATEST_SCHEMA_VERSION = 10
+# PhysicsBank v11 adds only knowledge points, not MathBank v11-v14 features.
+LATEST_SCHEMA_VERSION = 11
 LEGACY_REQUIRED_TABLES = {
     "questions",
     "question_curriculums",
     "papers",
     "paper_questions",
 }
-REQUIRED_TABLES = LEGACY_REQUIRED_TABLES | {"question_fingerprints"}
+KNOWLEDGE_POINT_TABLES = {"knowledge_points", "knowledge_point_curriculums", "question_knowledge_points"}
+REQUIRED_TABLES = LEGACY_REQUIRED_TABLES | {"question_fingerprints"} | KNOWLEDGE_POINT_TABLES
 
 V6_QUESTION_FINGERPRINT_COLUMNS = {
     "question_id",
@@ -623,6 +626,7 @@ def _rebuild_relationship_tables(engine: Engine) -> dict[str, int]:
             _validate_figure_layout_schema(connection)
 
             violations = connection.exec_driver_sql("PRAGMA foreign_key_check").fetchall()
+            _ensure_knowledge_point_tables(connection)
             if violations:
                 raise RuntimeError(f"迁移后仍存在外键异常: {violations[:5]}")
 
@@ -648,6 +652,80 @@ def _rebuild_relationship_tables(engine: Engine) -> dict[str, int]:
     return stats
 
 
+def _ensure_knowledge_point_tables(connection) -> dict[str, int]:
+    """PhysicsBank v11 adds independent points without rewriting existing questions."""
+
+    from mathbank.database import KnowledgePoint, KnowledgePointCurriculum, QuestionKnowledgePoint
+    existing = set(inspect(connection).get_table_names())
+    stats = {}
+    for model in (KnowledgePoint, KnowledgePointCurriculum, QuestionKnowledgePoint):
+        missing = model.__tablename__ not in existing
+        if missing:
+            model.__table__.create(bind=connection)
+        stats[f"added_{model.__tablename__}"] = int(missing)
+    _validate_knowledge_point_schema(connection)
+    return stats
+
+
+def _validate_knowledge_point_schema(connection) -> None:
+    """Fail closed for incomplete constraints, indexes, or persisted point data."""
+
+    from mathbank.database import KnowledgePoint, KnowledgePointCurriculum, QuestionKnowledgePoint
+    models = (KnowledgePoint, KnowledgePointCurriculum, QuestionKnowledgePoint)
+    expected_indexes = {
+        "knowledge_points": {(False, ("name",))},
+        "knowledge_point_curriculums": {
+            (True, ("point_code", "version_code", "compulsory", "chapter", "knowledge", "reference_section", "level")),
+            (False, ("point_code",)),
+            (False, ("version_code", "compulsory", "chapter", "knowledge", "point_code")),
+        },
+        "question_knowledge_points": {
+            (True, ("question_id", "point_code")), (False, ("question_id",)),
+            (False, ("point_code", "role", "status", "question_id")),
+        },
+    }
+    for model in models:
+        table = model.__tablename__
+        info = {row[1]: row for row in connection.exec_driver_sql(f'PRAGMA table_info("{table}")')}
+        columns = model.__table__.columns
+        if set(info) != set(columns.keys()) or any(not column.nullable and not int(info[column.name][3]) for column in columns if column.name != "id"):
+            raise RuntimeError(f"知识点表 {table} 缺少核心字段或非空约束")
+        primary_keys = tuple(row[1] for row in sorted(info.values(), key=lambda row: row[5]) if row[5])
+        if primary_keys != tuple(column.name for column in columns if column.primary_key):
+            raise RuntimeError(f"知识点表 {table} 主键结构异常")
+        actual_indexes = set()
+        for index in connection.exec_driver_sql(f'PRAGMA index_list("{table}")'):
+            actual_indexes.add((bool(index[2]), tuple(row[2] for row in connection.exec_driver_sql(f'PRAGMA index_info("{index[1]}")'))))
+        if not expected_indexes[table].issubset(actual_indexes):
+            raise RuntimeError(f"知识点表 {table} 缺少索引或唯一约束")
+        for foreign_key in model.__table__.foreign_keys:
+            if not any(row[2] == foreign_key.column.table.name and row[3] == foreign_key.parent.name and row[4] == foreign_key.column.name and row[6].upper() == "CASCADE" for row in connection.exec_driver_sql(f'PRAGMA foreign_key_list("{table}")')):
+                raise RuntimeError(f"知识点表 {table} 缺少级联外键")
+        ddl = connection.exec_driver_sql("SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (table,)).scalar_one()
+        for constraint in model.__table__.constraints:
+            if hasattr(constraint, "sqltext") and str(constraint.sqltext) not in ddl:
+                raise RuntimeError(f"知识点表 {table} 缺少值域约束")
+        if connection.exec_driver_sql(f'PRAGMA foreign_key_check("{table}")').fetchall():
+            raise RuntimeError(f"知识点表 {table} 存在外键异常")
+    try:
+        for row in connection.exec_driver_sql("SELECT code, name, original_name, source, aliases FROM knowledge_points"):
+            if any(not isinstance(value, str) or not value.strip() for value in row[:4]):
+                raise ValueError("point identity")
+            aliases = json.loads(row[4])
+            if not isinstance(aliases, list) or any(not isinstance(alias, str) or not alias.strip() for alias in aliases):
+                raise ValueError("aliases")
+        for row in connection.exec_driver_sql("SELECT level, knowledge FROM knowledge_point_curriculums"):
+            if row[0] not in {"leaf", "parent", "chapter"} or (row[0] == "chapter") != (not row[1]):
+                raise ValueError("point curriculum")
+        for row in connection.exec_driver_sql("SELECT role, status, position, scope, evidence_source, evidence, reason, origin FROM question_knowledge_points"):
+            if row[0] not in {"main", "auxiliary"} or row[1] not in {"confirmed", "suggested"} or not isinstance(row[2], int) or row[2] < 0:
+                raise ValueError("point role/status/position")
+            for value in row[3:]:
+                json.loads(value)
+    except (ValueError, TypeError) as exc:
+        raise RuntimeError("知识点表包含无效数据") from exc
+
+
 def _upgrade_derived_schema(engine: Engine) -> dict[str, int]:
     """Upgrade v2-v5 databases with TikZ fields and the current derived table."""
 
@@ -658,6 +736,7 @@ def _upgrade_derived_schema(engine: Engine) -> dict[str, int]:
             transaction_started = True
             stats = _ensure_tikz_asset_columns(connection)
             stats.update(_ensure_figure_layout_columns(connection))
+            stats.update(_ensure_knowledge_point_tables(connection))
             stats["added_question_fingerprints"] = (
                 _ensure_question_fingerprint_table(connection)
             )
@@ -731,6 +810,7 @@ def _upgrade_v6_or_v7_fingerprint_schema(
             _validate_question_fingerprint_schema(connection)
             figure_layout_stats = _ensure_figure_layout_columns(connection)
             _validate_figure_layout_schema(connection)
+            _ensure_knowledge_point_tables(connection)
             connection.exec_driver_sql(f"PRAGMA user_version={LATEST_SCHEMA_VERSION}")
             connection.exec_driver_sql("COMMIT")
             transaction_started = False
@@ -766,6 +846,7 @@ def migrate_database(
         with engine.connect() as connection:
             _validate_question_fingerprint_schema(connection)
             _validate_figure_layout_schema(connection)
+            _validate_knowledge_point_schema(connection)
         return {"from_version": current, "to_version": current, "backup": None}
 
     if not table_names:

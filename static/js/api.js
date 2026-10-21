@@ -436,6 +436,7 @@
                 state.createdAt = null;
                 state.draftId = null;
                 state.mode = 'new';
+                if (window.KnowledgePointState) window.KnowledgePointState.reset();
             };
 
             const useQuestion = (question) => {

@@ -1,6 +1,8 @@
 """HTTP route contract, kept in the original registration order."""
 
-ROUTES = [{'name': 'api_heartbeat', 'method': 'post', 'path': '/api/heartbeat', 'options': {}},
+ROUTES = [{'name': 'get_knowledge_points', 'method': 'get', 'path': '/api/knowledge-points', 'options': {}},
+ {'name': 'add_knowledge_point', 'method': 'post', 'path': '/api/knowledge-points', 'options': {}},
+ {'name': 'api_heartbeat', 'method': 'post', 'path': '/api/heartbeat', 'options': {}},
  {'name': 'healthz',
   'method': 'get',
   'path': '/healthz',

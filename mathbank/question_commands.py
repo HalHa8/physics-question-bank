@@ -9,6 +9,7 @@ from typing import Optional
 from fastapi import Depends, Form, BackgroundTasks
 from sqlalchemy.orm import Session
 from mathbank.database import Question, get_db
+from mathbank.knowledge_points import normalize_question_points, replace_question_points
 
 
 @dataclass(frozen=True)
@@ -214,10 +215,11 @@ def duplicate_review_required_response(db: Session, *, fingerprint, question_ids
     )
 
 
-def create_question(background_tasks: BackgroundTasks, content: str=Form(...), question_type: str=Form(...), category_compulsory: str=Form(''), category_chapter: str=Form(''), category_knowledge: str=Form(''), difficulty: str=Form(...), source: str=Form(''), answer_markdown: str=Form(''), review: str=Form(''), tikz_code: str=Form(''), content_tikz_assets: Optional[str]=Form(None), tikz_reference_image_path: str=Form(''), answer_tikz_assets: str=Form('[]'), figure_align: str=Form('right'), figure_align_custom: bool=Form(False), figure_size: str=Form('auto'), image_layouts: str=Form('{}'), tags: str=Form(''), related_question_id: str=Form(''), image_paths: str=Form('[]'), duplicate_snapshot_hash: str=Form(''), duplicate_override: str=Form(''), db: Session=Depends(get_db), *, dependencies: QuestionCommandsDependencies):
+def create_question(background_tasks: BackgroundTasks, content: str=Form(...), question_type: str=Form(...), category_compulsory: str=Form(''), category_chapter: str=Form(''), category_knowledge: str=Form(''), difficulty: str=Form(...), source: str=Form(''), answer_markdown: str=Form(''), review: str=Form(''), tikz_code: str=Form(''), content_tikz_assets: Optional[str]=Form(None), tikz_reference_image_path: str=Form(''), answer_tikz_assets: str=Form('[]'), figure_align: str=Form('right'), figure_align_custom: bool=Form(False), figure_size: str=Form('auto'), image_layouts: str=Form('{}'), tags: str=Form(''), related_question_id: str=Form(''), image_paths: str=Form('[]'), duplicate_snapshot_hash: str=Form(''), duplicate_override: str=Form(''), knowledge_points: Optional[str]=Form(None), db: Session=Depends(get_db), *, dependencies: QuestionCommandsDependencies):
     asset_promotions: list[tuple[dependencies.Path, dependencies.Path]] = []
     duplicate_warning = ""
     try:
+        normalized_points = normalize_question_points(knowledge_points if knowledge_points is not None else [], db)
         duplicate_snapshot_hash = str(duplicate_snapshot_hash or "").strip()
         duplicate_override = str(duplicate_override or "").strip()
         if duplicate_override not in {"", "independent"}:
@@ -293,6 +295,7 @@ def create_question(background_tasks: BackgroundTasks, content: str=Form(...), q
                     db_question.association_group_id = g2
 
         db.add(db_question)
+        replace_question_points(db_question, normalized_points, db)
         db.flush()
 
         try:
@@ -380,7 +383,7 @@ def create_question(background_tasks: BackgroundTasks, content: str=Form(...), q
     return response
 
 
-def update_question(question_id: int, background_tasks: BackgroundTasks, content: str=Form(...), question_type: str=Form(...), category_compulsory: str=Form(''), category_chapter: str=Form(''), category_knowledge: str=Form(''), difficulty: str=Form(...), source: str=Form(''), answer_markdown: str=Form(''), review: str=Form(''), tikz_code: str=Form(''), content_tikz_assets: Optional[str]=Form(None), tikz_reference_image_path: str=Form(''), answer_tikz_assets: str=Form('[]'), figure_align: str=Form('right'), figure_align_custom: Optional[bool]=Form(None), figure_size: Optional[str]=Form(None), image_layouts: Optional[str]=Form(None), tags: str=Form(''), related_question_id: str=Form(''), image_paths: str=Form('[]'), duplicate_snapshot_hash: str=Form(''), duplicate_override: str=Form(''), db: Session=Depends(get_db), *, dependencies: QuestionCommandsDependencies):
+def update_question(question_id: int, background_tasks: BackgroundTasks, content: str=Form(...), question_type: str=Form(...), category_compulsory: str=Form(''), category_chapter: str=Form(''), category_knowledge: str=Form(''), difficulty: str=Form(...), source: str=Form(''), answer_markdown: str=Form(''), review: str=Form(''), tikz_code: str=Form(''), content_tikz_assets: Optional[str]=Form(None), tikz_reference_image_path: str=Form(''), answer_tikz_assets: str=Form('[]'), figure_align: str=Form('right'), figure_align_custom: Optional[bool]=Form(None), figure_size: Optional[str]=Form(None), image_layouts: Optional[str]=Form(None), tags: str=Form(''), related_question_id: str=Form(''), image_paths: str=Form('[]'), duplicate_snapshot_hash: str=Form(''), duplicate_override: str=Form(''), knowledge_points: Optional[str]=Form(None), db: Session=Depends(get_db), *, dependencies: QuestionCommandsDependencies):
     db_question = db.query(dependencies.Question).filter(dependencies.Question.id == question_id).first()
     if not db_question:
         raise dependencies.HTTPException(status_code=404, detail="未找到对应的题目")
@@ -389,6 +392,7 @@ def update_question(question_id: int, background_tasks: BackgroundTasks, content
     duplicate_warning = ""
     old_images = list(db_question.image_paths)
     try:
+        normalized_points = normalize_question_points(knowledge_points, db) if knowledge_points is not None else None
         duplicate_snapshot_hash = str(duplicate_snapshot_hash or "").strip()
         duplicate_override = str(duplicate_override or "").strip()
         if duplicate_override not in {"", "independent"}:
@@ -447,6 +451,10 @@ def update_question(question_id: int, background_tasks: BackgroundTasks, content
         if figure_size is not None:
             db_question.figure_size = figure_size
         db_question.tags = tags
+        # Old clients omit the field: preserve existing independent labels.
+        # An explicit [] is the only way to clear every label.
+        if normalized_points is not None:
+            replace_question_points(db_question, normalized_points, db)
         # Physical cleanup happens only after the database commit succeeds.
         removed_images = set(old_images) - set(parsed_img_paths)
 

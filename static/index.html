@@ -391,6 +391,19 @@
                     <option value="">所有章节</option>
                 </select>
                 <select id="filterKnowledge" aria-label="小节" class="glass-select" disabled><option value="">先选择章节</option></select>
+                <details class="kp-panel kp-filter-panel">
+                    <summary>考查知识点筛选（可多选）</summary>
+                    <div class="kp-search-row"><input id="filterPointSearch" type="search" class="glass-input" aria-label="搜索筛选知识点" placeholder="输入名称或别名，例如：动量守恒">
+                        <button id="searchFilterPointsBtn" type="button" class="glass-btn kp-button">查询</button></div>
+                    <div id="filterPointResults" class="kp-results"></div>
+                    <p id="filterPointStatus" class="kp-hint" role="status" aria-live="polite"></p>
+                    <div id="filterPointSelection" class="kp-results"></div>
+                    <div class="kp-filter-options">
+                        <select id="filterPointMatch" class="glass-select" aria-label="知识点匹配方式"><option value="any">包含任一知识点</option><option value="all">同时包含全部知识点</option></select>
+                        <select id="filterPointRole" class="glass-select" aria-label="知识点主辅范围"><option value="all">主、辅知识均参与</option><option value="main">仅主要考查</option></select>
+                        <label><input id="filterPointsUnlabeled" type="checkbox">只看尚未标注</label>
+                    </div>
+                </details>
                 <select id="filterType" aria-label="题型" class="glass-select text-xs px-2.5 py-2.5 rounded-xl">
                     <option value="">所有题型</option>
                     <option value="single_choice">单选题</option>
@@ -565,6 +578,21 @@
                         </div>
                     </div>
 
+                    <section class="kp-panel" aria-labelledby="knowledgePointsHeading">
+                        <h4 id="knowledgePointsHeading">考查知识点（可多选）</h4>
+                        <p class="kp-hint">与教材位置、个人标签分别保存；综合题可跨章节选择。此处仅人工标注，不调用 AI。</p>
+                        <div id="knowledgePointSelection" class="kp-selection"></div>
+                        <div class="kp-search-row"><input id="knowledgePointSearch" type="search" class="glass-input" aria-label="搜索考查知识点" placeholder="搜索名称或别名">
+                            <button id="searchKnowledgePointsBtn" type="button" class="glass-btn kp-button">查询</button></div>
+                        <div id="knowledgePointResults" class="kp-results"></div>
+                        <p id="knowledgePointStatus" class="kp-hint" role="status" aria-live="polite"></p>
+                        <details><summary>找不到？新增个人知识点</summary>
+                            <div class="kp-search-row"><input id="newKnowledgePointName" class="glass-input" maxlength="200" aria-label="新增知识点名称" placeholder="输入清晰、不重复的知识点名称">
+                                <button id="createKnowledgePointBtn" type="button" class="glass-btn kp-button">新增并选择</button></div>
+                            <input id="newKnowledgePointAliases" class="glass-input" maxlength="1000" aria-label="知识点搜索别名" placeholder="搜索别名（可选，多个用逗号分隔）">
+                            <p class="kp-hint">新增立即进入个人目录；选中后仍需保存题目。模型、解题方法与易错点可先放入下方个人标签。</p>
+                        </details>
+                    </section>
                     <!-- Row 3: Custom Tags -->
                     <div class="mt-3">
                         <label for="editTags" class="block text-[11px] font-medium text-slate-500 mb-1 flex items-center">
@@ -1016,6 +1044,7 @@
                             <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">难度：未定</span>
                         </div>
 
+                        <div id="knowledgePointSummary" class="kp-hint" aria-live="polite"></div>
                         <!-- Content Render Box Container -->
                         <div class="relative group/copy">
                             <div class="text-sm leading-relaxed text-slate-800 space-y-4 preview-box pb-6" id="paperContent">
@@ -2249,6 +2278,7 @@
 
     <!-- MAIN APP JAVASCRIPT -->
     <script src="/static/js/api.js"></script>
+    <script src="/static/js/knowledge-points.js"></script>
     <script src="/static/js/editor.js"></script>
     <script src="/static/js/ocr.js"></script>
     <script src="/static/js/import.js"></script>

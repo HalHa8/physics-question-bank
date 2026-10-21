@@ -9,6 +9,7 @@ from fastapi import Depends
 from sqlalchemy.orm import Session
 from mathbank.database import Question, get_db
 from mathbank.question_duplicates import QuestionDuplicateInput
+from mathbank.knowledge_points import apply_knowledge_point_filters
 
 
 @dataclass(frozen=True)
@@ -58,7 +59,7 @@ def get_seq_mapping(db: Session, question_ids=None, *, dependencies: QuestionQue
     return {question_id: int(seq_num) for question_id, seq_num in rows}
 
 
-def list_questions(q: str=None, search: str=None, compulsory: str=None, category_compulsory: str=None, chapter: str=None, category_chapter: str=None, knowledge: str=None, category_knowledge: str=None, qtype: str=None, question_type: str=None, difficulty: str=None, source: str=None, page: Optional[int]=None, page_size: int=20, sort: str='desc', db: Session=Depends(get_db), *, dependencies: QuestionQueriesDependencies):
+def list_questions(q: str=None, search: str=None, compulsory: str=None, category_compulsory: str=None, chapter: str=None, category_chapter: str=None, knowledge: str=None, category_knowledge: str=None, qtype: str=None, question_type: str=None, difficulty: str=None, source: str=None, page: Optional[int]=None, page_size: int=20, sort: str='desc', knowledge_points: Optional[str]=None, point_match: str='any', point_role: str='all', point_unlabeled: bool=False, db: Session=Depends(get_db), *, dependencies: QuestionQueriesDependencies):
     search_q = q or search
     comp_val = compulsory or category_compulsory
     chap_val = chapter or category_chapter
@@ -66,6 +67,10 @@ def list_questions(q: str=None, search: str=None, compulsory: str=None, category
     type_val = qtype or question_type
 
     query = db.query(dependencies.Question)
+    try:
+        query = apply_knowledge_point_filters(query, knowledge_points or [], point_match, point_role, point_unlabeled)
+    except ValueError as exc:
+        raise dependencies.HTTPException(status_code=400, detail=str(exc)) from exc
 
     # Check if searching for a specific display sequence number
     target_id_by_seq = None

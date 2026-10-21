@@ -10,6 +10,7 @@ from mathbank import solve_service
 from mathbank import settings_service
 from mathbank import question_queries
 from mathbank import question_commands
+from mathbank import knowledge_point_service
 from mathbank import curriculum_service
 from mathbank import classification_service
 from mathbank import paper_parse_service
@@ -20,6 +21,11 @@ from mathbank import paper_record_service
 from mathbank import paper_export_service
 
 DOMAINS = (
+    (
+        knowledge_point_service,
+        knowledge_point_service.KnowledgePointServiceDependencies,
+        ('get_knowledge_points', 'add_knowledge_point'),
+    ),
     (
         maintenance_service,
         maintenance_service.MaintenanceServiceDependencies,

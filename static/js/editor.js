@@ -189,6 +189,7 @@ window.normalizeEditorFractions = normalizeEditorFractions;
                 category_compulsory: document.getElementById('editCompulsory').value,
                 category_chapter: document.getElementById('editChapter').value,
                 category_knowledge: document.getElementById('editKnowledge').value,
+                knowledge_points: window.KnowledgePointState ? window.KnowledgePointState.key() : '[]',
                 related_question_id: document.getElementById('editRelatedQuestion').value,
                 image_paths: JSON.stringify(uploadedImages),
                 tikz_code: TikzState.contentAssets[0] ? TikzState.contentAssets[0].tikz_code : '',
@@ -215,6 +216,7 @@ window.normalizeEditorFractions = normalizeEditorFractions;
                 category_compulsory: snapshot.category_compulsory,
                 category_chapter: snapshot.category_chapter,
                 category_knowledge: snapshot.category_knowledge,
+                knowledge_points: snapshot.knowledge_points || '[]',
                 related_question_id: snapshot.related_question_id || '',
                 image_paths: snapshot.image_paths,
                 tikz_code: snapshot.tikz_code || '',
@@ -348,6 +350,7 @@ window.normalizeEditorFractions = normalizeEditorFractions;
                    currentComp === snapshot.category_compulsory &&
                    currentChap === snapshot.category_chapter &&
                    currentKnow === snapshot.category_knowledge &&
+                   (window.KnowledgePointState ? window.KnowledgePointState.key() : '[]') === (snapshot.knowledge_points || '[]') &&
                    currentRelatedQuestionId === (snapshot.related_question_id || '') &&
                    currentImages === snapshot.image_paths &&
                    currentTikzCode === (snapshot.tikz_code || '') &&
@@ -556,11 +559,14 @@ window.normalizeEditorFractions = normalizeEditorFractions;
             if (!button || !clear) return;
             const selected = ['filterCompulsory', 'filterChapter', 'filterKnowledge', 'filterType', 'filterDifficulty', 'filterSource']
                 .map(id => document.getElementById(id)).filter(element => element && element.value);
-            button.textContent = selected.length ? `筛选 (${selected.length})` : '筛选';
+            const pointCount = window.PhysicsKnowledgePoints ? window.PhysicsKnowledgePoints.filterCount() : 0;
+            const count = selected.length + pointCount;
+            button.textContent = count ? `筛选 (${count})` : '筛选';
             button.setAttribute('data-tooltip', selected.map(element => element.tagName === 'SELECT' ? element.selectedOptions[0]?.textContent : element.value).join(' / ') || '按学段、章节、小节等条件筛选');
-            clear.hidden = selected.length === 0;
+            clear.hidden = count === 0;
         }
         function clearBankFilters() {
+            if (window.PhysicsKnowledgePoints) window.PhysicsKnowledgePoints.clearFilters();
             ['filterCompulsory', 'filterChapter', 'filterKnowledge', 'filterType', 'filterDifficulty', 'filterSource'].forEach(id => {
                 const element = document.getElementById(id);
                 if (element) element.value = '';
@@ -821,6 +827,7 @@ window.normalizeEditorFractions = normalizeEditorFractions;
                 category_compulsory: compulsory,
                 category_chapter: chapter,
                 category_knowledge: knowledge,
+                knowledge_points: window.KnowledgePointState ? window.KnowledgePointState.export() : [],
                 difficulty: difficulty,
                 source: source,
                 answer_markdown: answerMarkdown,
@@ -878,6 +885,7 @@ window.normalizeEditorFractions = normalizeEditorFractions;
                 window.invalidatePendingQuestionDetailLoad();
             }
             EditorState.useDraft(draft);
+            if (window.KnowledgePointState) window.KnowledgePointState.hydrate(draft);
             
             // Populate form fields
             document.getElementById('editContent').value = draft.content || '';
@@ -987,6 +995,8 @@ window.normalizeEditorFractions = normalizeEditorFractions;
             const source = document.getElementById('filterSource') ? document.getElementById('filterSource').value.trim().toLowerCase() : '';
             
             let drafts = getLocalStorageDrafts();
+
+            if (window.PhysicsKnowledgePoints) drafts = drafts.filter(window.PhysicsKnowledgePoints.matchesDraft);
             
             // Filter by type
             if (qtype) {
@@ -1573,6 +1583,7 @@ window.normalizeEditorFractions = normalizeEditorFractions;
             if (chapter) params.append('chapter', chapter);
             if (knowledge) params.append('knowledge', knowledge);
             if (source) params.append('source', source);
+            if (window.PhysicsKnowledgePoints) window.PhysicsKnowledgePoints.appendFilters(params);
             params.append('page', String(requestedPage));
             params.append('page_size', String(PAGE_LIMIT));
             params.append('sort', sortOrder === 'asc' ? 'asc' : 'desc');

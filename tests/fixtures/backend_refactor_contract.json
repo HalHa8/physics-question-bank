@@ -89,6 +89,16 @@
       "name": "api_heartbeat"
     },
     {
+      "path": "/api/knowledge-points",
+      "method": "GET",
+      "name": "get_knowledge_points"
+    },
+    {
+      "path": "/api/knowledge-points",
+      "method": "POST",
+      "name": "add_knowledge_point"
+    },
+    {
       "path": "/api/ocr",
       "method": "POST",
       "name": "ocr_formula"
@@ -313,5 +323,21 @@
       "method": "GET",
       "name": "healthz"
     }
-  ]
+  ],
+  "intentional_route_additions": {
+    "reason": "Manual independent physics catalogue; existing route names and methods retained.",
+    "routes": [
+      {
+        "path": "/api/knowledge-points",
+        "method": "GET",
+        "name": "get_knowledge_points"
+      },
+      {
+        "path": "/api/knowledge-points",
+        "method": "POST",
+        "name": "add_knowledge_point"
+      }
+    ],
+    "behavior_regressions": "tests/test_physics_knowledge_points.py"
+  }
 }
