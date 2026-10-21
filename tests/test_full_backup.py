@@ -315,11 +315,14 @@ def test_restore_rejects_future_schema_before_replacing_current_database(tmp_pat
             "question_id INTEGER NOT NULL, fingerprint_version INTEGER NOT NULL, "
             "PRIMARY KEY(question_id, fingerprint_version))"
         )
-    # A future fixture must still contain the known v11 tables; otherwise the
+    # A future fixture must still contain all known v12 tables; otherwise the
     # new incomplete-backup guard correctly fails before the downgrade check.
     future_engine = create_engine(f"sqlite:///{future_database}")
     try:
-        for model in (KnowledgePoint, KnowledgePointCurriculum, QuestionKnowledgePoint):
+        from mathbank.database import (QuestionSubKnowledge, QuestionSourceLabel,
+                                       QuestionReference, DocumentImportReceipt)
+        for model in (KnowledgePoint, KnowledgePointCurriculum, QuestionKnowledgePoint,
+                      QuestionSubKnowledge, QuestionSourceLabel, QuestionReference, DocumentImportReceipt):
             model.__table__.create(future_engine)
     finally:
         future_engine.dispose()

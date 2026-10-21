@@ -52,8 +52,8 @@ def setup(tmp_path, monkeypatch):
     add_question(state)
     add_question(state, page=2)
     state.response = {"choices": [{"finish_reason": "stop", "message": {"content": json.dumps({"items": [
-        {"id": "item_001", "decision": "equivalent", "evidence": "原页函数及所求不变，已知改为给出。"},
-        {"id": "item_002", "decision": "uncertain", "evidence": "原页图像中的条件边界看不清。"},
+        verdict(0, "equivalent", "原页函数及所求不变，已知改为给出。", [1]),
+        verdict(1, "uncertain", "原页图像中的条件边界看不清。", [2]),
     ]})}}], "usage": {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 155}}
     builder = verify.prompts.build_pdf_source_verification_prompt
     def prompt(items):
@@ -73,8 +73,15 @@ def call(setup, data=None, **kwargs):
     return verify.verify_pdf_source_suspicions(setup.questions, setup.diagnostics, setup.urls, setup.numbers, **kwargs)
 
 
-def all_equivalent(count):
-    return {"items": [{"id": f"item_{index + 1:03d}", "decision": "equivalent", "evidence": "原页全部条件与题干一致，仅表述排版差异。"}
+def verdict(index, decision, evidence, pages):
+    return {"id": f"item_{index + 1:03d}", "source_number": 14 + index,
+            "source_pages": pages, "checks": {key: True for key in verify._CHECKS},
+            "decision": decision, "evidence": evidence}
+
+
+def all_equivalent(count, setup):
+    return {"items": [verdict(index, "equivalent", "原页全部条件与题干一致，仅表述排版差异。",
+                             setup.diagnostics["pdf_review_items"][index]["source_pages"])
                       for index in range(count)]}
 
 
@@ -82,18 +89,21 @@ def test_confirmed_only_clear_review_keep_original_evidence_and_text(setup):
     original = deepcopy(setup.questions)
     report = call(setup)
     assert report == {"status": "completed", "calls": 1, "checked": 2, "confirmed": 1, "pending": 1, "skipped": 0,
-        "usage": setup.response["usage"], "notes": [], "skipped_reasons": [], "items": [
+        "usage": setup.response["usage"], "notes": [], "skipped_reasons": [], "invalid_items": [], "items": [
             {"id": "item_001", "question_index": 0, "source_number": 14, "source_pages": [1],
-             "decision": "equivalent", "evidence": "原页函数及所求不变，已知改为给出。"},
+             "decision": "equivalent", "checks": {key: True for key in verify._CHECKS}, "evidence": "原页函数及所求不变，已知改为给出。"},
             {"id": "item_002", "question_index": 1, "source_number": 15, "source_pages": [2],
-             "decision": "uncertain", "evidence": "原页图像中的条件边界看不清。"}]}
+             "decision": "uncertain", "checks": {key: True for key in verify._CHECKS}, "evidence": "原页图像中的条件边界看不清。"}]}
     confirmed = setup.questions[0]["source_review"]
     assert confirmed["required"] is False and confirmed["verified_by"] == "vision"
     assert confirmed["source_excerpt"] == original[0]["source_review"]["source_excerpt"]
     assert confirmed["reasons"] == original[0]["source_review"]["reasons"]
     assert len(confirmed["verification"]["snapshot_hash"]) == 64
     assert confirmed["verification"]["model"] == setup.provider.model_name
-    assert setup.questions[1] == original[1]
+    pending = setup.questions[1]['source_review']
+    assert pending['required'] is True
+    assert pending['verification_attempt']['decision'] == 'uncertain'
+    assert pending['source_excerpt'] == original[1]['source_review']['source_excerpt']
     for new, old in zip(setup.questions, original):
         assert new["content"] == old["content"] and new["answer_markdown"] == old["answer_markdown"]
     assert setup.diagnostics["source_review_count"] == 1
@@ -160,7 +170,7 @@ def test_critical_formula_condition_or_image_change_never_reaches_model(setup, s
     setup.diagnostics = {"source_matches": [], "pdf_review_items": []}
     add_question(setup, source=source, output=output)
     original = deepcopy(setup.questions)
-    report = call(setup, all_equivalent(1))
+    report = call(setup, all_equivalent(1, setup))
     assert report["status"] == "no_candidates" and report["skipped"] == report["pending"] == 1
     assert not setup.calls and setup.questions == original
 
@@ -201,14 +211,14 @@ def test_ambiguous_provenance_or_other_review_reasons_stay_manual(setup, change)
     elif change == "wrong_offsets": match["source_end"] += 1
     elif change == "boolean_index": match["question_index"] = False
     elif change == "conflicting_review_item": item["reasons"] = ["配图待核对"]
-    report = call(setup, all_equivalent(1))
+    report = call(setup, all_equivalent(1, setup))
     assert report["calls"] == 0 and report["pending"] == 1 and report["skipped"] == 1
     assert review["required"] is True
 
 
 @pytest.mark.parametrize("change", ["missing", "duplicate", "unknown", "decision", "extra", "empty_evidence", "long_evidence", "root_field", "not_list"])
-def test_bad_model_contract_cannot_clear_even_first_valid_item(setup, change):
-    data = all_equivalent(2)
+def test_bad_model_contract_retains_invalid_items_and_only_accepts_complete_items(setup, change):
+    data = all_equivalent(2, setup)
     if change == "missing": data["items"].pop()
     elif change == "duplicate": data["items"][1]["id"] = "item_001"
     elif change == "unknown": data["items"][1]["id"] = "unknown"
@@ -220,14 +230,21 @@ def test_bad_model_contract_cannot_clear_even_first_valid_item(setup, change):
     elif change == "not_list": data["items"] = {}
     original, diagnostics = deepcopy(setup.questions), deepcopy(setup.diagnostics)
     report = call(setup, data)
-    assert report["status"] == "failed" and report["calls"] == 1 and report["confirmed"] == 0
-    assert setup.questions == original and setup.diagnostics == diagnostics
+    partial = change in {'missing', 'decision', 'extra', 'empty_evidence', 'long_evidence'}
+    assert report["status"] == ('partial' if partial else 'failed') and report["calls"] == 1
+    assert report["confirmed"] == int(partial)
+    assert setup.questions[1] == original[1] and setup.questions[1]['source_review']['required']
+    if partial:
+        assert setup.questions[0]['source_review']['required'] is False
+        assert report['invalid_items'][0]['question_index'] == 1
+    else:
+        assert setup.questions == original and setup.diagnostics == diagnostics
 
 
 @pytest.mark.parametrize("finish", ["length", "content_filter", None])
 def test_truncated_response_preserves_required_and_actual_usage(setup, finish):
     setup.response["choices"][0]["finish_reason"] = finish
-    report = call(setup, all_equivalent(2))
+    report = call(setup, all_equivalent(2, setup))
     assert report["status"] == "failed" and report["confirmed"] == 0
     assert report["usage"] == setup.response["usage"]
     assert all(question["source_review"]["required"] for question in setup.questions)
@@ -242,21 +259,21 @@ def test_inflight_edits_invalidate_all_decisions(setup, monkeypatch, field):
         else: setup.questions[0][field] += "用户编辑"
         return SimpleNamespace(status_code=200, json=lambda: deepcopy(setup.response))
     monkeypatch.setattr(verify, "post_chat_completion", post)
-    report = call(setup, all_equivalent(2))
+    report = call(setup, all_equivalent(2, setup))
     assert report["status"] == "failed" and "已变化" in report["notes"][0]
     assert all(question["source_review"]["required"] for question in setup.questions)
 
 
 def test_eight_item_limit_and_four_page_limit_do_not_truncate_items(setup):
     for _ in range(8): add_question(setup)
-    report = call(setup, all_equivalent(8))
+    report = call(setup, all_equivalent(8, setup))
     assert report["checked"] == report["confirmed"] == 8 and report["skipped"] == report["pending"] == 2
     assert len(setup.calls) == 1
 
 
 def test_page_limit_skips_fifth_page_and_keeps_full_available_pages(setup):
     for page in [3, 4, 5]: add_question(setup, page=page)
-    report = call(setup, all_equivalent(4))
+    report = call(setup, all_equivalent(4, setup))
     assert report["checked"] == 4 and report["pending"] == report["skipped"] == 1
     assert len([part for part in setup.calls[0][1]["messages"][0]["content"] if part["type"] == "image_url"]) == 4
 
@@ -268,8 +285,11 @@ def test_text_budget_skips_whole_items_and_never_truncates(setup, monkeypatch, m
         report = call(setup)
         assert report["calls"] == 0 and report["pending"] == report["skipped"] == 2
     else:
-        monkeypatch.setattr(verify, "MAX_TOTAL_CHARS", 65)
-        report = call(setup, all_equivalent(1))
+        candidate = verify._candidate(0, setup.questions[0], setup.diagnostics, allow_image_changes=True)
+        evidence = verify._candidate_images([candidate], ())
+        limit = verify._planned_text_chars([candidate], None, evidence)
+        monkeypatch.setattr(verify, "MAX_TOTAL_CHARS", limit)
+        report = call(setup, all_equivalent(1, setup))
         assert report["checked"] == 1 and report["pending"] == report["skipped"] == 1
         assert setup.prompt_items[0][0]["source_excerpt"] == setup.diagnostics["source_matches"][0]["source_excerpt"]
 
@@ -390,7 +410,7 @@ def first_pass_cache(setup):
 def test_first_pass_cache_is_slice_verified_and_not_resent_in_full(setup):
     cache = first_pass_cache(setup)
     original = deepcopy(cache)
-    report = call(setup, all_equivalent(2), source_pages=cache)
+    report = call(setup, all_equivalent(2, setup), source_pages=cache)
     assert report["confirmed"] == 2 and report["calls"] == 1 and report["skipped_reasons"] == []
     assert cache == original
     for question in setup.questions:
@@ -417,7 +437,7 @@ def test_incomplete_or_mismatched_cache_never_qualifies_a_referee_call(setup, ch
     elif change == "truncated": cache[0]["truncated"] = True
     elif change == "too_long": cache[0]["markdown"] = "字" * (verify.MAX_CACHED_PAGE_CHARS + 1)
     elif change == "not_list": cache = {}
-    report = call(setup, all_equivalent(2), source_pages=cache)
+    report = call(setup, all_equivalent(2, setup), source_pages=cache)
     assert report["calls"] == 0 and report["pending"] == report["skipped"] == 2
     assert all(item["code"] == "source_evidence_missing" for item in report["skipped_reasons"])
     assert all(question["source_review"]["required"] for question in setup.questions)
@@ -426,7 +446,7 @@ def test_incomplete_or_mismatched_cache_never_qualifies_a_referee_call(setup, ch
 def test_cache_excerpt_mismatch_skips_only_that_item_and_keeps_other_proven_item(setup):
     cache = first_pass_cache(setup)
     cache[0]["markdown"] = cache[0]["markdown"].replace("已知", "另知")  # Same length, so later page offsets stay exact.
-    report = call(setup, {"items": [{"id": "item_002", "decision": "equivalent", "evidence": "第15题原页核对通过。"}]}, source_pages=cache)
+    report = call(setup, {"items": [verdict(1, "equivalent", "第15题原页核对通过。", [2])]}, source_pages=cache)
     assert report["confirmed"] == 1 and report["skipped"] == 1 and report["pending"] == 1
     assert report["skipped_reasons"][0]["question_index"] == 0
     assert report["skipped_reasons"][0]["code"] == "source_evidence_missing"
@@ -440,7 +460,7 @@ def test_cache_changes_during_request_invalidate_the_snapshot(setup, monkeypatch
         cache[0]["markdown"] += "后来编辑"
         return SimpleNamespace(status_code=200, json=lambda: deepcopy(setup.response))
     monkeypatch.setattr(verify, "post_chat_completion", post)
-    report = call(setup, all_equivalent(2), source_pages=cache)
+    report = call(setup, all_equivalent(2, setup), source_pages=cache)
     assert report["status"] == "failed" and report["confirmed"] == 0 and report["calls"] == 1
     assert all(question["source_review"]["required"] for question in setup.questions)
 

@@ -65,7 +65,7 @@ def test_catalogue_paths_do_not_limit_cross_chapter_question_labels(catalog):
 
 
 @pytest.mark.parametrize('value', ['{', None, {}, ['x'], [{'code': 'unknown'}], [{'code': MAIN}, {'code': MAIN}],
-                                  [{'code': MAIN, 'role': 'wrong'}], [{'code': MAIN, 'status': 'suggested'}], [{}], [True]])
+                                  [{'code': MAIN, 'role': 'wrong'}], [{'code': MAIN, 'status': 'invalid'}], [{}], [True]])
 def test_malformed_manual_labels_fail_without_writes(catalog, value):
     with pytest.raises(ValueError):
         normalize_question_points(value, catalog)
@@ -156,7 +156,7 @@ def test_v10_migration_backup_first_preserves_every_old_question_column(tmp_path
         with engine.connect() as conn:
             before = conn.exec_driver_sql('SELECT * FROM questions').all()
         result = db_migrations.migrate_database(engine)
-        assert result['from_version'] == 10 and result['to_version'] == 11
+        assert result['from_version'] == 10 and result['to_version'] == db_migrations.LATEST_SCHEMA_VERSION
         with closing(sqlite3.connect(result['backup'])) as backup:
             assert backup.execute('PRAGMA user_version').fetchone()[0] == 10
             assert 'knowledge_points' not in {row[0] for row in backup.execute("SELECT name FROM sqlite_master WHERE type='table'")}

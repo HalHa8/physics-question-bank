@@ -21,6 +21,18 @@ def test_old_operations_and_components_outside_knowledge_scope_are_unchanged():
                 assert _hash(schema['paths'][path][method]) == digest, (path, method)
         for name, digest in contract['unchanged_components'].items():
             assert _hash(schema['components']['schemas'][name]) == digest, name
+        for name, audit in contract.get('audited_components', {}).items():
+            assert _hash(schema['components']['schemas'][name]) == audit['sha256'], name
+            assert audit['previous_sha256'] and audit['reason'] and audit['behavior_regressions']
+        forms = schema['components']['schemas']
+        assert forms['Body_ai_classify_api_ai_classify_post']['required'] == ['content']
+        assert forms['Body_ai_parse_paper_api_ai_parse_paper_post']['required'] == ['latex_content']
+        for kind in ('pdf', 'docx'):
+            form = forms[f'Body_upload_{kind}_task_api_upload_{kind}_task_post']
+            assert form['required'] == ['file']
+            assert form['properties'][f'{kind}_verify_suspicions']['default'] in (False, 'false')
+            assert form['properties']['generate_answers']['default'] == 'false'
+            assert 'client_request_id' not in form['required'] and 'paper_title' not in form['required']
         parameters = {item['name']: item for item in schema['paths']['/api/questions']['get']['parameters']}
         for name in ('knowledge_points', 'point_match', 'point_role', 'point_unlabeled'):
             assert parameters[name]['required'] is False

@@ -1,46 +1,46 @@
 """Paper record service; all application dependencies are explicit."""
 
-from dataclasses import dataclass
-from typing import Any, Callable
-
-from mathbank.application_state import RuntimeState
-from fastapi import Depends, BackgroundTasks
+from typing import List, Optional
+from pathlib import Path
+from fastapi import BackgroundTasks, Depends, File, Form, Header, HTTPException, Query, Request, Response, UploadFile
 from sqlalchemy.orm import Session
 from mathbank.database import get_db
+from dataclasses import dataclass
+from typing import Any, Callable
+from mathbank.application_state import RuntimeState
 
 
 @dataclass(frozen=True)
 class PaperRecordServiceDependencies:
-    state: RuntimeState
     JSONResponse: Any
     Paper: Any
     PaperQuestion: Any
     Question: Any
-    get_seq_mapping: Callable
+    get_active_version_code: Any
+    get_seq_mapping: Any
     json: Any
     normalize_section_order: Any
-    schedule_database_export: Callable
+    reference_payloads: Any
+    schedule_database_export: Any
+    state: RuntimeState
 
 
 def get_paper_questions(ids: str='', db: Session=Depends(get_db), *, dependencies: PaperRecordServiceDependencies):
     """获取指定 ID 列表的完整题目数据（组卷试题篮批量拉取）"""
     if not ids:
-        return {"status": "success", "data": []}
+        return {'status': 'success', 'data': []}
     try:
-        id_list = [int(i.strip()) for i in ids.split(",") if i.strip().isdigit()]
+        id_list = [int(i.strip()) for i in ids.split(',') if i.strip().isdigit()]
         if not id_list:
-            return {"status": "success", "data": []}
+            return {'status': 'success', 'data': []}
         questions = db.query(dependencies.Question).filter(dependencies.Question.id.in_(id_list)).all()
-        q_map = {q.id: q.to_dict() for q in questions}
+        q_map = {q.id: q.to_dict(dependencies.get_active_version_code()) for q in questions}
+        refs_by_id = dependencies.reference_payloads(db, questions)
         seq_map = dependencies.get_seq_mapping(db, id_list)
-        result = [
-            {**q_map[qid], "seq_num": seq_map.get(qid)}
-            for qid in id_list
-            if qid in q_map
-        ]
-        return {"status": "success", "data": result}
+        result = [{**q_map[qid], 'question_references': refs_by_id.get(qid, []), 'seq_num': seq_map.get(qid)} for qid in id_list if qid in q_map]
+        return {'status': 'success', 'data': result}
     except Exception as e:
-        return dependencies.JSONResponse(content={"status": "error", "message": str(e)}, status_code=500)
+        return dependencies.JSONResponse(content={'status': 'error', 'message': str(e)}, status_code=500)
 
 
 def save_paper(payload: dict, background_tasks: BackgroundTasks, db: Session=Depends(get_db), *, dependencies: PaperRecordServiceDependencies):
@@ -154,30 +154,14 @@ def get_paper_detail(paper_id: int, db: Session=Depends(get_db), *, dependencies
     try:
         paper = db.query(dependencies.Paper).filter(dependencies.Paper.id == paper_id).first()
         if not paper:
-            return dependencies.JSONResponse(content={"status": "error", "message": "试卷不存在"}, status_code=404)
-
-        rows = (
-            db.query(dependencies.PaperQuestion, dependencies.Question)
-            .join(dependencies.Question, dependencies.Question.id == dependencies.PaperQuestion.question_id)
-            .filter(dependencies.PaperQuestion.paper_id == paper_id)
-            .order_by(dependencies.PaperQuestion.order_index.asc())
-            .all()
-        )
-
-        questions_list = [
-            {
-                "id": question.id,
-                "score": paper_question.score,
-                "question": question.to_dict(),
-            }
-            for paper_question, question in rows
-        ]
-
+            return dependencies.JSONResponse(content={'status': 'error', 'message': '试卷不存在'}, status_code=404)
+        rows = db.query(dependencies.PaperQuestion, dependencies.Question).join(dependencies.Question, dependencies.Question.id == dependencies.PaperQuestion.question_id).filter(dependencies.PaperQuestion.paper_id == paper_id).order_by(dependencies.PaperQuestion.order_index.asc()).all()
+        questions_list = [{'id': question.id, 'score': paper_question.score, 'question': question.to_dict(dependencies.get_active_version_code())} for (paper_question, question) in rows]
         result = paper.to_dict()
-        result["questions"] = questions_list
-        return {"status": "success", "data": result}
+        result['questions'] = questions_list
+        return {'status': 'success', 'data': result}
     except Exception as e:
-        return dependencies.JSONResponse(content={"status": "error", "message": str(e)}, status_code=500)
+        return dependencies.JSONResponse(content={'status': 'error', 'message': str(e)}, status_code=500)
 
 
 def delete_paper(paper_id: int, background_tasks: BackgroundTasks, db: Session=Depends(get_db), *, dependencies: PaperRecordServiceDependencies):

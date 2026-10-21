@@ -2,10 +2,18 @@
   "baseline_commit": "94de5dd1fd5e9fd4ea6256312be2e1ebf311899f",
   "intentional_algorithm_updates": {
     "ocr_via_provider": {
-      "upstream_commit": "3252b7237f3add8f632f00a413a23814ed8882a4",
-      "reason": "Single screenshots request named per-figure slots once; reject incomplete output and disable retries; PDF text protocol unchanged.",
-      "previous_body_sha256": "365fb58cae8042b4da63a72dd6c36291acd74b6cc4ddba605c540bbc092b250a",
-      "behavior_regressions": "tests/test_physics_ocr_crops.py"
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Single selected provider, bounded stream timeout and cancellation; original physical image crops preserved; no paid retry or provider fallback.",
+      "previous_body_sha256": "ba642bc0d7b4341d677868c044b924260d5f7817e3259c0c3206d147e9887a43",
+      "behavior_regressions": "tests/test_pdf_page_vision.py; tests/test_pdf_region_vision.py; tests/test_multimodal_ai.py; tests/test_physics_ocr_crops.py",
+      "previous_audits": [
+        {
+          "upstream_commit": "3252b7237f3add8f632f00a413a23814ed8882a4",
+          "reason": "Single screenshots request named per-figure slots once; reject incomplete output and disable retries; PDF text protocol unchanged.",
+          "previous_body_sha256": "365fb58cae8042b4da63a72dd6c36291acd74b6cc4ddba605c540bbc092b250a",
+          "behavior_regressions": "tests/test_physics_ocr_crops.py"
+        }
+      ]
     },
     "ocr_formula": {
       "upstream_commit": "3252b7237f3add8f632f00a413a23814ed8882a4",
@@ -14,38 +22,518 @@
       "behavior_regressions": "tests/test_physics_ocr_crops.py; tests/test_single_ocr_illustrations.py; tests/test_single_ocr_frontend.py"
     },
     "heal_database_curriculum_names": {
-      "upstream_commit": "3252b7237f3add8f632f00a413a23814ed8882a4",
-      "reason": "Keep custom and historical knowledge labels; exclude PhysicsBank P mirrors from mathematics book aliases.",
-      "previous_body_sha256": "8ed3bda7de19bd3df0ca8838a256b0b11c36a5e60e051aa28bd83caa1421f90f",
-      "behavior_regressions": "tests/test_startup_knowledge_preservation.py"
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Coalesce post-commit exports; preserve committed writes, retained assets and P-only textbook names; normalize proven legacy mirrors only.",
+      "previous_body_sha256": "66b906f711b5b5fc18799d9bdae9811a596cb9bd6c3e42da790df6b523876397",
+      "behavior_regressions": "tests/test_background_export.py; tests/test_question_transactions.py; tests/test_startup_knowledge_preservation.py; tests/test_physics_adaptation.py",
+      "previous_audits": [
+        {
+          "upstream_commit": "3252b7237f3add8f632f00a413a23814ed8882a4",
+          "reason": "Keep custom and historical knowledge labels; exclude PhysicsBank P mirrors from mathematics book aliases.",
+          "previous_body_sha256": "8ed3bda7de19bd3df0ca8838a256b0b11c36a5e60e051aa28bd83caa1421f90f",
+          "behavior_regressions": "tests/test_startup_knowledge_preservation.py"
+        }
+      ]
     },
     "create_question": {
-      "upstream_commit": "763b345374773a13cec987c42ae21fc5753d57df",
-      "reason": "Validate explicit physics points before asset work and persist labels in the same question transaction; omitted field remains empty.",
-      "previous_body_sha256": "689202ec3f59d544884927b2f99aa9e8f16508962aa4c7942548286c40130210",
-      "behavior_regressions": "tests/test_physics_knowledge_points.py; tests/test_physics_knowledge_browser.py"
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Save labels, source/reference relations and fingerprints atomically; check stale curriculum/project identity and retain rollback/duplicate safety.",
+      "previous_body_sha256": "f3fbc26860095fa311262d807a687cbbca2694690545bad312941c9f92232d19",
+      "behavior_regressions": "tests/test_question_transactions.py; tests/test_question_duplicate_api.py; tests/test_physics_knowledge_points.py; tests/test_question_references_api.py",
+      "previous_audits": [
+        {
+          "upstream_commit": "763b345374773a13cec987c42ae21fc5753d57df",
+          "reason": "Validate explicit physics points before asset work and persist labels in the same question transaction; omitted field remains empty.",
+          "previous_body_sha256": "689202ec3f59d544884927b2f99aa9e8f16508962aa4c7942548286c40130210",
+          "behavior_regressions": "tests/test_physics_knowledge_points.py; tests/test_physics_knowledge_browser.py"
+        }
+      ]
     },
     "update_question": {
-      "upstream_commit": "763b345374773a13cec987c42ae21fc5753d57df",
-      "reason": "Preserve labels for old clients omitting the field; explicit [] clears labels, invalid points roll back with question assets.",
-      "previous_body_sha256": "b275c10a1147c64216bc28e5f89e53efa938808707cca7b6a11e2f99ac75ce09",
-      "behavior_regressions": "tests/test_physics_knowledge_points.py; tests/test_physics_knowledge_browser.py"
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Save labels, source/reference relations and fingerprints atomically; check stale curriculum/project identity and retain rollback/duplicate safety.",
+      "previous_body_sha256": "eb5f244218a6e840f33cb5d0a61132bf9254607508494aeefc303cfe1589519e",
+      "behavior_regressions": "tests/test_question_transactions.py; tests/test_question_duplicate_api.py; tests/test_physics_knowledge_points.py; tests/test_question_references_api.py",
+      "previous_audits": [
+        {
+          "upstream_commit": "763b345374773a13cec987c42ae21fc5753d57df",
+          "reason": "Preserve labels for old clients omitting the field; explicit [] clears labels, invalid points roll back with question assets.",
+          "previous_body_sha256": "b275c10a1147c64216bc28e5f89e53efa938808707cca7b6a11e2f99ac75ce09",
+          "behavior_regressions": "tests/test_physics_knowledge_points.py; tests/test_physics_knowledge_browser.py"
+        }
+      ]
     },
     "list_questions": {
-      "upstream_commit": "763b345374773a13cec987c42ae21fc5753d57df",
-      "reason": "Add exact indexed knowledge-point ANY/ALL, main-role and unlabeled filters without changing existing search or pagination.",
-      "previous_body_sha256": "2839b3aec522c8755a27651383cc47d45f8395465a8fe5137b6e2459da421ec2",
-      "behavior_regressions": "tests/test_physics_knowledge_points.py; tests/test_physics_knowledge_browser.py"
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Compact list/association projections, explicit references and literal assets; optional indexed knowledge filters coexist with legacy PhysicsBank aliases.",
+      "previous_body_sha256": "b5a005822e5794b802fe58662e82db10ce82d8be16bf254e732e0d5304cd6d5b",
+      "behavior_regressions": "tests/test_api.py; tests/test_question_references_api.py; tests/test_library_transfer_api.py; tests/test_physics_knowledge_points.py",
+      "previous_audits": [
+        {
+          "upstream_commit": "763b345374773a13cec987c42ae21fc5753d57df",
+          "reason": "Add exact indexed knowledge-point ANY/ALL, main-role and unlabeled filters without changing existing search or pagination.",
+          "previous_body_sha256": "2839b3aec522c8755a27651383cc47d45f8395465a8fe5137b6e2459da421ec2",
+          "behavior_regressions": "tests/test_physics_knowledge_points.py; tests/test_physics_knowledge_browser.py"
+        }
+      ]
     },
     "get_knowledge_points": {
-      "upstream_commit": "763b345374773a13cec987c42ae21fc5753d57df",
-      "reason": "New isolated catalogue domain; manual physics data only, same local authentication and explicit dependencies; no AI or runtime bootstrap.",
-      "behavior_regressions": "tests/test_physics_knowledge_points.py; tests/test_physics_knowledge_browser.py"
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "P-native catalogue pagination, atomic teacher-created identity/aliases and compatible response envelope; reads never create points.",
+      "previous_body_sha256": "13c06ee3b29479d93f5151c6809ae6670f503c1aebb947df79681f3e3e0820da",
+      "behavior_regressions": "tests/test_physics_knowledge_points.py; tests/test_physics_knowledge_browser.py; tests/test_ai_knowledge_points.py",
+      "previous_audits": [
+        {
+          "upstream_commit": "763b345374773a13cec987c42ae21fc5753d57df",
+          "reason": "New isolated catalogue domain; manual physics data only, same local authentication and explicit dependencies; no AI or runtime bootstrap.",
+          "behavior_regressions": "tests/test_physics_knowledge_points.py; tests/test_physics_knowledge_browser.py"
+        }
+      ]
     },
     "add_knowledge_point": {
-      "upstream_commit": "763b345374773a13cec987c42ae21fc5753d57df",
-      "reason": "New isolated catalogue domain; manual physics data only, same local authentication and explicit dependencies; no AI or runtime bootstrap.",
-      "behavior_regressions": "tests/test_physics_knowledge_points.py; tests/test_physics_knowledge_browser.py"
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "P-native catalogue pagination, atomic teacher-created identity/aliases and compatible response envelope; reads never create points.",
+      "previous_body_sha256": "1650cc08e125a026197535db509fc3a0c543bc00605dc2929b1efb7ef94c17a0",
+      "behavior_regressions": "tests/test_physics_knowledge_points.py; tests/test_physics_knowledge_browser.py; tests/test_ai_knowledge_points.py",
+      "previous_audits": [
+        {
+          "upstream_commit": "763b345374773a13cec987c42ae21fc5753d57df",
+          "reason": "New isolated catalogue domain; manual physics data only, same local authentication and explicit dependencies; no AI or runtime bootstrap.",
+          "behavior_regressions": "tests/test_physics_knowledge_points.py; tests/test_physics_knowledge_browser.py"
+        }
+      ]
+    },
+    "schedule_database_export": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Coalesce post-commit exports; preserve committed writes, retained assets and P-only textbook names; normalize proven legacy mirrors only.",
+      "previous_body_sha256": "0e9019607f89682e0a4d3c94984855252060b9c2ed6d1f5f9eee3f68c67fa7c2",
+      "behavior_regressions": "tests/test_background_export.py; tests/test_question_transactions.py; tests/test_startup_knowledge_preservation.py; tests/test_physics_adaptation.py"
+    },
+    "clean_orphaned_images": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Coalesce post-commit exports; preserve committed writes, retained assets and P-only textbook names; normalize proven legacy mirrors only.",
+      "previous_body_sha256": "db2b5964eb44d04d162ac1f642922a9c170d20b628db0e229458e8feee9b4fd0",
+      "behavior_regressions": "tests/test_background_export.py; tests/test_question_transactions.py; tests/test_startup_knowledge_preservation.py; tests/test_physics_adaptation.py"
+    },
+    "recalibrate_usage_counts": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Coalesce post-commit exports; preserve committed writes, retained assets and P-only textbook names; normalize proven legacy mirrors only.",
+      "previous_body_sha256": "96aba02af03ac5d84173d7529f5499994a25024c1ab2cf86bd0d6a5b9dad05db",
+      "behavior_regressions": "tests/test_background_export.py; tests/test_question_transactions.py; tests/test_startup_knowledge_preservation.py; tests/test_physics_adaptation.py"
+    },
+    "app_lifespan": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Own durable Word tasks and export queue on the application instance; drain on shutdown; PDF projects remain disabled.",
+      "previous_body_sha256": "9a5317eacfeda0de308271728afd85ef7560f0348490387c8364d1182bbb6405",
+      "behavior_regressions": "tests/test_backend_domains.py; tests/test_document_task_store.py; tests/test_physics_v3_sync.py; tests/test_large_library_upgrade.py"
+    },
+    "healthz": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Check new derived schema and inject disabled PDF feature flag without changing branding, health or version contracts.",
+      "previous_body_sha256": "fa9092b8bbc9fcdda1271c43407b493825db40e1702b5b2af6be232c50bccf7d",
+      "behavior_regressions": "tests/test_health.py; tests/test_backend_decoupling.py; tests/test_physics_v3_sync.py"
+    },
+    "read_index": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Check new derived schema and inject disabled PDF feature flag without changing branding, health or version contracts.",
+      "previous_body_sha256": "f5a63b25281399c01fabeb82c6d3a467df8e653c30eec9c566fed405e5ce76be",
+      "behavior_regressions": "tests/test_health.py; tests/test_backend_decoupling.py; tests/test_physics_v3_sync.py"
+    },
+    "ocr_pdf_page_image": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Single selected provider, bounded stream timeout and cancellation; original physical image crops preserved; no paid retry or provider fallback.",
+      "previous_body_sha256": "95e69e5e3125ee8366dcb3547909cfa76755f528280a3a03a1e46bc41074d8dc",
+      "behavior_regressions": "tests/test_pdf_page_vision.py; tests/test_pdf_region_vision.py; tests/test_multimodal_ai.py; tests/test_physics_ocr_crops.py"
+    },
+    "_duplicate_input_from_payload": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Compact list/association projections, explicit references and literal assets; optional indexed knowledge filters coexist with legacy PhysicsBank aliases.",
+      "previous_body_sha256": "712d25d4a97bce3d8629e35e10cc1855fb611cb17f3584db2015dbf0ef864cbd",
+      "behavior_regressions": "tests/test_api.py; tests/test_question_references_api.py; tests/test_library_transfer_api.py; tests/test_physics_knowledge_points.py"
+    },
+    "_prompt_visible_image_paths": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Compact list/association projections, explicit references and literal assets; optional indexed knowledge filters coexist with legacy PhysicsBank aliases.",
+      "previous_body_sha256": "7dbdf8dddbcdfaf9e3687175c1f0dc21419af4f1bee6824597feefbb7ef0e9fc",
+      "behavior_regressions": "tests/test_api.py; tests/test_question_references_api.py; tests/test_library_transfer_api.py; tests/test_physics_knowledge_points.py"
+    },
+    "get_question": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Compact list/association projections, explicit references and literal assets; optional indexed knowledge filters coexist with legacy PhysicsBank aliases.",
+      "previous_body_sha256": "c76bde093b77d96f27bb39d3ce4b147050da749e6f99c6d8243a87dd0b40b3b7",
+      "behavior_regressions": "tests/test_api.py; tests/test_question_references_api.py; tests/test_library_transfer_api.py; tests/test_physics_knowledge_points.py"
+    },
+    "committed_question_response": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Save labels, source/reference relations and fingerprints atomically; check stale curriculum/project identity and retain rollback/duplicate safety.",
+      "previous_body_sha256": "86758e92e3b310d2fbbc08c65a583f8a9b8f4ab8cb4ef00e61660de6a3a72d32",
+      "behavior_regressions": "tests/test_question_transactions.py; tests/test_question_duplicate_api.py; tests/test_physics_knowledge_points.py; tests/test_question_references_api.py"
+    },
+    "prepare_question_assets": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Save labels, source/reference relations and fingerprints atomically; check stale curriculum/project identity and retain rollback/duplicate safety.",
+      "previous_body_sha256": "a6111ce3dffd261e17e3af4c2d9883e4f82e53ab352a6fb02853ddaab394639a",
+      "behavior_regressions": "tests/test_question_transactions.py; tests/test_question_duplicate_api.py; tests/test_physics_knowledge_points.py; tests/test_question_references_api.py"
+    },
+    "build_prepared_question_fingerprint": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Save labels, source/reference relations and fingerprints atomically; check stale curriculum/project identity and retain rollback/duplicate safety.",
+      "previous_body_sha256": "878749a08055d9d528d459f1a79988f1e541d98e2c30203419ab21043fbc20d1",
+      "behavior_regressions": "tests/test_question_transactions.py; tests/test_question_duplicate_api.py; tests/test_physics_knowledge_points.py; tests/test_question_references_api.py"
+    },
+    "get_associated_questions": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Save labels, source/reference relations and fingerprints atomically; check stale curriculum/project identity and retain rollback/duplicate safety.",
+      "previous_body_sha256": "c0b774b7a56798a97801ad9b65a3434bb46af2829fe694cefb942ea63e0d3eee",
+      "behavior_regressions": "tests/test_question_transactions.py; tests/test_question_duplicate_api.py; tests/test_physics_knowledge_points.py; tests/test_question_references_api.py"
+    },
+    "delete_question": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Save labels, source/reference relations and fingerprints atomically; check stale curriculum/project identity and retain rollback/duplicate safety.",
+      "previous_body_sha256": "67a9e781b56194fcac18be3ed685c28ca86c1e91f4a7d212262623766405e9fe",
+      "behavior_regressions": "tests/test_question_transactions.py; tests/test_question_duplicate_api.py; tests/test_physics_knowledge_points.py; tests/test_question_references_api.py"
+    },
+    "get_active_version_code": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Explicit curriculum identity and evidence-backed routing; serialize metadata switch; keep custom labels/P and historical sub-relations without enabling deprecated filters.",
+      "previous_body_sha256": "e3cd322455bca27bc7879c0b7e489e5ad7176f34cdf72181768ad3640a062f70",
+      "behavior_regressions": "tests/test_curriculum_coexistence.py; tests/test_startup_knowledge_preservation.py; tests/test_physics_adaptation.py; tests/test_library_transfer.py"
+    },
+    "route_chapter": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Explicit curriculum identity and evidence-backed routing; serialize metadata switch; keep custom labels/P and historical sub-relations without enabling deprecated filters.",
+      "previous_body_sha256": "55b45c0e4b218927302e86ef2bc20092f2cc49824a4cc65d9c9a085f8038be22",
+      "behavior_regressions": "tests/test_curriculum_coexistence.py; tests/test_startup_knowledge_preservation.py; tests/test_physics_adaptation.py; tests/test_library_transfer.py"
+    },
+    "save_metadata_config": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Explicit curriculum identity and evidence-backed routing; serialize metadata switch; keep custom labels/P and historical sub-relations without enabling deprecated filters.",
+      "previous_body_sha256": "c8fd49dbd66c3caa05e67992be0fc1b7ef0effb312a2c08e027d50b7729e5e91",
+      "behavior_regressions": "tests/test_curriculum_coexistence.py; tests/test_startup_knowledge_preservation.py; tests/test_physics_adaptation.py; tests/test_library_transfer.py"
+    },
+    "ai_classify": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Use one classification request for installed point suggestions and literal evidence; preserve teacher confirmation and stale-version rejection; retain physics experiment/short-answer forms and do not collapse experiments with blanks into fill-in questions.",
+      "previous_body_sha256": "ae67232a651f3a618eadbaf1712d011a4531ae99bb0eaeba1f9afaab61df7dbd",
+      "behavior_regressions": "tests/test_ai_knowledge_points.py; tests/test_ai_knowledge_evidence_locks.py; tests/test_ai_knowledge_points_frontend.py; tests/test_ai_knowledge_points_browser.py; tests/test_physics_v3_sync.py; tests/test_question_types.py"
+    },
+    "parse_paper_text_internal": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Source-preserving Word/Markdown/TeX classification and point evidence; bounded one-request parsing and explicit configuration failures.",
+      "previous_body_sha256": "3e7b96e1a3a878d2be1680aacf6ea62dd9567f70b329a3244f9014932c3a20bb",
+      "behavior_regressions": "tests/test_source_metadata.py; tests/test_word_source_metadata_flow.py; tests/test_ai_knowledge_points.py; tests/test_pdf_regional_flow.py"
+    },
+    "ai_parse_paper": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Source-preserving Word/Markdown/TeX classification and point evidence; bounded one-request parsing and explicit configuration failures.",
+      "previous_body_sha256": "cd51f70e1e4d216a3c1c1f04501a98c6468385e5b9ad50524b4ae1991bc8817c",
+      "behavior_regressions": "tests/test_source_metadata.py; tests/test_word_source_metadata_flow.py; tests/test_ai_knowledge_points.py; tests/test_pdf_regional_flow.py"
+    },
+    "rollback_question_asset_promotions": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Reference-aware, serialized recoverable asset retirement/promotion rather than irreversible cleanup; preserve rollback and original physics pixels.",
+      "previous_body_sha256": "2e4598885ad32ec4827f85f67d6a3829daca12e949c613b95af4f0223667a99b",
+      "behavior_regressions": "tests/test_question_transactions.py; tests/test_physics_ocr_crops.py; tests/test_pdf_figures.py; tests/test_single_ocr_batch_crop.py"
+    },
+    "_referenced_question_assets": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Reference-aware, serialized recoverable asset retirement/promotion rather than irreversible cleanup; preserve rollback and original physics pixels.",
+      "previous_body_sha256": "dc1e656a1fb25c0677950d33d916fa4c4a8c56f69f4a74deead53cae9e2207d2",
+      "behavior_regressions": "tests/test_question_transactions.py; tests/test_physics_ocr_crops.py; tests/test_pdf_figures.py; tests/test_single_ocr_batch_crop.py"
+    },
+    "delete_unreferenced_question_assets": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Reference-aware, serialized recoverable asset retirement/promotion rather than irreversible cleanup; preserve rollback and original physics pixels.",
+      "previous_body_sha256": "ea4bd8ef9fe44817558785e04dcf35eb14e57ef3f3546c68c1efa8f1c7020692",
+      "behavior_regressions": "tests/test_question_transactions.py; tests/test_physics_ocr_crops.py; tests/test_pdf_figures.py; tests/test_single_ocr_batch_crop.py"
+    },
+    "promote_question_temp_assets": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Reference-aware, serialized recoverable asset retirement/promotion rather than irreversible cleanup; preserve rollback and original physics pixels.",
+      "previous_body_sha256": "a20f7b9c98d0b0743a163ba714e477fdce515828d34fd33cdb1207df998d1448",
+      "behavior_regressions": "tests/test_question_transactions.py; tests/test_physics_ocr_crops.py; tests/test_pdf_figures.py; tests/test_single_ocr_batch_crop.py"
+    },
+    "_delete_task_temp_assets": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Reference-aware, serialized recoverable asset retirement/promotion rather than irreversible cleanup; preserve rollback and original physics pixels.",
+      "previous_body_sha256": "f27a013a0cf39b3fd4d8eacf08c2573b57b87f4a17a0c3ef8b1555be92e970be",
+      "behavior_regressions": "tests/test_question_transactions.py; tests/test_physics_ocr_crops.py; tests/test_pdf_figures.py; tests/test_single_ocr_batch_crop.py"
+    },
+    "build_document_import_dependencies": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Explicit request identity, Word source/recovery, status/retention and scoped crops; manual-only restart; PDF local-project/checkpoint experiments stay disabled.",
+      "previous_body_sha256": "b1db25b748f0e9277776db41f0bd58c1fbb480db7e0dc4d81fc2164c2888df88",
+      "behavior_regressions": "tests/test_task_manager.py; tests/test_document_task_store.py; tests/test_pdf_inspector_flow.py; tests/test_pdf_regional_flow.py; tests/test_docx_source_verify_flow.py; tests/test_backend_decoupling.py"
+    },
+    "manual_crop_pdf": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Explicit request identity, Word source/recovery, status/retention and scoped crops; manual-only restart; PDF local-project/checkpoint experiments stay disabled.",
+      "previous_body_sha256": "fd715b1763a34af4b47bfb294e81064449337efed8b1fdb7d3c75aa4eb32b97c",
+      "behavior_regressions": "tests/test_task_manager.py; tests/test_document_task_store.py; tests/test_pdf_inspector_flow.py; tests/test_pdf_regional_flow.py; tests/test_docx_source_verify_flow.py; tests/test_backend_decoupling.py"
+    },
+    "post_process_pdf_parsed_questions": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Explicit request identity, Word source/recovery, status/retention and scoped crops; manual-only restart; PDF local-project/checkpoint experiments stay disabled.",
+      "previous_body_sha256": "a5b445933878983207029eed9f4d730ae97bc935975c089f44a616dc0f2534af",
+      "behavior_regressions": "tests/test_task_manager.py; tests/test_document_task_store.py; tests/test_pdf_inspector_flow.py; tests/test_pdf_regional_flow.py; tests/test_docx_source_verify_flow.py; tests/test_backend_decoupling.py"
+    },
+    "upload_pdf_task": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Explicit request identity, Word source/recovery, status/retention and scoped crops; manual-only restart; PDF local-project/checkpoint experiments stay disabled.",
+      "previous_body_sha256": "149fb7f2b6b67bad63f33b5dc3319e59b2238777caa87a70d081b98b3a1046f0",
+      "behavior_regressions": "tests/test_task_manager.py; tests/test_document_task_store.py; tests/test_pdf_inspector_flow.py; tests/test_pdf_regional_flow.py; tests/test_docx_source_verify_flow.py; tests/test_backend_decoupling.py"
+    },
+    "run_docx_parsing_task": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Explicit request identity, Word source/recovery, status/retention and scoped crops; manual-only restart; PDF local-project/checkpoint experiments stay disabled.",
+      "previous_body_sha256": "34d49c944577d37dfdd8948860773e5d9f93e4f35dbe90cac7361691e998c260",
+      "behavior_regressions": "tests/test_task_manager.py; tests/test_document_task_store.py; tests/test_pdf_inspector_flow.py; tests/test_pdf_regional_flow.py; tests/test_docx_source_verify_flow.py; tests/test_backend_decoupling.py"
+    },
+    "upload_docx_task": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Explicit request identity, Word source/recovery, status/retention and scoped crops; manual-only restart; PDF local-project/checkpoint experiments stay disabled.",
+      "previous_body_sha256": "642031432310910037437e56ed364f162313270c5651243c47d8ee85765ae295",
+      "behavior_regressions": "tests/test_task_manager.py; tests/test_document_task_store.py; tests/test_pdf_inspector_flow.py; tests/test_pdf_regional_flow.py; tests/test_docx_source_verify_flow.py; tests/test_backend_decoupling.py"
+    },
+    "get_pdf_task_status": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Explicit request identity, Word source/recovery, status/retention and scoped crops; manual-only restart; PDF local-project/checkpoint experiments stay disabled.",
+      "previous_body_sha256": "1e4deda705d1cff6d42510bc62fad342e84d71dbf48a52ad4e0060c1c063fd59",
+      "behavior_regressions": "tests/test_task_manager.py; tests/test_document_task_store.py; tests/test_pdf_inspector_flow.py; tests/test_pdf_regional_flow.py; tests/test_docx_source_verify_flow.py; tests/test_backend_decoupling.py"
+    },
+    "ai_select_paper": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Use bounded compact question candidates with exact physical curriculum and point filters; retain physics question-type semantics.",
+      "previous_body_sha256": "d4c30547ecc8382ed1813bc0b59d4e1c04798c1ba9e1430afc1d9994142d0e46",
+      "behavior_regressions": "tests/test_custom_paper_types.py; tests/test_api.py; tests/test_physics_adaptation.py"
+    },
+    "get_paper_questions": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Read reference-aware detail/summary projections without altering stored paper snapshots.",
+      "previous_body_sha256": "1f3b0f140bcaeae8f496d621887fec366a1e772a673f2cc29316769f9623d6dc",
+      "behavior_regressions": "tests/test_paper.py; tests/test_api.py; tests/test_question_references_api.py"
+    },
+    "get_paper_detail": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Read reference-aware detail/summary projections without altering stored paper snapshots.",
+      "previous_body_sha256": "5fe1483d9fa543bc349003f67ee511714fbafde7a74b32b3458de27741eb17d6",
+      "behavior_regressions": "tests/test_paper.py; tests/test_api.py; tests/test_question_references_api.py"
+    },
+    "_prepare_paper_export_questions": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Preflight missing assets, preserve source comments/references in export copies and support new layout/image profiles; fail before native compilation when incomplete.",
+      "previous_body_sha256": "faddc97a2b8cfa22ad76feb73c4a200aa8613db8ec1008f6ba3c3c7df52c477c",
+      "behavior_regressions": "tests/test_export_preflight.py; tests/test_markdown_table_exports.py; tests/test_word_export_lists.py; tests/test_paper.py; tests/test_physics_ocr_export.py"
+    },
+    "export_paper_tex": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Preflight missing assets, preserve source comments/references in export copies and support new layout/image profiles; fail before native compilation when incomplete.",
+      "previous_body_sha256": "b0c35dd15c01834c305033dc43d4b22e2fa3f7cd07b1c4515f7b39ebdb2f9828",
+      "behavior_regressions": "tests/test_export_preflight.py; tests/test_markdown_table_exports.py; tests/test_word_export_lists.py; tests/test_paper.py; tests/test_physics_ocr_export.py"
+    },
+    "export_paper_bundle": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Preflight missing assets, preserve source comments/references in export copies and support new layout/image profiles; fail before native compilation when incomplete.",
+      "previous_body_sha256": "1132617f7a5aa26052bc7598330c9a5566544bd539cdf1bf53d458d87a6e1937",
+      "behavior_regressions": "tests/test_export_preflight.py; tests/test_markdown_table_exports.py; tests/test_word_export_lists.py; tests/test_paper.py; tests/test_physics_ocr_export.py"
+    },
+    "export_paper_pdf": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Preflight missing assets, preserve source comments/references in export copies and support new layout/image profiles; fail before native compilation when incomplete.",
+      "previous_body_sha256": "8f88ba40933340d1f680aac4a913a8ca2b8da0c6be36d0b8b34a315b5ba70a87",
+      "behavior_regressions": "tests/test_export_preflight.py; tests/test_markdown_table_exports.py; tests/test_word_export_lists.py; tests/test_paper.py; tests/test_physics_ocr_export.py"
+    },
+    "_report_database_export_error": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Coalesce post-commit exports; preserve committed writes, retained assets and P-only textbook names; normalize proven legacy mirrors only.",
+      "previous_body_sha256": null,
+      "behavior_regressions": "tests/test_background_export.py; tests/test_question_transactions.py; tests/test_startup_knowledge_preservation.py; tests/test_physics_adaptation.py"
+    },
+    "upload_markdown_source": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Bounded UTF-8 Markdown source upload with safe literal image mapping, no database/AI work during upload.",
+      "previous_body_sha256": null,
+      "behavior_regressions": "tests/test_api.py; tests/test_source_metadata.py"
+    },
+    "list_association_candidates": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Compact list/association projections, explicit references and literal assets; optional indexed knowledge filters coexist with legacy PhysicsBank aliases.",
+      "previous_body_sha256": null,
+      "behavior_regressions": "tests/test_api.py; tests/test_question_references_api.py; tests/test_library_transfer_api.py; tests/test_physics_knowledge_points.py"
+    },
+    "curriculum_filter_expression": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Explicit curriculum identity and evidence-backed routing; serialize metadata switch; keep custom labels/P and historical sub-relations without enabling deprecated filters.",
+      "previous_body_sha256": null,
+      "behavior_regressions": "tests/test_curriculum_coexistence.py; tests/test_startup_knowledge_preservation.py; tests/test_physics_adaptation.py; tests/test_library_transfer.py"
+    },
+    "apply_curriculum_filters": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Explicit curriculum identity and evidence-backed routing; serialize metadata switch; keep custom labels/P and historical sub-relations without enabling deprecated filters.",
+      "previous_body_sha256": null,
+      "behavior_regressions": "tests/test_curriculum_coexistence.py; tests/test_startup_knowledge_preservation.py; tests/test_physics_adaptation.py; tests/test_library_transfer.py"
+    },
+    "require_expected_curriculum_version": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Explicit curriculum identity and evidence-backed routing; serialize metadata switch; keep custom labels/P and historical sub-relations without enabling deprecated filters.",
+      "previous_body_sha256": null,
+      "behavior_regressions": "tests/test_curriculum_coexistence.py; tests/test_startup_knowledge_preservation.py; tests/test_physics_adaptation.py; tests/test_library_transfer.py"
+    },
+    "get_sub_knowledge_config": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Explicit curriculum identity and evidence-backed routing; serialize metadata switch; keep custom labels/P and historical sub-relations without enabling deprecated filters.",
+      "previous_body_sha256": null,
+      "behavior_regressions": "tests/test_curriculum_coexistence.py; tests/test_startup_knowledge_preservation.py; tests/test_physics_adaptation.py; tests/test_library_transfer.py"
+    },
+    "_save_metadata_config": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Explicit curriculum identity and evidence-backed routing; serialize metadata switch; keep custom labels/P and historical sub-relations without enabling deprecated filters.",
+      "previous_body_sha256": null,
+      "behavior_regressions": "tests/test_curriculum_coexistence.py; tests/test_startup_knowledge_preservation.py; tests/test_physics_adaptation.py; tests/test_library_transfer.py"
+    },
+    "validate_import_knowledge": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Source-preserving Word/Markdown/TeX classification and point evidence; bounded one-request parsing and explicit configuration failures.",
+      "previous_body_sha256": null,
+      "behavior_regressions": "tests/test_source_metadata.py; tests/test_word_source_metadata_flow.py; tests/test_ai_knowledge_points.py; tests/test_pdf_regional_flow.py"
+    },
+    "_document_request_id": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Explicit request identity, Word source/recovery, status/retention and scoped crops; manual-only restart; PDF local-project/checkpoint experiments stay disabled.",
+      "previous_body_sha256": null,
+      "behavior_regressions": "tests/test_task_manager.py; tests/test_document_task_store.py; tests/test_pdf_inspector_flow.py; tests/test_pdf_regional_flow.py; tests/test_docx_source_verify_flow.py; tests/test_backend_decoupling.py"
+    },
+    "_document_curriculum_sha256": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Explicit request identity, Word source/recovery, status/retention and scoped crops; manual-only restart; PDF local-project/checkpoint experiments stay disabled.",
+      "previous_body_sha256": null,
+      "behavior_regressions": "tests/test_task_manager.py; tests/test_document_task_store.py; tests/test_pdf_inspector_flow.py; tests/test_pdf_regional_flow.py; tests/test_docx_source_verify_flow.py; tests/test_backend_decoupling.py"
+    },
+    "_register_document_input": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Explicit request identity, Word source/recovery, status/retention and scoped crops; manual-only restart; PDF local-project/checkpoint experiments stay disabled.",
+      "previous_body_sha256": null,
+      "behavior_regressions": "tests/test_task_manager.py; tests/test_document_task_store.py; tests/test_pdf_inspector_flow.py; tests/test_pdf_regional_flow.py; tests/test_docx_source_verify_flow.py; tests/test_backend_decoupling.py"
+    },
+    "_document_status": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Explicit request identity, Word source/recovery, status/retention and scoped crops; manual-only restart; PDF local-project/checkpoint experiments stay disabled.",
+      "previous_body_sha256": null,
+      "behavior_regressions": "tests/test_task_manager.py; tests/test_document_task_store.py; tests/test_pdf_inspector_flow.py; tests/test_pdf_regional_flow.py; tests/test_docx_source_verify_flow.py; tests/test_backend_decoupling.py"
+    },
+    "_manual_crop_pdf_impl": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Explicit request identity, Word source/recovery, status/retention and scoped crops; manual-only restart; PDF local-project/checkpoint experiments stay disabled.",
+      "previous_body_sha256": null,
+      "behavior_regressions": "tests/test_task_manager.py; tests/test_document_task_store.py; tests/test_pdf_inspector_flow.py; tests/test_pdf_regional_flow.py; tests/test_docx_source_verify_flow.py; tests/test_backend_decoupling.py"
+    },
+    "_queue_document_upload": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Explicit request identity, Word source/recovery, status/retention and scoped crops; manual-only restart; PDF local-project/checkpoint experiments stay disabled.",
+      "previous_body_sha256": null,
+      "behavior_regressions": "tests/test_task_manager.py; tests/test_document_task_store.py; tests/test_pdf_inspector_flow.py; tests/test_pdf_regional_flow.py; tests/test_docx_source_verify_flow.py; tests/test_backend_decoupling.py"
+    },
+    "get_document_task_by_request": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Explicit request identity, Word source/recovery, status/retention and scoped crops; manual-only restart; PDF local-project/checkpoint experiments stay disabled.",
+      "previous_body_sha256": null,
+      "behavior_regressions": "tests/test_task_manager.py; tests/test_document_task_store.py; tests/test_pdf_inspector_flow.py; tests/test_pdf_regional_flow.py; tests/test_docx_source_verify_flow.py; tests/test_backend_decoupling.py"
+    },
+    "cancel_document_task_by_request": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Explicit request identity, Word source/recovery, status/retention and scoped crops; manual-only restart; PDF local-project/checkpoint experiments stay disabled.",
+      "previous_body_sha256": null,
+      "behavior_regressions": "tests/test_task_manager.py; tests/test_document_task_store.py; tests/test_pdf_inspector_flow.py; tests/test_pdf_regional_flow.py; tests/test_docx_source_verify_flow.py; tests/test_backend_decoupling.py"
+    },
+    "resume_document_task": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Explicit request identity, Word source/recovery, status/retention and scoped crops; manual-only restart; PDF local-project/checkpoint experiments stay disabled.",
+      "previous_body_sha256": null,
+      "behavior_regressions": "tests/test_task_manager.py; tests/test_document_task_store.py; tests/test_pdf_inspector_flow.py; tests/test_pdf_regional_flow.py; tests/test_docx_source_verify_flow.py; tests/test_backend_decoupling.py"
+    },
+    "_read_document_source": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Explicit request identity, Word source/recovery, status/retention and scoped crops; manual-only restart; PDF local-project/checkpoint experiments stay disabled.",
+      "previous_body_sha256": null,
+      "behavior_regressions": "tests/test_task_manager.py; tests/test_document_task_store.py; tests/test_pdf_inspector_flow.py; tests/test_pdf_regional_flow.py; tests/test_docx_source_verify_flow.py; tests/test_backend_decoupling.py"
+    },
+    "download_document_source": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Explicit request identity, Word source/recovery, status/retention and scoped crops; manual-only restart; PDF local-project/checkpoint experiments stay disabled.",
+      "previous_body_sha256": null,
+      "behavior_regressions": "tests/test_task_manager.py; tests/test_document_task_store.py; tests/test_pdf_inspector_flow.py; tests/test_pdf_regional_flow.py; tests/test_docx_source_verify_flow.py; tests/test_backend_decoupling.py"
+    },
+    "retain_document_task": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Explicit request identity, Word source/recovery, status/retention and scoped crops; manual-only restart; PDF local-project/checkpoint experiments stay disabled.",
+      "previous_body_sha256": null,
+      "behavior_regressions": "tests/test_task_manager.py; tests/test_document_task_store.py; tests/test_pdf_inspector_flow.py; tests/test_pdf_regional_flow.py; tests/test_docx_source_verify_flow.py; tests/test_backend_decoupling.py"
+    },
+    "get_paper_export_preflight": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Preflight missing assets, preserve source comments/references in export copies and support new layout/image profiles; fail before native compilation when incomplete.",
+      "previous_body_sha256": null,
+      "behavior_regressions": "tests/test_export_preflight.py; tests/test_markdown_table_exports.py; tests/test_word_export_lists.py; tests/test_paper.py; tests/test_physics_ocr_export.py"
+    },
+    "preview_library_transfer": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Validate portable sharing ZIP, preflight and snapshot before append-only import; protect origin/local data and exclude secrets.",
+      "previous_body_sha256": null,
+      "behavior_regressions": "tests/test_library_transfer_api.py; tests/test_library_transfer.py; tests/test_library_transfer_browser.py; tests/test_physics_v3_sync.py"
+    },
+    "select_library_transfer_ids": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Validate portable sharing ZIP, preflight and snapshot before append-only import; protect origin/local data and exclude secrets.",
+      "previous_body_sha256": null,
+      "behavior_regressions": "tests/test_library_transfer_api.py; tests/test_library_transfer.py; tests/test_library_transfer_browser.py; tests/test_physics_v3_sync.py"
+    },
+    "export_library_transfer": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Validate portable sharing ZIP, preflight and snapshot before append-only import; protect origin/local data and exclude secrets.",
+      "previous_body_sha256": null,
+      "behavior_regressions": "tests/test_library_transfer_api.py; tests/test_library_transfer.py; tests/test_library_transfer_browser.py; tests/test_physics_v3_sync.py"
+    },
+    "import_library_transfer": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Validate portable sharing ZIP, preflight and snapshot before append-only import; protect origin/local data and exclude secrets.",
+      "previous_body_sha256": null,
+      "behavior_regressions": "tests/test_library_transfer_api.py; tests/test_library_transfer.py; tests/test_library_transfer_browser.py; tests/test_physics_v3_sync.py"
+    },
+    "_document_project_service": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Retain upstream disabled experimental project component behind PDF_CLOUD_ONLY=True; do not advertise it as an active workflow.",
+      "previous_body_sha256": null,
+      "behavior_regressions": "tests/test_document_projects.py; tests/test_document_project_import.py; tests/test_physics_v3_sync.py"
+    },
+    "_sync_document_project": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Retain upstream disabled experimental project component behind PDF_CLOUD_ONLY=True; do not advertise it as an active workflow.",
+      "previous_body_sha256": null,
+      "behavior_regressions": "tests/test_document_projects.py; tests/test_document_project_import.py; tests/test_physics_v3_sync.py"
+    },
+    "_restore_document_project_asset": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Retain upstream disabled experimental project component behind PDF_CLOUD_ONLY=True; do not advertise it as an active workflow.",
+      "previous_body_sha256": null,
+      "behavior_regressions": "tests/test_document_projects.py; tests/test_document_project_import.py; tests/test_physics_v3_sync.py"
+    },
+    "_dispatch_document_project": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Retain upstream disabled experimental project component behind PDF_CLOUD_ONLY=True; do not advertise it as an active workflow.",
+      "previous_body_sha256": null,
+      "behavior_regressions": "tests/test_document_projects.py; tests/test_document_project_import.py; tests/test_physics_v3_sync.py"
+    },
+    "_release_document_project_assets": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Retain upstream disabled experimental project component behind PDF_CLOUD_ONLY=True; do not advertise it as an active workflow.",
+      "previous_body_sha256": null,
+      "behavior_regressions": "tests/test_document_projects.py; tests/test_document_project_import.py; tests/test_physics_v3_sync.py"
+    },
+    "_maintain_document_projects": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Retain upstream disabled experimental project component behind PDF_CLOUD_ONLY=True; do not advertise it as an active workflow.",
+      "previous_body_sha256": null,
+      "behavior_regressions": "tests/test_document_projects.py; tests/test_document_project_import.py; tests/test_physics_v3_sync.py"
     }
   },
   "functions": {
@@ -152,25 +640,57 @@
     "export_paper_pdf": "paper_export_service",
     "export_paper_word": "paper_export_service",
     "get_knowledge_points": "knowledge_point_service",
-    "add_knowledge_point": "knowledge_point_service"
+    "add_knowledge_point": "knowledge_point_service",
+    "_report_database_export_error": "maintenance_service",
+    "upload_markdown_source": "image_upload_service",
+    "list_association_candidates": "question_queries",
+    "curriculum_filter_expression": "curriculum_service",
+    "apply_curriculum_filters": "curriculum_service",
+    "require_expected_curriculum_version": "curriculum_service",
+    "get_sub_knowledge_config": "curriculum_service",
+    "_save_metadata_config": "curriculum_service",
+    "validate_import_knowledge": "paper_parse_service",
+    "_document_request_id": "document_task_service",
+    "_document_curriculum_sha256": "document_task_service",
+    "_register_document_input": "document_task_service",
+    "_document_status": "document_task_service",
+    "_manual_crop_pdf_impl": "document_task_service",
+    "_queue_document_upload": "document_task_service",
+    "get_document_task_by_request": "document_task_service",
+    "cancel_document_task_by_request": "document_task_service",
+    "resume_document_task": "document_task_service",
+    "_read_document_source": "document_task_service",
+    "download_document_source": "document_task_service",
+    "retain_document_task": "document_task_service",
+    "get_paper_export_preflight": "paper_export_service",
+    "preview_library_transfer": "library_transfer_service",
+    "select_library_transfer_ids": "library_transfer_service",
+    "export_library_transfer": "library_transfer_service",
+    "import_library_transfer": "library_transfer_service",
+    "_document_project_service": "document_project_runtime",
+    "_sync_document_project": "document_project_runtime",
+    "_restore_document_project_asset": "document_project_runtime",
+    "_dispatch_document_project": "document_project_runtime",
+    "_release_document_project_assets": "document_project_runtime",
+    "_maintain_document_projects": "document_project_runtime"
   },
   "body_sha256": {
-    "schedule_database_export": "0e9019607f89682e0a4d3c94984855252060b9c2ed6d1f5f9eee3f68c67fa7c2",
+    "schedule_database_export": "c9946611c688c2a3f10ebcb98e11875959006cef23fab98ee0eb58456b4fd0c8",
     "schedule_question_fingerprint_retry": "757ed575359f4e38da0b655c173e0d7be7c59558b69b3cafdc13692039ba31c4",
     "print_startup_diagnostics": "0feb145ebf5e182f982a1b4863ec7030aa384c1309ff52d0fb39311a13011436",
     "print_optional_tool_diagnostics": "1b44fb8aa0a6a85abd75a33e568c49d1814a33611243a5d925a08249af433ed2",
-    "heal_database_curriculum_names": "66b906f711b5b5fc18799d9bdae9811a596cb9bd6c3e42da790df6b523876397",
-    "clean_orphaned_images": "db2b5964eb44d04d162ac1f642922a9c170d20b628db0e229458e8feee9b4fd0",
-    "recalibrate_usage_counts": "96aba02af03ac5d84173d7529f5499994a25024c1ab2cf86bd0d6a5b9dad05db",
+    "heal_database_curriculum_names": "48cb3e2cd1feb30e6ec828c699f2fe0991a82688df28c9cc77293180f9b4e023",
+    "clean_orphaned_images": "e8c4673a0ab3c261fc008e50594785f3b77facab53fee5e6ba86dbc333729bdd",
+    "recalibrate_usage_counts": "5eee1c1fa0fc0138a6d9d36a751fef7a1327b7c7795cd3723862b4dedabee361",
     "start_startup_cleanup": "13400d3b386cf93d0dd97d1abb2f1e9e736824169cad789e4e2709f28861c2b0",
     "load_or_create_local_token": "97baddae123e30ec08ed6185cd4308f1fcf07cb3f91148523e409c09b8f63d02",
-    "app_lifespan": "9a5317eacfeda0de308271728afd85ef7560f0348490387c8364d1182bbb6405",
+    "app_lifespan": "55f7ff13f4d67388d8eeaa0651148d403504608b8ddcf86899fcb12d0ef65ea9",
     "security_and_heartbeat_middleware": "2c52340caf66d6b19735ad220eee416e8626badf6f707a0c1d3f287ac15c5ee3",
     "api_heartbeat": "9b224f174bba01e697125256f732145b59b8c6b361ac2af6e36a05311e18a1fc",
     "watchdog_loop": "1d40f664d28673eaeffd95caf8ea99958851f719bb9d5aaa1edbc83c864548df",
     "shutdown_server": "43591425ef684c3d035b8237eee7a391e85c02a794e3f5839ab76ca95e03f686",
-    "healthz": "fa9092b8bbc9fcdda1271c43407b493825db40e1702b5b2af6be232c50bccf7d",
-    "read_index": "f5a63b25281399c01fabeb82c6d3a467df8e653c30eec9c566fed405e5ce76be",
+    "healthz": "adab4acf18e4099ef7ff609db0bd8fcb25b9d758afa2f5e1107c7deba9e1a922",
+    "read_index": "ec0df3826fe4872693e7b8e842122c6400aeaaf1961ed0ebb9da29cad0824f00",
     "read_favicon": "e36396108dbf34405a41be9754bf9c22d4daa29fda80b5af170423d43be78dbf",
     "read_favicon_svg": "a002e18e0807d6a674b7ea181246ceb2b0ce14d554f137769488e1c4ce02b0b5",
     "read_apple_touch_icon": "1a24455e48bf753c5130fa854d6411140da920b5ff0765fc7146cfcbac4a554e",
@@ -184,9 +704,9 @@
     "auto_crop_image": "300bb084eba6afad4f69b1a51aeec63087dd6ea1b1947200be85479a010258f6",
     "upload_tex_source": "ed4f5cdc500e47ed28511fc34b903c5534611348d08b674b19365d091bb3d0ad",
     "upload_batch_images": "4a7680c5430df4097abf2c66f1130d55adfb35c28b520b0c1a89889d67010756",
-    "ocr_via_provider": "ba642bc0d7b4341d677868c044b924260d5f7817e3259c0c3206d147e9887a43",
+    "ocr_via_provider": "bf2325d2e7360556e829e6b7ef130abcc9c52f460303a438005d35a4a20f16b7",
     "ocr_formula": "febe3d8e81c98350f93dbddb60d3e3fe5a25e84d168ab9550ec1c2c38a882d2a",
-    "ocr_pdf_page_image": "95e69e5e3125ee8366dcb3547909cfa76755f528280a3a03a1e46bc41074d8dc",
+    "ocr_pdf_page_image": "e1484ac7223cb6472a443a6398a7161cce0f80b6a3fda2cfd32f85965d983b74",
     "extract_tikz_source": "e26bf4292edcb249fae01993bb83592cbf66e51b8f44633a472658ca29a659cd",
     "request_tikz_completion": "34b3bf7c5d601f3e4cf7675deaeb08934c9bf4cf1b5de31f27f527bb012d4fbd",
     "draw_tikz_via_high_model": "0951df65bb1bacd1acf9303a9205ceb6efcfc85eb485bd657bb7d624e3ebf7d0",
@@ -199,65 +719,97 @@
     "get_settings": "96f06b42cce7f21c8e8c6f7bc116c2c120932e78bffbd39b65aaadf9bb1b0193",
     "save_settings": "94761fbefd7e841585aeb3522821067d3a894c8810e61c881de2c5ac719e9326",
     "get_seq_mapping": "eba47c6034ef55a8326fc88f1dad7d8a412cc04678645e46851cec381907e1c5",
-    "list_questions": "b5a005822e5794b802fe58662e82db10ce82d8be16bf254e732e0d5304cd6d5b",
+    "list_questions": "eb0c5e26860111e61d748895a1f36f7ff9f4c5e8eedf7c9e46ea6b40c4a00ceb",
     "_duplicate_payload_list": "4a90815efea521dec8394a084557875d28f019bf7262ac5470c3be6b4ca7d63c",
-    "_duplicate_input_from_payload": "712d25d4a97bce3d8629e35e10cc1855fb611cb17f3584db2015dbf0ef864cbd",
-    "_prompt_visible_image_paths": "7dbdf8dddbcdfaf9e3687175c1f0dc21419af4f1bee6824597feefbb7ef0e9fc",
+    "_duplicate_input_from_payload": "57a65674dee27f182dac674d560eb19bef9b78ca1f7357c726cb308a061267db",
+    "_prompt_visible_image_paths": "fe409476df3071a7b2018d3e6a82b0f255dadac8fbd23d4a573fe358fbdbb7b9",
     "check_question_duplicates": "3073904e24a137425e114e044d81691ce8d944f6fa21f548b4d9c7afc5816f50",
-    "get_question": "c76bde093b77d96f27bb39d3ce4b147050da749e6f99c6d8243a87dd0b40b3b7",
+    "get_question": "efdcc6912fa0634e885ec3999ebfcb1f36d6a289eebbadbe3a50482849e31bdf",
     "get_db_stats": "8ef275c114c53e35f196911b556887384a4b7efc32f48b4a33e4241b6d685569",
     "list_categories": "574fbc41457b016680118ff9d622c264e3d0fd84308b133ada75186603cdde80",
     "get_sources": "5d90b2758d40934727e3ec7debf8177e3f2656a2a26d59cc7beeb062f4ac1a99",
-    "committed_question_response": "86758e92e3b310d2fbbc08c65a583f8a9b8f4ab8cb4ef00e61660de6a3a72d32",
-    "prepare_question_assets": "a6111ce3dffd261e17e3af4c2d9883e4f82e53ab352a6fb02853ddaab394639a",
-    "build_prepared_question_fingerprint": "878749a08055d9d528d459f1a79988f1e541d98e2c30203419ab21043fbc20d1",
+    "committed_question_response": "4deb3006e185c802ad20700c5d822ab04ad2684b1746930b6afcfa9b28c163a0",
+    "prepare_question_assets": "3c25a066e7eef71da7f8480aaf472aabc141d2f12b55ecff92fde1168ce02147",
+    "build_prepared_question_fingerprint": "5f3cef978d06d1e37159588cee539c4e31dff97b59d385caf1b2641b1b019f1b",
     "duplicate_review_required_response": "738ac53f9f0fbbedb27131d07657a37ded74b2572d932a2588a414002c9bc537",
-    "create_question": "f3fbc26860095fa311262d807a687cbbca2694690545bad312941c9f92232d19",
-    "update_question": "eb5f244218a6e840f33cb5d0a61132bf9254607508494aeefc303cfe1589519e",
+    "create_question": "47ed05e0ef4d9023bfac0c7c39a8eb1de559e02ed6df1d6c28956da0fc00ac46",
+    "update_question": "20177f7f9a5d19f3e54808ab1496102ca07505a98ebc75e6ba1797593441671f",
     "update_question_figure_align": "c1a78a7bceeaaeb39dc6f8dd10e7ebaf58ef50990a61d404b49785d905cb9317",
     "update_question_figure_layout": "4f29022dd798c0a2924a2c71087b22603d7b61b1708ce10ebf3409b5a46cd6f3",
-    "get_associated_questions": "c0b774b7a56798a97801ad9b65a3434bb46af2829fe694cefb942ea63e0d3eee",
+    "get_associated_questions": "6f16571fad731591a8700b2f742f5c93a494cf482449f8fadacbecdc1851472d",
     "associate_questions_endpoint": "03e28d42ca2e755acc31813c7eccf8e34fcdbcdc104c9ff895a7504c4c274a9f",
     "remove_association": "cd58cb65e5a0a1f76bf8f9699f87cedb0c978a2c9065bb854199f303ba8e8ed8",
-    "delete_question": "67a9e781b56194fcac18be3ed685c28ca86c1e91f4a7d212262623766405e9fe",
+    "delete_question": "2beede1b5946e39dcf314b00b3b165f1cd1aab90645dbb66ccc6f1064f6621f0",
     "get_current_curriculum": "973e9abfa963822646cef7d12c785b1dbfea2b181e98e0389980ca3aab3d2497",
     "load_or_init_metadata": "e09d7a5d4e9265b56e898445e796ef996b32b6d68607050aed0363bdb1d50273",
-    "get_active_version_code": "e3cd322455bca27bc7879c0b7e489e5ad7176f34cdf72181768ad3640a062f70",
+    "get_active_version_code": "0cebe5a731c95a2c84a6f33766db34cceeb75369c1e555e233a3afbcac09965f",
     "get_metadata_config": "8e10a4bf68bea24f6830e12ccf40080f47ade81cb4c76e16cc6f61a7821b9f06",
     "get_curriculum_preset_config": "db66c89100bdd3448d831c3c7dd125477aacbf88ec4fb74600bf3556d7fc25c1",
-    "route_chapter": "55b45c0e4b218927302e86ef2bc20092f2cc49824a4cc65d9c9a085f8038be22",
-    "save_metadata_config": "c8fd49dbd66c3caa05e67992be0fc1b7ef0effb312a2c08e027d50b7729e5e91",
-    "ai_classify": "ae67232a651f3a618eadbaf1712d011a4531ae99bb0eaeba1f9afaab61df7dbd",
-    "parse_paper_text_internal": "3e7b96e1a3a878d2be1680aacf6ea62dd9567f70b329a3244f9014932c3a20bb",
-    "ai_parse_paper": "cd51f70e1e4d216a3c1c1f04501a98c6468385e5b9ad50524b4ae1991bc8817c",
-    "rollback_question_asset_promotions": "2e4598885ad32ec4827f85f67d6a3829daca12e949c613b95af4f0223667a99b",
-    "_referenced_question_assets": "dc1e656a1fb25c0677950d33d916fa4c4a8c56f69f4a74deead53cae9e2207d2",
-    "delete_unreferenced_question_assets": "ea4bd8ef9fe44817558785e04dcf35eb14e57ef3f3546c68c1efa8f1c7020692",
-    "promote_question_temp_assets": "a20f7b9c98d0b0743a163ba714e477fdce515828d34fd33cdb1207df998d1448",
-    "_delete_task_temp_assets": "f27a013a0cf39b3fd4d8eacf08c2573b57b87f4a17a0c3ef8b1555be92e970be",
-    "build_document_import_dependencies": "b1db25b748f0e9277776db41f0bd58c1fbb480db7e0dc4d81fc2164c2888df88",
-    "manual_crop_pdf": "fd715b1763a34af4b47bfb294e81064449337efed8b1fdb7d3c75aa4eb32b97c",
-    "post_process_pdf_parsed_questions": "a5b445933878983207029eed9f4d730ae97bc935975c089f44a616dc0f2534af",
+    "route_chapter": "e0e688bbc10e96d2b48c8346e4ea141043cf27d8dcb545b9f9679a5e70e1287b",
+    "save_metadata_config": "5a446db3198516cd1b3131b5da268cc55d05adad7c955fd721e6857c5f57074c",
+    "ai_classify": "acd76c92618fd0b15176245bbd0b16bad0670db36259b53cc598baee18b4b8e8",
+    "parse_paper_text_internal": "4e324ed8dd7be4902b874278b6a46b8a9aecf0ca08c7931d567d5b75fa6d9cb5",
+    "ai_parse_paper": "04d3d175083fb4d64ddd1660e336ee526fb51b976d8720b2e56efa9965a2db8e",
+    "rollback_question_asset_promotions": "f53f86617ab99092c458563f0558f4bc98c8469d0b352073e47090ebfd7c14f2",
+    "_referenced_question_assets": "f41034985899b4d1346eaab16e707bfddd7a5b7dbfdd5db64a54dfc4906147a9",
+    "delete_unreferenced_question_assets": "f702237709adb787b05ffe663afca7e4ab9cb2df037a93887d3481b6fb335242",
+    "promote_question_temp_assets": "6d845c9bcbcc7a328257532702c09bb917e0838971a3424e1c7d2c9bbfc9afd4",
+    "_delete_task_temp_assets": "74e880c71ff49390fa96b078ecb144c42a90634cfef214ebc11d07c17d137fe0",
+    "build_document_import_dependencies": "58c12c7cfa85e83edff3e35937ab7a2fdde216d393e7a3c3256545daa6783260",
+    "manual_crop_pdf": "227c384822cb7c91b7abbf0683138a6919b56632aac3446e8d09a8cd8f94a51d",
+    "post_process_pdf_parsed_questions": "b30e35b63f894dd5b5c0dade37b25b7115ee28dd526c49d613977b724871dcb6",
     "run_pdf_parsing_task": "179d67bd3be0730f9036a64919124f9e7a73f860a21bf1effe48fa9d302affed",
-    "upload_pdf_task": "149fb7f2b6b67bad63f33b5dc3319e59b2238777caa87a70d081b98b3a1046f0",
-    "run_docx_parsing_task": "34d49c944577d37dfdd8948860773e5d9f93e4f35dbe90cac7361691e998c260",
-    "upload_docx_task": "642031432310910037437e56ed364f162313270c5651243c47d8ee85765ae295",
-    "get_pdf_task_status": "1e4deda705d1cff6d42510bc62fad342e84d71dbf48a52ad4e0060c1c063fd59",
+    "upload_pdf_task": "2cd402ab558d09fe8db1394f7ea0b2be16033841ff799c87a5e3c2b2c97edd38",
+    "run_docx_parsing_task": "cf747b2c4510e40f34fa2c1c6b0094a841498fbd7fd392ae7eb62b5d052341de",
+    "upload_docx_task": "65259e59c5bb8ad482d336f73352c2d98aabe080ba67f33146de68f4bce0f866",
+    "get_pdf_task_status": "533cc34840bec42c60b865f5902d175eb73440ebff989ce1a7d680c63e8fef9f",
     "cancel_pdf_task": "f707d80afa321a2cff60736a7b9cd68efad0c8d8aa1ebbaf916bd57d551e91ab",
     "clear_temp_crops": "9f684694d500fd53846b69c56437956fc5ab83d40376e207f4acb3bfb863a893",
-    "ai_select_paper": "d4c30547ecc8382ed1813bc0b59d4e1c04798c1ba9e1430afc1d9994142d0e46",
-    "get_paper_questions": "1f3b0f140bcaeae8f496d621887fec366a1e772a673f2cc29316769f9623d6dc",
+    "ai_select_paper": "c62fbdb2775f7bbc7152ca2859709b308b63ed546649cbc6526b436a876d9d0e",
+    "get_paper_questions": "662b8c191714ea30091acd13fce54be9847c658a6b4f7643ab898d745cea9de5",
     "save_paper": "c40c268ec3cc8c05bbc3cfd52cc4047bee2659f92e767c12ea76f8c4117aad2f",
     "list_papers": "1693cbeb2ddd51d8b2030b4cc210a0e3ccbd565a13bc05632a5b41db5c003a7e",
-    "get_paper_detail": "5fe1483d9fa543bc349003f67ee511714fbafde7a74b32b3458de27741eb17d6",
+    "get_paper_detail": "8e00abde6285f0f432d584661f0eb7ce9a6e2a830a8bf1eb04ed9024fa3b50dc",
     "delete_paper": "beac040c685f0aec49277d9ceacc3cb1291961b28c4451205e50c9580b789878",
-    "_prepare_paper_export_questions": "faddc97a2b8cfa22ad76feb73c4a200aa8613db8ec1008f6ba3c3c7df52c477c",
-    "export_paper_tex": "b0c35dd15c01834c305033dc43d4b22e2fa3f7cd07b1c4515f7b39ebdb2f9828",
-    "export_paper_bundle": "1132617f7a5aa26052bc7598330c9a5566544bd539cdf1bf53d458d87a6e1937",
+    "_prepare_paper_export_questions": "383acd6b74b7d4eb6f79571bf452998036f8be03582c5cc47fbf368f209f373b",
+    "export_paper_tex": "14bd6f379cf3b03c5c04c551a6f2266131cdf9473379ccd30ae43218dd0ef977",
+    "export_paper_bundle": "7da17aee472b47c5610ce261bb857f830cafe02373667f185b4bd2cf65b33260",
     "explain_latex_compile_error": "555eb45c65d5677b7bf82f18b348987dc7b9b1a9a505b5fbc6a2c111734b01d1",
-    "export_paper_pdf": "8f88ba40933340d1f680aac4a913a8ca2b8da0c6be36d0b8b34a315b5ba70a87",
+    "export_paper_pdf": "253b1f23eaa74a20936658255c769654b226c9e2b4c236c8641e5f31fe7269f6",
     "export_paper_word": "b429ff42557b7069c504378c7dab94ba72373e78d0b1691482912700bc7bb6c1",
-    "get_knowledge_points": "13c06ee3b29479d93f5151c6809ae6670f503c1aebb947df79681f3e3e0820da",
-    "add_knowledge_point": "1650cc08e125a026197535db509fc3a0c543bc00605dc2929b1efb7ef94c17a0"
+    "get_knowledge_points": "dc6926c87f6f30c23a0f45c7389b60e6cbbd087ad8629619d5f11a3593fd6c6d",
+    "add_knowledge_point": "4b670e9b031bf55a9f84e0782ffae35c3068fa908ac31946dea313c1a1a95c7f",
+    "_report_database_export_error": "6216f9dd794ec25788ae96c3d4997d9b3f3412bf50517227b3e338873e56bacc",
+    "upload_markdown_source": "2b3e314964a9d0d469da9d74b2b8b95eea5e475a1c54a930dacfc0fb755b4b9f",
+    "list_association_candidates": "ab632226187c9eb45333048d78677add8f69035cdd061dfc283d8cfd11ac693e",
+    "curriculum_filter_expression": "41349680e3c89243d1977a2adec808ffdb12f9a3a865513d74f8c67bcc5a0af3",
+    "apply_curriculum_filters": "d926be9f03f5fc6e200b74047a9f7d87412dff65dbd5083b5f6cc029610b0b9a",
+    "require_expected_curriculum_version": "62b7d1c9acd182ebf406851a75c0828b20b748f0c51583e73b75746941c91892",
+    "get_sub_knowledge_config": "2d145ec98afe83822a8258883b9e2b155132d0884aa681eba3fba8b2e5f524c5",
+    "_save_metadata_config": "33958cd9033096a2d0ab9cfb5128a3a40aa0abf11999d423a325ff0087fd284d",
+    "validate_import_knowledge": "4323dde0abf714fc51aeae2c2cb3995d8a93e6812a7228f5fec5faaed07551b2",
+    "_document_request_id": "421e91a8057eda678a74520bb94e4b845c8e8da0e1e74c5b250d35c1d2b42425",
+    "_document_curriculum_sha256": "0d6a3bbd3972537e86624e60d0eeef017fa0dcee5f9c5d8444652f6438590076",
+    "_register_document_input": "d8c2d28ad13e20e641f9a8fe654db84658864bdbb575528212d063f736812742",
+    "_document_status": "944c316d063e9f644f3620d6d504cc19ca9fdd36b46ff9877be6ff104e1cd5fa",
+    "_manual_crop_pdf_impl": "9a45d24bd14e1fcbf6eac04ce3f9388166cf0ca828ede59004d03af650376a0b",
+    "_queue_document_upload": "767511cc0229c5f2fe2bedb1eafc92bb1d0a3dfda001dcafc765ced93a815d3b",
+    "get_document_task_by_request": "0da8aee23ec813a48a059e3725d5bb07a664a26814b298b4fc947592cdd95cf3",
+    "cancel_document_task_by_request": "81e0148b6f2b35e9c623e5010a50d1b306dea76433639fcfe8237033ec609d5c",
+    "resume_document_task": "f257e18094ff40ed237d2480210bc8e45fcee66975930e3a3a9bba99e0a1f32a",
+    "_read_document_source": "7abd52cc963a7ce5c2dd41fa1722ae292b8bc68ed157c12b5695a054223050a2",
+    "download_document_source": "d9fd9a298ed51765f0a10da2d862903f741d17aa4d7a113c53b99d1995bf6a93",
+    "retain_document_task": "fd8c895adf398efc5ef8d4d62cea8c971a5064b00191ab492792e4d8703fc944",
+    "get_paper_export_preflight": "d2ff560cb81a719032875d8cd136055d131ddd75ba496d95d5a29fbb5e753fe7",
+    "preview_library_transfer": "0061ff6b8365be33833a5006837675f8402770eb361b7059b7b2712d21d9312e",
+    "select_library_transfer_ids": "99f433d5cf558551bd230ab66bf1982e30ca016e5820ae46f08acc181d4e9ff5",
+    "export_library_transfer": "0f4eb88cccd76f0f492566d8af090a805f7047ef93501dbdea97648582493e54",
+    "import_library_transfer": "71a3425ef4ab2c0014aa09fbb75a40dfd6a3a791a01f0e9179c04ca1a8cc3376",
+    "_document_project_service": "d1b0fc2d2dd323bec5f203a9947dca51e6f85f1f103a2fb21b2c040ec034c547",
+    "_sync_document_project": "7e28ff2c649ff0cf95ce7da5b6064c0ead2a9bfe9b304aa8a489d0a7fe600960",
+    "_restore_document_project_asset": "3a9f17c7af4b1e8922a47483ddc94e8939a1b5df4565866d819b8b1047cf2e7c",
+    "_dispatch_document_project": "13c96f2e81e458787184b279d3dbdf3068fa4d2785a69521ca9ec4fe0b0de69a",
+    "_release_document_project_assets": "f729b206571f99e7124d1865172438c55d0a207650567da85055349e3108f71f",
+    "_maintain_document_projects": "20ea85f828f953b73edf95f2f2a48af57eab0336fe9da1dcac5fe2968f689141"
   }
 }

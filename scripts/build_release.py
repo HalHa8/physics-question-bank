@@ -123,11 +123,17 @@ HIDDEN_FILE_ALLOWLIST = {".env.example", ".gitkeep", ".rels"}
 INTERNAL_TOOL_RELEASE_PATHS = frozenset({
     "mathbank/association_batch.py",
     "mathbank/classification_proposals.py",
+    "mathbank/difficulty_batch.py",
     "mathbank/knowledge_backfill.py",
     "mathbank/knowledge_backfill_apply.py",
     "mathbank/question_exchange.py",
     "scripts/association_batch.py",
+    "scripts/backfill_question_references.py",
+    "tests/test_backfill_question_references.py",
+    "tests/test_question_references_exchange.py",
     "scripts/classification_proposals.py",
+    "scripts/difficulty_batch.py",
+    "scripts/difficulty_classify.py",
     "scripts/knowledge_backfill.py",
     "scripts/knowledge_backfill_apply.py",
     "scripts/question_exchange.py",
@@ -616,6 +622,8 @@ def _release_path_violation(relative_path):
     name = path.as_posix()
     if _is_internal_tool_release_path(path):
         return "non-runtime source tooling"
+    if name.startswith('docs/') and name not in {f'docs/images/{image}' for image in DOCS_IMAGE_ALLOWLIST}:
+        return "non-runtime documentation"
     if name == "static/uploads/.gitkeep":
         return None
     if name == ".env" or name.startswith(".env/"):

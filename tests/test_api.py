@@ -254,6 +254,8 @@ def test_ai_classify_returns_coarse_form_without_question_type():
         "main.post_chat_completion", return_value=response
     ), patch(
         "main.get_current_curriculum", return_value={"必修一": {"1. 集合": []}}
+    ), patch(
+        "main.get_active_version_code", return_value="P"
     ):
         from main import ai_classify
 
@@ -267,8 +269,12 @@ def test_ai_classify_returns_coarse_form_without_question_type():
         "status": "success",
         "compulsory": "必修一",
         "chapter": "1. 集合",
+        "knowledge": "",
         "question_form": "choice",
         "question_form_source": "ai",
+        "knowledge_points": [],
+        "knowledge_point_warnings": [],
+        "version_code": "P",
     }
     assert fillin_result["question_form"] == "fill_in_blank"
     assert fillin_result["question_form_source"] == "structure"
@@ -382,13 +388,15 @@ def test_api_metadata_config(client):
 
 
 def test_curriculum_preset_api(client):
-    for version in ("A", "B", "S", "H"):
+    from mathbank.curriculums import CURRICULUM_NAMES
+    for version in CURRICULUM_NAMES:
         response = client.get(f"/api/config/curriculum-presets/{version}")
         assert response.status_code == 200
         data = response.json()
         assert data["version"] == version
         assert data["name"]
         assert data["metadata"]["curriculum"]
+        assert data["metadata"]["curriculum_version"] == version
 
     response = client.get("/api/config/curriculum-presets/unknown")
     assert response.status_code == 404
@@ -590,7 +598,7 @@ def test_parse_paper_flows_use_shared_provider_resolution(client):
         assert "reasoning_effort" not in kwargs["json"]
         assert "thinking_budget" not in kwargs["json"]
         assert "max_tokens" not in kwargs["json"]
-        assert kwargs["timeout"] == 180
+        assert kwargs["timeout"] == 600
 
 def test_figure_align_api(client):
     headers = {"X-Local-Token": LOCAL_TOKEN}

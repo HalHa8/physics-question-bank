@@ -42,10 +42,23 @@ def create_application(*, initialize=True, state=None):
     state.TMP_UPLOAD_DIR = os.path.join(state.UPLOAD_DIR, "tmp")
     state._SHUTDOWN_SCHEDULED = threading.Event()
     state._SHUTDOWN_SCHEDULE_LOCK = threading.Lock()
-    state.PDF_OCR_SEMAPHORE = threading.BoundedSemaphore(4)
-    state.DOCUMENT_TASKS = TaskManager(
+    state._METADATA_SAVE_LOCK = threading.RLock()
+    state._DOCUMENT_PROJECT_STOP = threading.Event()
+    state.PDF_OCR_CAPACITY = defaults.PdfOcrCapacity(defaults.configured_pdf_ocr_concurrency())
+    state.PDF_OCR_SEMAPHORE = state.PDF_OCR_CAPACITY.auxiliary
+    state.DATABASE_EXPORT_QUEUE = defaults.DatabaseExportQueue(
+        lambda: bindings.resolve("export_database_to_files")(),
+        on_error=lambda exc, operation: bindings.resolve("_report_database_export_error")(exc, operation))
+    # Durable storage is opened only after acquiring the restore/runtime lock.
+    state.DOCUMENT_TASK_STORE = None
+    state.DOCUMENT_PROJECTS = None
+    state.DOCUMENT_TASKS = defaults.DurableDocumentTasks(
+        store=state.DOCUMENT_TASK_STORE,
+        transient_document_types={"pdf"} if state.PDF_CLOUD_ONLY else (),
+        on_snapshot=lambda task_id, snapshot: bindings.resolve("_sync_document_project")(task_id, snapshot),
         max_workers=2, max_queue=4, terminal_ttl_seconds=3600,
         temp_asset_cleanup=lambda paths: bindings.resolve("_delete_task_temp_assets")(paths),
+        record_cleanup=lambda task_id: state.DOCUMENT_TASK_INPUTS.pop(task_id, None),
     )
     # P remains the default; legacy mathematics trees are data-compatibility only.
     for name, code in (("PHYSICS_CURRICULUM", "P"), ("RENJIAO_A_CURRICULUM", "A"),
@@ -67,7 +80,8 @@ def create_application(*, initialize=True, state=None):
     )
     app.middleware("http")(bindings.resolve("security_and_heartbeat_middleware"))
     register_routes(app, bindings.resolve)
-    app.mount("/static", StaticFiles(directory=str(defaults.STATIC_DIR)), name="static")
+    app.mount("/static", defaults.RetainedUploadStaticFiles(directory=str(defaults.STATIC_DIR),
+        uploads_dir=state.UPLOAD_DIR, url_prefix=state.UPLOAD_DIR_REL), name="static")
     return bindings
 
 
@@ -76,6 +90,9 @@ def initialize_runtime(bindings):
     try:
         defaults.load_dotenv(defaults.ENV_FILE)
         defaults.harden_private_path(defaults.ENV_FILE)
+        # Read concurrency only after loading this installation's environment.
+        state.PDF_OCR_CAPACITY = defaults.PdfOcrCapacity(defaults.configured_pdf_ocr_concurrency())
+        state.PDF_OCR_SEMAPHORE = state.PDF_OCR_CAPACITY.auxiliary
         # The legacy entry loaded .env before deriving its instance identity.
         launch_id = os.environ.get("MATHBANK_LAUNCH_ID", "").strip().lower()
         if re.fullmatch(r"[0-9a-f]{32}", launch_id):
@@ -85,13 +102,27 @@ def initialize_runtime(bindings):
         if state._RUNTIME_LOCK is not None:
             atexit.register(state._RUNTIME_LOCK.close)
         defaults.init_db()
+        if not state.IS_TESTING:
+            state.DOCUMENT_TASK_STORE = defaults.DocumentTaskStore(defaults.DOCUMENT_TASKS_DIR)
+            state.DOCUMENT_PROJECTS = defaults.DocumentProjectStore(defaults.DOCUMENT_PROJECTS_DIR)
+            state.DOCUMENT_TASKS.shutdown(wait=False)
+            state.DOCUMENT_TASKS = defaults.DurableDocumentTasks(
+                store=state.DOCUMENT_TASK_STORE,
+                transient_document_types={"pdf"} if state.PDF_CLOUD_ONLY else (),
+                on_snapshot=lambda task_id, snapshot: bindings.resolve("_sync_document_project")(task_id, snapshot),
+                max_workers=2, max_queue=4, terminal_ttl_seconds=3600,
+                temp_asset_cleanup=lambda paths: bindings.resolve("_delete_task_temp_assets")(paths),
+                record_cleanup=lambda task_id: state.DOCUMENT_TASK_INPUTS.pop(task_id, None))
         os.makedirs(state.UPLOAD_DIR, exist_ok=True)
         os.makedirs(state.TMP_UPLOAD_DIR, exist_ok=True)
+        defaults.register_asset_store(state.UPLOAD_DIR,
+            defaults.RETAINED_UPLOADS_DIR / ("test" if state.IS_TESTING else "uploads"))
         state.LOCAL_TOKEN = bindings.resolve("load_or_create_local_token")()
         bindings.resolve("load_or_init_metadata")()
         bindings.resolve("print_startup_diagnostics")()
     except BaseException:
         state.DOCUMENT_TASKS.shutdown(wait=False)
+        state.DATABASE_EXPORT_QUEUE.close(wait=False)
         if state._RUNTIME_LOCK is not None:
             state._RUNTIME_LOCK.close()
         raise

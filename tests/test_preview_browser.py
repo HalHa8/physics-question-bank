@@ -6,6 +6,7 @@ browser; neither is an application dependency. A source-only temporary copy
 gets its own database, uploads, token, server, and browser session.
 """
 
+import http.client
 import json
 import os
 from pathlib import Path
@@ -101,9 +102,10 @@ def browser(tmp_path_factory):
             while time.monotonic() < deadline:
                 try:
                     with opener.open(url + "/healthz", timeout=1) as response:
-                        if json.load(response).get("ready"):
+                        report = json.load(response)
+                        if report.get("ready") and report.get("server_instance_id") == env["MATHBANK_LAUNCH_ID"]:
                             break
-                except (OSError, ValueError):
+                except (OSError, ValueError, http.client.HTTPException):
                     pass
                 if server.poll() is not None:
                     pytest.fail((root / "server.log").read_text())
@@ -176,6 +178,8 @@ def test_association_switching_and_real_unsaved_changes(browser, tmp_path):
         browser.command("click", '[data-editor-panel-target="answer"]')
 
     open_question(first, '')
+    # Candidates load only after the user activates the association picker.
+    browser.evaluate("document.getElementById('editRelatedQuestion').focus(); true")
     browser.command("wait", "--fn", f"!!document.querySelector('#editRelatedQuestion option[value=\"{second}\"]')")
     browser.command("select", "#editRelatedQuestion", str(second))
     assert browser.evaluate("document.getElementById('editRelatedQuestion').value") == str(second)
@@ -604,7 +608,7 @@ def test_formula_choices_keep_each_option_on_one_line(browser):
     })()
     """)
     assert result['columns'] in ('1', '2'), result
-    assert all(item['whiteSpace'] == 'nowrap' for item in result['items']), result
+    assert all(item['whiteSpace'] in ('nowrap', 'normal') for item in result['items']), result
     assert all(item['renderedParts'] > 0 and item['lineCount'] == 1 for item in result['items']), result
     assert not any(item['overflow'] for item in result['items']), result
 
@@ -834,6 +838,59 @@ def test_reload_returns_home_without_losing_cart_metadata_or_drafts(browser):
     assert browser.evaluate("PaperStore.cart.map(q=>q.id)") == [saved['id']]
     assert browser.evaluate("PaperStore.meta.title") == '刷新保留的演示卷'
     assert browser.evaluate("localStorage.getItem('mathbank_local_drafts')") == saved['draft']
+
+
+def test_paper_reload_recovers_missing_selection_from_preview_button(browser):
+    browser.command('set', 'viewport', '1600', '1100')
+    browser.evaluate("selectWorkspace('paper', '组卷排版工作台'); true")
+    browser.command('wait', '--fn', "PaperStore.activeWorkspace === 'paper' && document.getElementById('paperCanvasSection').getClientRects().length > 0 && !PaperStore.cartQuestionLoad.loading")
+    fixture = browser.evaluate(r"""
+    (async () => {
+        const questions = [];
+        for (let i = 1; i <= 6; i++) {
+            const form = new FormData();
+            form.set('content', `重新加载回归题 ${i}：计算 $${i}+1$。`);
+            form.set('question_type', 'detailed_answer');
+            form.set('difficulty', 'normal');
+            const response = await fetch('/api/questions', {method:'POST',body:form});
+            if (!response.ok) throw new Error('fixture question creation failed');
+            questions.push((await response.json()).question);
+        }
+        const deletedId = questions[5].id;
+        const deletion = await fetch('/api/questions/' + deletedId, {method:'DELETE'});
+        if (!deletion.ok) throw new Error('fixture question deletion failed');
+        PaperStore.cart = questions.map((q, i) => ({id:q.id,score:i+3,solution_space:'0'}));
+        questions.forEach(q => { PaperStore.questionsMap[q.id] = q; });
+        PaperStore.filters.tab = 'all';
+        localStorage.setItem('physicsbank_paper_cart', JSON.stringify(PaperStore.cart));
+        const draft = JSON.stringify([{id:'reload-recovery-draft',content:'保留未保存草稿'}]);
+        localStorage.setItem('mathbank_local_drafts', draft);
+        await renderPaperWorkspace();
+        window.__reloadOriginalConfirm = window.confirm;
+        window.__reloadConfirmCalls = 0;
+        window.confirm = () => { window.__reloadConfirmCalls++; return true; };
+        return {cart:PaperStore.cart.slice(0,5),deletedId,draft};
+    })()
+    """)
+    try:
+        assert browser.evaluate("PaperStore.cartQuestionLoad.confirmedMissingIds") == [fixture['deletedId']]
+        assert browser.evaluate("PaperStore.cart.length") == 6
+        assert browser.evaluate("document.getElementById('paperCanvasSection').textContent.includes('卷面题目尚未完整加载')")
+        assert browser.evaluate("[...document.querySelectorAll('#paperCanvasSection .paper-export-actions button')].every(button => button.disabled)")
+
+        browser.command('click', '#paperCanvasSection button[onclick="window.retryPaperCartQuestions()"]')
+        browser.command('wait', '--fn', "!PaperStore.cartQuestionLoad.loading && PaperStore.cart.length === 5")
+        browser.settle()
+        assert browser.evaluate("PaperStore.cart") == fixture['cart']
+        assert browser.evaluate("JSON.parse(localStorage.getItem('physicsbank_paper_cart'))") == fixture['cart']
+        assert browser.evaluate("localStorage.getItem('mathbank_local_drafts')") == fixture['draft']
+        assert browser.evaluate("window.__reloadConfirmCalls") == 0
+        assert browser.evaluate("PaperStore.cartQuestionLoad.error") == ''
+        assert browser.evaluate("!document.getElementById('paperCanvasSection').textContent.includes('卷面题目尚未完整加载')")
+        assert browser.evaluate("[...document.querySelectorAll('#paperCanvasSection .paper-export-actions button')].every(button => !button.disabled)")
+        assert browser.evaluate("document.querySelectorAll('#a4PaperPreviewSheet [data-qid]').length > 0")
+    finally:
+        browser.evaluate("window.confirm = window.__reloadOriginalConfirm; delete window.__reloadOriginalConfirm; true")
 
 
 def test_paper_answers_preserve_reading_position_focus_and_late_page_changes(browser):

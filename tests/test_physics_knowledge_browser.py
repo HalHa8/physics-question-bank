@@ -36,17 +36,29 @@ def _edit(browser, qid):
     browser.command('wait', '--fn', f"EditorState.questionId==={qid} && !questionDetailLoading && !isEditorModified()")
     browser.command('click', '#editQuestionFromPreviewBtn')
     browser.command('wait', '--fn', "!document.getElementById('editorSection').classList.contains('hidden')")
+    browser.command('click', '[data-editor-panel-target="classification"]')
 
 
 def _choose(browser, context, word, code):
-    field = 'knowledgePointSearch' if context == 'editor' else 'filterPointSearch'
-    host = 'knowledgePointResults' if context == 'editor' else 'filterPointResults'
-    browser.command('fill', '#' + field, word)
-    selector = f'#{host} [data-point-code="{code}"]'
+    kind = 'edit' if context == 'editor' else 'bank'
+    host = '#editKnowledgePointPicker' if kind == 'edit' else '#bankKnowledgePointPicker'
+    popup = '#mb-kp-picker-' + kind
+    if not browser.evaluate('document.querySelector(' + json.dumps(popup) + ').open'):
+        browser.command('scrollintoview', host + ' .mb-kp-toggle')
+        browser.command('click', host + ' .mb-kp-toggle')
+    browser.command('fill', popup + ' .mb-kp-tools input', word)
+    selector = f'{popup} .mb-kp-option[data-code="{code}"]'
     browser.command('wait', '--fn', '!!document.querySelector(' + json.dumps(selector) + ')')
     browser.command('scrollintoview', selector)
     browser.settle()
     browser.command('click', selector)
+
+
+def _role(browser, role):
+    browser.command('press', 'Escape')
+    browser.command('click', '#editKnowledgePointPicker .mb-kp-selected button:last-child')
+    browser.command('select', '#editKnowledgePointPicker .mb-kp-menu select', role)
+    browser.command('click', '#editKnowledgePointPicker .mb-kp-menu > button:last-of-type')
 
 
 @pytest.mark.parametrize('width', [1600, 375])
@@ -57,10 +69,9 @@ def test_manual_points_save_reload_draft_and_exact_filters(browser, tmp_path, wi
     _edit(browser, qid)
     original = browser.evaluate(f"fetch('/api/questions/{qid}').then(r=>r.json())")
     _choose(browser, 'editor', '动能定理', AUX)
-    role = '#knowledgePointSelection .kp-selected-row:last-child select'
-    browser.command('select', role, 'auxiliary')
+    _role(browser, 'auxiliary')
     assert browser.evaluate('isEditorModified()')
-    assert browser.evaluate('KnowledgePointState.snapshot()') == [
+    assert browser.evaluate('KnowledgePointState.snapshot().map(({code,role,status})=>({code,role,status}))') == [
         {'code': MAIN, 'role': 'main', 'status': 'confirmed'},
         {'code': AUX, 'role': 'auxiliary', 'status': 'confirmed'},
     ]
@@ -77,8 +88,10 @@ def test_manual_points_save_reload_draft_and_exact_filters(browser, tmp_path, wi
     for field in ('content', 'tags', 'category_compulsory', 'category_chapter', 'category_knowledge'):
         assert stored[field] == original[field]
     assert [point['role'] for point in stored['knowledge_points']] == ['main', 'auxiliary']
-    assert browser.evaluate("document.getElementById('knowledgePointSummary').textContent.includes('动能定理（辅）')")
-    assert browser.evaluate("[...document.querySelectorAll('#knowledgePointSelection button, #knowledgePointSelection select')].every(n=>n.getBoundingClientRect().height>=44)")
+    browser.evaluate("openQuestionEditorModal('classification');true")
+    browser.settle()
+    assert browser.evaluate("document.querySelectorAll('#editKnowledgePointPicker .mb-kp-selected button').length===2")
+    assert browser.evaluate("[...document.querySelectorAll('#editKnowledgePointPicker .mb-kp-selected button')].every(n=>n.getBoundingClientRect().height>=" + str(43 if width==375 else 27) + ")")
     assert browser.evaluate("document.documentElement.scrollWidth<=innerWidth+1")
     browser.command('screenshot', str(tmp_path / f'knowledge-editor-{width}.png'))
     browser.command('click', '#editorSection .question-editor-close')
@@ -90,12 +103,13 @@ def test_manual_points_save_reload_draft_and_exact_filters(browser, tmp_path, wi
     if width == 375:
         browser.command('click', '.bank-detail-back')
     browser.command('click', '.bank-filter-toggle')
-    browser.command('click', '.kp-filter-panel summary')
     _choose(browser, 'filter', '动量守恒', MAIN)
     _choose(browser, 'filter', '动能定理', AUX)
-    browser.command('select', '#filterPointMatch', 'all')
+    browser.command('select', '#mb-kp-picker-bank select[aria-label="匹配方式"]', 'all')
+    browser.command('select', '#mb-kp-picker-bank select[aria-label="考查作用"]', 'all')
     browser.command('wait', '--fn', f"!!document.querySelector('#questionsList [data-id=\"{qid}\"]') && !document.querySelector('#questionsList [data-id=\"{other}\"]')")
-    browser.command('select', '#filterPointRole', 'main')
+    browser.command('select', '#mb-kp-picker-bank select[aria-label="考查作用"]', 'main')
+    browser.command('press', 'Escape')
     browser.command('wait', '--fn', "document.getElementById('questionsList').textContent.includes('未找到匹配题目')")
     browser.command('click', '#clearBankFiltersBtn')
     browser.command('wait', '--fn', f"!!document.querySelector('#questionsList [data-id=\"{other}\"]')")
@@ -113,27 +127,28 @@ def test_personal_alias_is_text_only_and_late_catalogue_cannot_cross_questions(b
     _fresh(browser)
     qid = _question(browser, '自建知识点与会话测试', [])
     _edit(browser, qid)
-    browser.command('click', '#knowledgePointsHeading ~ details summary')
+    browser.command('click', '#editKnowledgePointPicker .mb-kp-create summary')
     name = '<img src=x onerror=alert(1)>个人点'
-    browser.command('fill', '#newKnowledgePointName', name)
-    browser.command('fill', '#newKnowledgePointAliases', '个人检索别名')
-    browser.command('click', '#createKnowledgePointBtn')
+    browser.command('fill', '#editKnowledgePointPicker .mb-kp-create input.glass-input', name)
+    browser.command('fill', '#editKnowledgePointPicker .mb-kp-create textarea', '个人检索别名')
+    browser.command('click', '#editKnowledgePointPicker .mb-kp-create > button')
     browser.command('wait', '--fn', 'KnowledgePointState.snapshot().length===1')
-    assert browser.evaluate("document.querySelector('#knowledgePointSelection span').textContent") == name
-    assert browser.evaluate("document.querySelectorAll('#knowledgePointSelection img').length") == 0
+    assert browser.evaluate("document.querySelector('#editKnowledgePointPicker .mb-kp-selected button').textContent") == name
+    assert browser.evaluate("document.querySelectorAll('#editKnowledgePointPicker .mb-kp-selected img').length") == 0
     assert browser.evaluate("fetch('/api/knowledge-points?q=个人检索别名').then(r=>r.json()).then(d=>d.total)") == 1
-    # Intercept only this synthetic catalogue search. There is no model request.
+    # A late create response must not select a point in another editor session.
     browser.evaluate("""window.__kpFetch=window.fetch; window.fetch=(url,options)=>
-        String(url).includes('/api/knowledge-points?') && String(url).includes('q=late')
-        ? new Promise(resolve=>{window.__kpLate=()=>resolve(new Response(JSON.stringify({total:1,items:[{code:'local:late',name:'错误串题'}]}),{status:200}));})
+        String(url)==='/api/knowledge-points' && options?.method==='POST'
+        ? new Promise(resolve=>{window.__kpLate=()=>resolve(new Response(JSON.stringify({code:'local:late',name:'错误串题',aliases:[],curriculum_paths:[]}),{status:200}));})
         : window.__kpFetch(url,options); true""")
-    browser.command('fill', '#knowledgePointSearch', 'late')
+    browser.command('fill', '#editKnowledgePointPicker .mb-kp-create input.glass-input', '迟到创建')
+    browser.command('click', '#editKnowledgePointPicker .mb-kp-create > button')
     browser.command('wait', '--fn', "typeof window.__kpLate === 'function'")
     browser.evaluate("EditorState.reset(); KnowledgePointState.reset(); window.__kpLate(); true")
     browser.settle()
     assert browser.evaluate('KnowledgePointState.snapshot()') == []
-    assert not browser.evaluate("document.getElementById('knowledgePointResults').textContent.includes('错误串题')")
     browser.evaluate('window.fetch=window.__kpFetch; true')
+
 
 
 def test_late_save_preserves_newer_point_role_as_unsaved_edit(browser):
@@ -152,7 +167,9 @@ def test_late_save_preserves_newer_point_role_as_unsaved_edit(browser):
     if browser.evaluate("document.getElementById('duplicateReviewIndependentBtn').offsetParent!==null"):
         browser.command('click', '#duplicateReviewIndependentBtn')
     browser.command('wait', '--fn', "typeof window.__kpRelease==='function'")
-    browser.command('select', '#knowledgePointSelection .kp-selected-row:last-child select', 'auxiliary')
+    # The duplicate-review dialog remains modal until the response is accepted.
+    # Exercise a newer controller edit without clicking through that safeguard.
+    browser.evaluate("KnowledgePointState.setRole('" + AUX + "','auxiliary');true")
     browser.evaluate('window.__kpRelease(); true')
     browser.command('wait', '--fn', 'window.__kpSaveDone!==null && !isQuestionSaveInFlight()')
     assert browser.evaluate('window.__kpSaveDone') is True

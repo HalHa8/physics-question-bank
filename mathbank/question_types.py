@@ -89,6 +89,11 @@ def normalize_ai_question_form(value: object) -> str:
         "填空题": QUESTION_FORM_FILL_IN_BLANK,
         "detailed_answer": QUESTION_FORM_DETAILED_ANSWER,
         "解答题": QUESTION_FORM_DETAILED_ANSWER,
+        "计算题": QUESTION_FORM_DETAILED_ANSWER,
+        "experiment": "experiment",
+        "实验题": "experiment",
+        "short_answer": "short_answer",
+        "简答题": "short_answer",
         "unknown": QUESTION_FORM_UNKNOWN,
         "未知": QUESTION_FORM_UNKNOWN,
     }

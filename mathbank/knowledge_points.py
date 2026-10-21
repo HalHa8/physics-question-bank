@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import re
+import sqlite3
 import uuid
 from functools import lru_cache
 
@@ -18,6 +19,7 @@ from mathbank.curriculums import load_curriculum
 from mathbank.paths import PROJECT_ROOT
 
 MAX_QUESTION_POINTS = 64
+METADATA_FIELDS = ('scope', 'evidence_source', 'evidence', 'reason', 'origin')
 CATALOG_FILE = PROJECT_ROOT / "mathbank" / "resources" / "physics_knowledge_points.json"
 
 
@@ -105,10 +107,12 @@ def seed_catalog(db):
     return {"added_points": added}
 
 
-def list_catalog(db, q="", compulsory="", chapter="", knowledge="", limit=100, offset=0):
+def list_catalog(db, q="", compulsory="", chapter="", knowledge="", limit=100, offset=0, *, version_code="P"):
     from mathbank.database import KnowledgePoint, KnowledgePointCurriculum
+    if version_code != "P":
+        raise ValueError("物理知识点只提供 P 教材映射")
     q = _text(q, "知识点搜索", 200, allow_empty=True)
-    if type(limit) is not int or not 1 <= limit <= 200 or type(offset) is not int or not 0 <= offset <= 2**63 - 1:
+    if type(limit) is not int or not 1 <= limit <= 1000 or type(offset) is not int or not 0 <= offset <= 2**63 - 1:
         raise ValueError("知识点分页参数无效")
     query = db.query(KnowledgePoint).options(selectinload(KnowledgePoint.curriculum_paths))
     if q.startswith("#"):
@@ -126,94 +130,143 @@ def list_catalog(db, q="", compulsory="", chapter="", knowledge="", limit=100, o
         query = query.filter(KnowledgePoint.curriculum_paths.any(and_(*conditions)))
     total = query.count()
     return {"items": [point.to_dict() for point in query.order_by(KnowledgePoint.name, KnowledgePoint.code).offset(offset).limit(limit)],
-            "total": total, "limit": limit, "offset": offset, "version_code": "P"}
+            "total": total, "limit": limit, "offset": offset, "version_code": "P", "hierarchy": []}
 
 
 def create_local_point(db, payload):
     from mathbank.database import KnowledgePoint, KnowledgePointCurriculum
-    if not isinstance(payload, dict) or set(payload) - {"name", "aliases", "curriculum_paths"}:
+    if not isinstance(payload, dict):
+        raise ValueError("新增知识点必须是对象")
+    if set(payload) - {"name", "aliases", "curriculum_paths", "paths", "expected_version_code"}:
         raise ValueError("新增知识点字段无效")
     name = _text(payload.get("name"), "知识点名称")
-    if db.query(KnowledgePoint.code).filter(KnowledgePoint.name == name).first():
-        raise ValueError("已有同名知识点，请搜索并选择已有项")
     aliases = _aliases(payload.get("aliases", []))
-    paths = payload.get("curriculum_paths", [])
-    if not isinstance(paths, list) or len(paths) > 16:
-        raise ValueError("教材映射格式无效")
-    paths = [_normalize_path(path) for path in paths]
+    names = {name.casefold(), *(alias.casefold() for alias in aliases)}
+    # Reserve SQLite's writer before checking names.  The reservation spans
+    # the caller's eventual commit/rollback, including across app processes;
+    # another creator can only check again after this creator has committed.
+    connection = db.connection()
+    raw_connection = connection.connection.dbapi_connection
+    if isinstance(raw_connection, sqlite3.Connection) and not raw_connection.in_transaction:
+        connection.exec_driver_sql("BEGIN IMMEDIATE")
+    # Catalogue creation is rare and bounded; exact aliases require decoding
+    # their JSON arrays.  Question searches below remain entirely indexed SQL.
+    for existing in db.query(KnowledgePoint).all():
+        existing_names = {existing.name.strip().casefold(), existing.original_name.strip().casefold(), *(alias.strip().casefold() for alias in existing.aliases)}
+        if names & existing_names:
+            raise ValueError(f"已有同名或同义知识点：{existing.name}（{existing.code}）")
+    paths_value = payload.get("curriculum_paths", payload.get("paths", []))
+    if not isinstance(paths_value, list) or len(paths_value) > 32:
+        raise ValueError("知识点教材归属必须是最多32项的列表")
+    paths = [_normalize_path(path) for path in paths_value]
     if len({tuple(path.values()) for path in paths}) != len(paths):
-        raise ValueError("教材映射重复")
-    point = KnowledgePoint(code="local:" + uuid.uuid4().hex, name=name, original_name=name, source="local")
+        raise ValueError("知识点教材归属重复")
+    point = KnowledgePoint(code=f"local:{uuid.uuid4().hex}", name=name, original_name=name, source="local")
     point.aliases = aliases
     point.curriculum_paths = [KnowledgePointCurriculum(**path) for path in paths]
     db.add(point)
     db.flush()
     return point
 
-
 def normalize_question_points(value, db):
-    """Only explicit manual selections are supported; no inferred confirmations."""
     from mathbank.database import KnowledgePoint
     if isinstance(value, str):
-        if len(value) > 20000:
+        if len(value) > 2_000_000:
             raise ValueError("知识点标注超过允许长度")
         try:
             value = json.loads(value)
         except (ValueError, TypeError) as exc:
             raise ValueError("知识点标注不是有效 JSON") from exc
     if not isinstance(value, list) or len(value) > MAX_QUESTION_POINTS:
-        raise ValueError("每题知识点必须为最多64项的列表")
-    result, seen = [], set()
+        raise ValueError("题目知识点必须是最多64项的列表")
+    normalized = []
+    codes = set()
     for item in value:
         if not isinstance(item, dict):
-            raise ValueError("知识点标注必须是对象")
+            raise ValueError("题目知识点必须是对象")
         code = _text(item.get("code"), "知识点编码", 100)
+        if code in codes:
+            raise ValueError(f"题目知识点重复：{code}")
+        codes.add(code)
         role = item.get("role", "main")
-        if code in seen or not isinstance(role, str) or role not in {"main", "auxiliary"} or item.get("status", "confirmed") != "confirmed":
-            raise ValueError("知识点重复、主辅角色或人工确认状态无效")
-        seen.add(code)
-        result.append({"code": code, "role": role})
-    known = {code for (code,) in db.query(KnowledgePoint.code).filter(KnowledgePoint.code.in_(seen))} if seen else set()
-    if seen != known:
-        raise ValueError("知识点不存在，请刷新目录后重新选择")
-    return result
-
+        status = item.get("status", "confirmed")
+        if not isinstance(role, str) or role not in {"main", "auxiliary"} or not isinstance(status, str) or status not in {"confirmed", "suggested"}:
+            raise ValueError("知识点的主要/辅助角色或确认状态无效")
+        row = {"code": code, "role": role, "status": status}
+        for field in METADATA_FIELDS:
+            metadata = item.get(field)
+            try:
+                encoded = json.dumps(metadata, ensure_ascii=False, allow_nan=False)
+            except (ValueError, TypeError, RecursionError) as exc:
+                raise ValueError(f"知识点{field}不是有效JSON值") from exc
+            if len(encoded) > 32768:
+                raise ValueError(f"知识点{field}超过允许长度")
+            row[field] = metadata
+        normalized.append(row)
+    known = {row[0] for row in db.query(KnowledgePoint.code).filter(KnowledgePoint.code.in_(codes)).all()} if codes else set()
+    if codes - known:
+        raise ValueError("未知知识点编码：" + ", ".join(sorted(codes - known)))
+    return normalized
 
 def replace_question_points(question, normalized, db):
-    """Participates in the question's transaction, including asset rollback."""
-    from mathbank.database import QuestionKnowledgePoint
+    """Replace explicit selections inside the caller's question transaction."""
+
+    from mathbank.database import KnowledgePoint, QuestionKnowledgePoint
     existing = {row.point_code: row for row in question.knowledge_points}
+    points = {row.code: row for row in db.query(KnowledgePoint).filter(KnowledgePoint.code.in_([item["code"] for item in normalized])).all()} if normalized else {}
     rows = []
     for position, item in enumerate(normalized):
-        row = existing.get(item["code"])
-        if row is None:
-            row = QuestionKnowledgePoint(point_code=item["code"])
-        row.position, row.role, row.status = position, item["role"], "confirmed"
-        row.origin = json.dumps("manual")
+        row = existing.get(item["code"]) or QuestionKnowledgePoint(point_code=item["code"])
+        row.point = points[item["code"]]
+        row.role, row.status, row.position = item["role"], item.get("status", "confirmed"), position
+        for field in METADATA_FIELDS:
+            setattr(row, field, json.dumps(item.get(field), ensure_ascii=False, allow_nan=False))
         rows.append(row)
     question.knowledge_points = rows
 
+def apply_knowledge_point_filters(query, codes, match_mode="any", role_scope="all", status_scope="confirmed", unlabeled=False):
+    """Apply exact ANY/ALL selections using indexed SQL, preserving other filters."""
 
-def apply_knowledge_point_filters(query, codes, match_mode="any", role_scope="all", unlabeled=False):
-    """Reuse MathBank's indexed exact ANY/ALL matching, never content guesses."""
     from mathbank.database import Question, QuestionKnowledgePoint
     if isinstance(codes, str):
         codes = codes.split(",") if codes else []
     if not isinstance(codes, (list, tuple)) or len(codes) > MAX_QUESTION_POINTS:
-        raise ValueError("知识点筛选格式无效")
+        raise ValueError("知识点筛选必须是最多64项编码的列表")
     codes = list(dict.fromkeys(_text(code, "知识点编码", 100) for code in codes))
-    if match_mode not in {"any", "all"} or role_scope not in {"main", "all"} or type(unlabeled) is not bool:
-        raise ValueError("知识点筛选方式无效")
+    if not isinstance(match_mode, str) or match_mode not in {"any", "all"} or not isinstance(role_scope, str) or role_scope not in {"main", "all"} or not isinstance(status_scope, str) or status_scope not in {"confirmed", "all"}:
+        raise ValueError("知识点筛选模式无效")
+    if not isinstance(unlabeled, bool):
+        raise ValueError("未标注筛选必须是布尔值")
+    conditions = []
+    if role_scope == "main":
+        conditions.append(QuestionKnowledgePoint.role == "main")
+    if status_scope == "confirmed":
+        conditions.append(QuestionKnowledgePoint.status == "confirmed")
     if unlabeled:
         if codes:
             raise ValueError("未标注筛选不能同时选择知识点")
-        return query.filter(~Question.knowledge_points.any())
+        unlabeled_conditions = [QuestionKnowledgePoint.status == "confirmed"] if status_scope == "confirmed" else []
+        return query.filter(~Question.knowledge_points.any(and_(*unlabeled_conditions))) if unlabeled_conditions else query.filter(~Question.knowledge_points.any())
     if not codes:
         return query
-    conditions = [QuestionKnowledgePoint.status == "confirmed"]
-    if role_scope == "main":
-        conditions.append(QuestionKnowledgePoint.role == "main")
     matches = select(QuestionKnowledgePoint.question_id).where(QuestionKnowledgePoint.point_code.in_(codes), *conditions)
     if match_mode == "all":
         matches = matches.group_by(QuestionKnowledgePoint.question_id).having(func.count(func.distinct(QuestionKnowledgePoint.point_code)) == len(codes))
     return query.filter(Question.id.in_(matches))
+
+# Textbook P currently has a flat, authoritative section list; do not invent
+# a mathematical-platform hierarchy or equate unrelated external identities.
+def get_curriculum_ancestors(version_code="P"):
+    return {}
+
+
+def is_zxxk_catalog_code(code):
+    """Recognize imported provenance only; never seed mathematical identities."""
+    return isinstance(code, str) and re.fullmatch(r"zxxk:catalog:[1-9][0-9]*", code) is not None
+
+
+def _resource_points():
+    return resource_points()
+
+
+_resource_points.cache_clear = resource_points.cache_clear

@@ -21,7 +21,7 @@ from PIL import Image, ImageOps
 from sqlalchemy import and_, func, literal, select, union_all
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import OperationalError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, noload
 
 from mathbank.asset_security import resolve_upload_asset
 from mathbank.database import Question, QuestionFingerprint as StoredFingerprint
@@ -100,10 +100,17 @@ def select_visible_question_images(
     answer_markdown: str,
     image_paths: Iterable[str],
     content_tikz_assets: object,
+    *,
+    review: str = "",
 ) -> list[str]:
-    """Keep prompt figures while excluding answer-only and AI reference assets."""
+    """Keep prompt/legacy figures, excluding answer, review and AI-only assets."""
 
-    paths = [str(path or "").strip() for path in image_paths if str(path or "").strip()]
+    from mathbank.question_assets import without_review_only_assets
+
+    paths = without_review_only_assets(
+        [str(path or "").strip() for path in image_paths if str(path or "").strip()],
+        content, answer_markdown, review,
+    )
     hidden_references: set[str] = set()
     assets = content_tikz_assets if isinstance(content_tikz_assets, list) else []
     for asset in assets:
@@ -212,6 +219,7 @@ def duplicate_input_for_question(
                 question.answer_markdown or "",
                 display_paths,
                 question.content_tikz_assets,
+                review=question.review or "",
             ),
             uploads_dir=uploads_dir,
             url_prefix=url_prefix,
@@ -661,6 +669,9 @@ def backfill_missing_fingerprints(
 ) -> int | tuple[int, int]:
     missing = (
         db.query(Question)
+        # Fingerprints depend on question text and assets, never on annotation
+        # evidence.  Override the model's selectin default for startup batches.
+        .options(noload(Question.knowledge_points))
         .outerjoin(
             StoredFingerprint,
             and_(

@@ -7,9 +7,12 @@
 Independent physics points are now separate from textbook placement and personal
 tags. The editor supports manual main/auxiliary labels, 80 starter points,
 aliases, teacher-created points and draft persistence. Bank filters support
-ANY/ALL, main-only and unlabeled questions. This stage makes no AI calls.
-The refactor branch upgrades its own schema from v10 to v11, with a database
-snapshot before migration; existing questions are not automatically relabeled.
+ANY/ALL, main-only and unlabeled questions. Optional AI classification uses the
+existing request to suggest points with literal evidence; suggestions remain
+pending until a teacher confirms them. Manual editing/search makes no AI calls.
+This branch adapts reusable MathBank 3.0 improvements while retaining physics
+content rules. PhysicsBank's own schema is v12 (not MathBank's version numbering),
+with a database snapshot before migration; existing questions are not relabeled.
 Make a full backup and close the service before upgrading. Older programs cannot
 open the upgraded database; rollback requires the pre-upgrade full backup and
 separate preservation of any newly added data. Portable packages are unchanged.
@@ -24,6 +27,21 @@ enables extra paid TikZ drawing calls per figure.
 
 This update is on `codex/refactor-backend-modules`; existing Windows portable
 packages have not been rebuilt. Use this source branch to obtain the changes.
+
+Settings → Library sharing exports selected questions, answers, labels and
+referenced images as a ZIP without credentials or runtime configuration. Import
+validates the package, creates a full backup, and appends without overwriting.
+Repeated imports append again; they do not automatically merge duplicates.
+Check content permissions and personal information before sharing.
+
+Markdown import, source-preserving classification, batch figure crops, tables,
+lists, image profiles and missing-asset export preflight are supported. Extra
+PDF/Word visual verification remains opt-in and may cost money. Failed paid
+requests are not automatically retried or silently routed to another provider.
+Word recovery requires an explicit click and may send unfinished requests.
+Upstream PDF local-project/fragment/checkpoint experiments remain disabled.
+
+See the [adaptation scope and acceptance record](docs/mathbank-3-physics-adaptation.md) for included features and deliberate differences.
 
 [简体中文](README.md) · [AGPL-3.0 license](LICENSE) · [Notices](NOTICE.md)
 

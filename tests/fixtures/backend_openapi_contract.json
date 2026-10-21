@@ -1,8 +1,216 @@
 {
   "baseline_commit": "94de5dd1fd5e9fd4ea6256312be2e1ebf311899f",
-  "openapi_sha256": "b275e386fdd33a56c764a710ab90a3b3902a8ab5ce29feed64e720d55ef95443",
-  "paths": 50,
-  "intentional_update": {"previous_openapi_sha256":"d09a69ede236271789904e3902c6849e275bf55bef6998688523e48b4a9746a2","reason":"One new catalogue path (GET/POST), four optional question filters, optional knowledge_points form fields; existing clients stay compatible.","behavior_regressions":"tests/test_physics_knowledge_points.py; tests/test_knowledge_api_contract.py"},
-  "unchanged_operations": {"/api/heartbeat":{"post":"5cdbcd6815f75018d6c61b4efd5eb316f93a0eac492f903c4474bb345d655059"},"/":{"get":"a4d470bb8c9e3da7ff9bb6a51b5cb86c264a7006345962e662b848669195861f"},"/api/format/fractions":{"post":"e5ea985a42220b67e0b9071e26487309104a1e9159e97f8cebc9724eda9c5986"},"/api/upload":{"post":"100081ece77b3d4d671a2c5b6184c4c928fdf48423d3f46dddac17737f694267"},"/api/ocr":{"post":"e9d2e8313bb063e9ea1225d89efbbdf6ce34c076eba2649c5f8f2a1db1134f2b"},"/api/ai/solve":{"post":"737c4ce62472ef19014e25ec9d7778644e6219663f25c22c27cb02633311b858"},"/api/settings":{"get":"1154906c59be702a0a3a9cd02aaec0de16e8ca9ef4f9474d43c0bb70b56897b4"},"/api/settings/save":{"post":"16e8e9d9aff254e92de11244e77d2406a4936647096c630c1e160883d87f8207"},"/api/version":{"get":"1c14d71386754f96c34a90d4ab87b78041983dbfec610b6113e0b91a0c9ed222"},"/api/version/check-update":{"get":"6d6b6b2735d60f7b866b5019ab85a9f8fa2f8a1cc448bac4bd55ae10a837b822"},"/api/render_tikz":{"post":"f57f18154ef799687cc90722e0ebcdfb272980e21b6339452d970becc415ea5d"},"/api/correct_tikz":{"post":"820f51e6e4c5359ae6a5c7571e7c6dc5cdff7764fe4339bd63ef55c91f428661"},"/api/ai/draw_tikz":{"post":"aeea2b90481de0311bfd27904a4b63c5f9a0f905f8e161529e45ffeb9c813207"},"/api/ai/draw_tikz_from_image":{"post":"c58f5e258d2a30b41b94bf9ffa84b5a8168a43587826892b5c4b415ad865c5cc"},"/api/questions":{"post":"868dbb51be2b19d398c3f4efb8b36243b077bc7aa617da075498a0932015025e"},"/api/questions/check-duplicates":{"post":"7103110575516db7fe45e00f553a9307ed0d1e08b49e9a4678941dad65548f6a"},"/api/questions/{question_id}":{"get":"7619af4227b435a3d1415bb19dce8822cc14abdebd5358cc1c63620069439e74","put":"e3343b6fc86d38652f4aa2ca398d525e46db4edb6ea689ba8d3993de56079867","delete":"d8b90bbcbe17e5a8ecfa19b48f75633dce527c83f0009a76229cd3cae82d3f18"},"/api/questions/{question_id}/figure_align":{"post":"f8bcf29d8593397502cb003140d51d8a2ecacb54feb45b0735aa2235aa2f9b2b"},"/api/questions/{question_id}/figure_layout":{"post":"c88f36706110365399c2c80964a17954233f14acbb0767a3fb94f00801664f7f"},"/api/questions/{question_id}/associated":{"get":"0bd7f2d6f927302e639dc6bc470af9a6175e5be732c0eb14e82a39b2b883e74f","delete":"7289795688952a8f51f277628e5994886603a8b667b998e078fd435ecffa14a7"},"/api/questions/{question_id}/associate":{"post":"0abe4fd3c4996a5265d52c9653ca6c3735fe03585b16a8ac74a018f156c467ed"},"/api/config/metadata":{"get":"ca25a1c47bf540a6aa0a34328b8c701be0ce60ec3a4c4284056c3d7b76936304","post":"043b3dfd3555e78866fe95e66253b32be4d31f74125595696ccc75e393d8473a"},"/api/config/curriculum-presets/{version}":{"get":"2f467e55c5e33be0f1a447928cf3dc16985c4189867fa7883a7c60bba94008a0"},"/api/stats":{"get":"c77d61ad2751d93845ade895929e5446b6234361f20ddb91a4c484a2ac035196"},"/api/categories":{"get":"3c2d8ab00e0b20875681d806aa4c13339288e75dddb96348a3d569425b88cac7"},"/api/ai/classify":{"post":"e3868692eacb1c83def33e19499d1b81d6ca949d1e14459954ffcafa4784bf59"},"/api/upload/tex-source":{"post":"ebd4ac0916ee1443d532281adf08548e000d08a0ed035cc656310e7f420811fd"},"/api/upload/batch":{"post":"96028b49d3479b5c1c437c308be4344062ea916ec116e2998bec1c495b89d8ab"},"/api/ai/parse-paper":{"post":"5273373671be994e8ba79f54f82307a3ad0fb1b66444860c898588a1862ff542"},"/api/sources":{"get":"ad8c241a687c96af1bda0461def623c3803a83d632a36c49bc264425a66f993a"},"/api/shutdown":{"post":"d14732c59ead8cc18f5f399b7533ab7b32dacbc3d1dbbb586215ee151bc8b408"},"/api/ai/manual-crop-pdf":{"post":"6fd633986f7c7dc64d150d3214fc2ce17dcf630dc8b7059d30b4467cd9a3e689"},"/api/paper/ai-select":{"post":"d9b71fbbb56d2fb90976b94b38f46ad67b3026e98ce6ba869b57aadfd6c7477e"},"/api/upload/pdf-task":{"post":"acc3be8c4f81b7659ea5035ac09a40bcc6b32fb7edc1ec5dcc80aaefb458cf14"},"/api/upload/docx-task":{"post":"8af469700bfee3ec0c8f050cb3a92952c78a606a5df25b470465303462278738"},"/api/tasks/{task_id}/status":{"get":"5d29e84ccf44c6e5f86f0a0bff3be60fff45230038b5c73a5b4f97f45048cdb3"},"/api/tasks/{task_id}/cancel":{"post":"2ae2c387be09949ca7fbe36edb412793f5c329037fe6c2f87a776a357027f930"},"/api/ai/clear-temp-crops":{"post":"500174183fa065c250e9579314bda414877b46041f95bc37693ddbfd6555516b"},"/api/paper/questions":{"get":"a4fdd0ed3fb1349c4f6fe000f9e20760e8cd546e22664dab32e4c8d7fcc49286"},"/api/paper/save":{"post":"cc256768e1dfea7bf7d6b5d20963e0195b82d2cb9e560e0c66538416d476c82b"},"/api/papers":{"get":"104b49d5462563a7951ba89577b39d3a18dea8f58b40629ac060c131b685ce87"},"/api/papers/{paper_id}":{"get":"b13e874ac5304c2e34afa25392c6286ed8273eb8a34caedc948c0133eb3cf62b","delete":"0bf2cc959dc6f17a3d5548a8f4ebe426fb8902e4c1d2456ce5c779b661fbbb79"},"/api/paper/export/tex":{"post":"c0a2ffb476032f0f78d5057e6781e1aca16c8547f0f425946bf6fc1ebc26abee"},"/api/paper/export/bundle":{"post":"f54177d654260483bfa432694e453fb33796b8340e368495900e58d0f8df172e"},"/api/paper/export/pdf":{"post":"7eba55a4e88f5886228edab2f81642995e05b0631e482318765242d4e3ca49bd"},"/api/runtime/pandoc/status":{"get":"8e586f6e9a97067655a73dce5672888b17e34a24579f3a4fc3dee4cabb755d29"},"/api/runtime/pandoc/install":{"post":"b67d10f607134d2054ec8f1840451679de0cae5e8b4b28d04341dd824d982351"},"/api/runtime/pandoc/install/{task_id}":{"get":"29b229e3756f998482fa09560340b3170f2f90e7e8662795c86bb6e4d0cd9bc9"},"/api/paper/export/word":{"post":"a75ab968ed02ac6d786fff900654d22cbed16346cc984141ce4e6876fab8d3fe"}},
-  "unchanged_components": {"Body_ai_classify_api_ai_classify_post":"c8e4613b21e23bf377cbff25a55ad0c060f82d8acc47a5c2c318aed21a33d3de","Body_ai_parse_paper_api_ai_parse_paper_post":"b4ab98008c1777f466872b3651290fe47c2a018b80d1a95709c1bf289dfcb577","Body_ai_solve_api_ai_solve_post":"9d5b35a4be0a325f3a506ddb619e4c4ac7305f1c5c3784e1b0e4a4bc461d48db","Body_associate_questions_endpoint_api_questions__question_id__associate_post":"6865ebf3f9d31cd7208285aee298e74f5b470de14e3fb20058055a8035b729f2","Body_correct_tikz_endpoint_api_correct_tikz_post":"7ad0edf7286a27406df3ad8168240cc39db5641acbb26385b612433e262b809c","Body_draw_tikz_from_image_endpoint_api_ai_draw_tikz_from_image_post":"4889068125973a2d0851995e2ad491590d8077e44684dc7410294f788709ffba","Body_draw_tikz_workbench_endpoint_api_ai_draw_tikz_post":"1bbe2fa00fd2a2130509084348ac9deff80a77855a9fb7d9b7de5d71e6212a37","Body_format_fraction_style_api_format_fractions_post":"13c8800e2733d7d43825dc613d46855ee8b158134ccfc537fcedb262ce1241f1","Body_ocr_formula_api_ocr_post":"42c584cbcebd7ec1852642fba3e7e2cf4c82981a48dc43a1e46ac639eb0c5d56","Body_render_tikz_endpoint_api_render_tikz_post":"0afa2044ad1a992d2c04580f99abb147178b026267a38fe55aac87dfe7706776","Body_save_settings_api_settings_save_post":"cd88bc5c61b56ae785c18655d7c396196b88a09e26b5c9483401c40e24844a69","Body_update_question_figure_align_api_questions__question_id__figure_align_post":"d9d9baf4bd3caa7b80c9392429762226d03a241455ac0155498bbd6639c5421e","Body_update_question_figure_layout_api_questions__question_id__figure_layout_post":"a324c88bff8d56156a69011c14025fd8fd337af74bc74f97896462f9731e9265","Body_upload_batch_images_api_upload_batch_post":"75bde78956be231717df8c6dd8c5f0acde0e62725561956dc0446529af9910c0","Body_upload_docx_task_api_upload_docx_task_post":"094fb93f92af3ccd0f162ccfe28d3ec40af01c1ed61c99e8f48ea1371f7417c1","Body_upload_image_api_upload_post":"774f495defda2c0e15e98deadc8518f56dc36b129822d72e9bb126466d0679ae","Body_upload_pdf_task_api_upload_pdf_task_post":"1da95b95a152ea934a63845fad5747bf9725005eaaf1d27a67aced266c5c72ce","Body_upload_tex_source_api_upload_tex_source_post":"cd965a25f8171e197028e35411dfcb006bd82acb6343ba332031c4fb0906997b","HTTPValidationError":"7373c21f1389312367e27e440140ba11d587693c56d8aa27249b36d3f58c10c6","ValidationError":"ca285d0c0e64c42844efd2e860edb239e77cc49d87f065c5ccb7d2f55331b862"}
+  "openapi_sha256": "c9e4e4cf35083f817d7bd15d3e69f55f7aae87475274c5ebb5851d33308f9974",
+  "paths": 71,
+  "intentional_update": {
+    "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+    "previous_openapi_sha256": "b275e386fdd33a56c764a710ab90a3b3902a8ab5ce29feed64e720d55ef95443",
+    "reason": "21 additional paths (including disabled project contracts), optional classification/source/request identity and project-import form fields; original route methods/names and fee opt-in defaults retained.",
+    "behavior_regressions": "tests/test_knowledge_api_contract.py; tests/test_library_transfer_api.py; tests/test_question_references_api.py; tests/test_physics_knowledge_points.py; tests/test_pdf_regional_flow.py"
+  },
+  "unchanged_operations": {
+    "/api/heartbeat": {
+      "post": "5cdbcd6815f75018d6c61b4efd5eb316f93a0eac492f903c4474bb345d655059"
+    },
+    "/": {
+      "get": "a4d470bb8c9e3da7ff9bb6a51b5cb86c264a7006345962e662b848669195861f"
+    },
+    "/api/format/fractions": {
+      "post": "e5ea985a42220b67e0b9071e26487309104a1e9159e97f8cebc9724eda9c5986"
+    },
+    "/api/upload": {
+      "post": "100081ece77b3d4d671a2c5b6184c4c928fdf48423d3f46dddac17737f694267"
+    },
+    "/api/ocr": {
+      "post": "e9d2e8313bb063e9ea1225d89efbbdf6ce34c076eba2649c5f8f2a1db1134f2b"
+    },
+    "/api/ai/solve": {
+      "post": "737c4ce62472ef19014e25ec9d7778644e6219663f25c22c27cb02633311b858"
+    },
+    "/api/settings": {
+      "get": "1154906c59be702a0a3a9cd02aaec0de16e8ca9ef4f9474d43c0bb70b56897b4"
+    },
+    "/api/settings/save": {
+      "post": "16e8e9d9aff254e92de11244e77d2406a4936647096c630c1e160883d87f8207"
+    },
+    "/api/version": {
+      "get": "1c14d71386754f96c34a90d4ab87b78041983dbfec610b6113e0b91a0c9ed222"
+    },
+    "/api/version/check-update": {
+      "get": "6d6b6b2735d60f7b866b5019ab85a9f8fa2f8a1cc448bac4bd55ae10a837b822"
+    },
+    "/api/render_tikz": {
+      "post": "f57f18154ef799687cc90722e0ebcdfb272980e21b6339452d970becc415ea5d"
+    },
+    "/api/correct_tikz": {
+      "post": "820f51e6e4c5359ae6a5c7571e7c6dc5cdff7764fe4339bd63ef55c91f428661"
+    },
+    "/api/ai/draw_tikz": {
+      "post": "aeea2b90481de0311bfd27904a4b63c5f9a0f905f8e161529e45ffeb9c813207"
+    },
+    "/api/ai/draw_tikz_from_image": {
+      "post": "c58f5e258d2a30b41b94bf9ffa84b5a8168a43587826892b5c4b415ad865c5cc"
+    },
+    "/api/questions": {
+      "post": "868dbb51be2b19d398c3f4efb8b36243b077bc7aa617da075498a0932015025e"
+    },
+    "/api/questions/check-duplicates": {
+      "post": "7103110575516db7fe45e00f553a9307ed0d1e08b49e9a4678941dad65548f6a"
+    },
+    "/api/questions/{question_id}": {
+      "get": "7619af4227b435a3d1415bb19dce8822cc14abdebd5358cc1c63620069439e74",
+      "put": "e3343b6fc86d38652f4aa2ca398d525e46db4edb6ea689ba8d3993de56079867",
+      "delete": "d8b90bbcbe17e5a8ecfa19b48f75633dce527c83f0009a76229cd3cae82d3f18"
+    },
+    "/api/questions/{question_id}/figure_align": {
+      "post": "f8bcf29d8593397502cb003140d51d8a2ecacb54feb45b0735aa2235aa2f9b2b"
+    },
+    "/api/questions/{question_id}/figure_layout": {
+      "post": "c88f36706110365399c2c80964a17954233f14acbb0767a3fb94f00801664f7f"
+    },
+    "/api/questions/{question_id}/associated": {
+      "get": "0bd7f2d6f927302e639dc6bc470af9a6175e5be732c0eb14e82a39b2b883e74f",
+      "delete": "7289795688952a8f51f277628e5994886603a8b667b998e078fd435ecffa14a7"
+    },
+    "/api/questions/{question_id}/associate": {
+      "post": "0abe4fd3c4996a5265d52c9653ca6c3735fe03585b16a8ac74a018f156c467ed"
+    },
+    "/api/config/metadata": {
+      "get": "ca25a1c47bf540a6aa0a34328b8c701be0ce60ec3a4c4284056c3d7b76936304",
+      "post": "043b3dfd3555e78866fe95e66253b32be4d31f74125595696ccc75e393d8473a"
+    },
+    "/api/config/curriculum-presets/{version}": {
+      "get": "2f467e55c5e33be0f1a447928cf3dc16985c4189867fa7883a7c60bba94008a0"
+    },
+    "/api/stats": {
+      "get": "c77d61ad2751d93845ade895929e5446b6234361f20ddb91a4c484a2ac035196"
+    },
+    "/api/categories": {
+      "get": "3c2d8ab00e0b20875681d806aa4c13339288e75dddb96348a3d569425b88cac7"
+    },
+    "/api/ai/classify": {
+      "post": "e3868692eacb1c83def33e19499d1b81d6ca949d1e14459954ffcafa4784bf59"
+    },
+    "/api/upload/tex-source": {
+      "post": "ebd4ac0916ee1443d532281adf08548e000d08a0ed035cc656310e7f420811fd"
+    },
+    "/api/upload/batch": {
+      "post": "96028b49d3479b5c1c437c308be4344062ea916ec116e2998bec1c495b89d8ab"
+    },
+    "/api/ai/parse-paper": {
+      "post": "5273373671be994e8ba79f54f82307a3ad0fb1b66444860c898588a1862ff542"
+    },
+    "/api/sources": {
+      "get": "ad8c241a687c96af1bda0461def623c3803a83d632a36c49bc264425a66f993a"
+    },
+    "/api/shutdown": {
+      "post": "d14732c59ead8cc18f5f399b7533ab7b32dacbc3d1dbbb586215ee151bc8b408"
+    },
+    "/api/ai/manual-crop-pdf": {
+      "post": "6fd633986f7c7dc64d150d3214fc2ce17dcf630dc8b7059d30b4467cd9a3e689"
+    },
+    "/api/paper/ai-select": {
+      "post": "d9b71fbbb56d2fb90976b94b38f46ad67b3026e98ce6ba869b57aadfd6c7477e"
+    },
+    "/api/upload/pdf-task": {
+      "post": "acc3be8c4f81b7659ea5035ac09a40bcc6b32fb7edc1ec5dcc80aaefb458cf14"
+    },
+    "/api/upload/docx-task": {
+      "post": "8af469700bfee3ec0c8f050cb3a92952c78a606a5df25b470465303462278738"
+    },
+    "/api/tasks/{task_id}/status": {
+      "get": "5d29e84ccf44c6e5f86f0a0bff3be60fff45230038b5c73a5b4f97f45048cdb3"
+    },
+    "/api/tasks/{task_id}/cancel": {
+      "post": "2ae2c387be09949ca7fbe36edb412793f5c329037fe6c2f87a776a357027f930"
+    },
+    "/api/ai/clear-temp-crops": {
+      "post": "500174183fa065c250e9579314bda414877b46041f95bc37693ddbfd6555516b"
+    },
+    "/api/paper/questions": {
+      "get": "a4fdd0ed3fb1349c4f6fe000f9e20760e8cd546e22664dab32e4c8d7fcc49286"
+    },
+    "/api/paper/save": {
+      "post": "cc256768e1dfea7bf7d6b5d20963e0195b82d2cb9e560e0c66538416d476c82b"
+    },
+    "/api/papers": {
+      "get": "104b49d5462563a7951ba89577b39d3a18dea8f58b40629ac060c131b685ce87"
+    },
+    "/api/papers/{paper_id}": {
+      "get": "b13e874ac5304c2e34afa25392c6286ed8273eb8a34caedc948c0133eb3cf62b",
+      "delete": "0bf2cc959dc6f17a3d5548a8f4ebe426fb8902e4c1d2456ce5c779b661fbbb79"
+    },
+    "/api/paper/export/tex": {
+      "post": "c0a2ffb476032f0f78d5057e6781e1aca16c8547f0f425946bf6fc1ebc26abee"
+    },
+    "/api/paper/export/bundle": {
+      "post": "f54177d654260483bfa432694e453fb33796b8340e368495900e58d0f8df172e"
+    },
+    "/api/paper/export/pdf": {
+      "post": "7eba55a4e88f5886228edab2f81642995e05b0631e482318765242d4e3ca49bd"
+    },
+    "/api/runtime/pandoc/status": {
+      "get": "8e586f6e9a97067655a73dce5672888b17e34a24579f3a4fc3dee4cabb755d29"
+    },
+    "/api/runtime/pandoc/install": {
+      "post": "b67d10f607134d2054ec8f1840451679de0cae5e8b4b28d04341dd824d982351"
+    },
+    "/api/runtime/pandoc/install/{task_id}": {
+      "get": "29b229e3756f998482fa09560340b3170f2f90e7e8662795c86bb6e4d0cd9bc9"
+    },
+    "/api/paper/export/word": {
+      "post": "a75ab968ed02ac6d786fff900654d22cbed16346cc984141ce4e6876fab8d3fe"
+    }
+  },
+  "unchanged_components": {
+    "Body_ai_solve_api_ai_solve_post": "9d5b35a4be0a325f3a506ddb619e4c4ac7305f1c5c3784e1b0e4a4bc461d48db",
+    "Body_associate_questions_endpoint_api_questions__question_id__associate_post": "6865ebf3f9d31cd7208285aee298e74f5b470de14e3fb20058055a8035b729f2",
+    "Body_correct_tikz_endpoint_api_correct_tikz_post": "7ad0edf7286a27406df3ad8168240cc39db5641acbb26385b612433e262b809c",
+    "Body_draw_tikz_from_image_endpoint_api_ai_draw_tikz_from_image_post": "4889068125973a2d0851995e2ad491590d8077e44684dc7410294f788709ffba",
+    "Body_draw_tikz_workbench_endpoint_api_ai_draw_tikz_post": "1bbe2fa00fd2a2130509084348ac9deff80a77855a9fb7d9b7de5d71e6212a37",
+    "Body_format_fraction_style_api_format_fractions_post": "13c8800e2733d7d43825dc613d46855ee8b158134ccfc537fcedb262ce1241f1",
+    "Body_ocr_formula_api_ocr_post": "42c584cbcebd7ec1852642fba3e7e2cf4c82981a48dc43a1e46ac639eb0c5d56",
+    "Body_render_tikz_endpoint_api_render_tikz_post": "0afa2044ad1a992d2c04580f99abb147178b026267a38fe55aac87dfe7706776",
+    "Body_save_settings_api_settings_save_post": "cd88bc5c61b56ae785c18655d7c396196b88a09e26b5c9483401c40e24844a69",
+    "Body_update_question_figure_align_api_questions__question_id__figure_align_post": "d9d9baf4bd3caa7b80c9392429762226d03a241455ac0155498bbd6639c5421e",
+    "Body_update_question_figure_layout_api_questions__question_id__figure_layout_post": "a324c88bff8d56156a69011c14025fd8fd337af74bc74f97896462f9731e9265",
+    "Body_upload_batch_images_api_upload_batch_post": "75bde78956be231717df8c6dd8c5f0acde0e62725561956dc0446529af9910c0",
+    "Body_upload_image_api_upload_post": "774f495defda2c0e15e98deadc8518f56dc36b129822d72e9bb126466d0679ae",
+    "Body_upload_tex_source_api_upload_tex_source_post": "cd965a25f8171e197028e35411dfcb006bd82acb6343ba332031c4fb0906997b",
+    "HTTPValidationError": "7373c21f1389312367e27e440140ba11d587693c56d8aa27249b36d3f58c10c6",
+    "ValidationError": "ca285d0c0e64c42844efd2e860edb239e77cc49d87f065c5ccb7d2f55331b862"
+  },
+  "prior_intentional_updates": [
+    {
+      "previous_openapi_sha256": "d09a69ede236271789904e3902c6849e275bf55bef6998688523e48b4a9746a2",
+      "reason": "One new catalogue path (GET/POST), four optional question filters, optional knowledge_points form fields; existing clients stay compatible.",
+      "behavior_regressions": "tests/test_physics_knowledge_points.py; tests/test_knowledge_api_contract.py"
+    }
+  ],
+  "audited_components": {
+    "Body_ai_classify_api_ai_classify_post": {
+      "previous_sha256": "c8e4613b21e23bf377cbff25a55ad0c060f82d8acc47a5c2c318aed21a33d3de",
+      "sha256": "2afc976144d23cc75f66c86448ba8e0a06ff62ca8aea6f376224603dcb42aa8e",
+      "reason": "Optional answer_markdown/review_markdown/expected_version_code; content remains required.",
+      "behavior_regressions": "tests/test_knowledge_api_contract.py; tests/test_library_transfer_api.py; tests/test_question_references_api.py; tests/test_physics_knowledge_points.py; tests/test_pdf_regional_flow.py"
+    },
+    "Body_ai_parse_paper_api_ai_parse_paper_post": {
+      "previous_sha256": "b4ab98008c1777f466872b3651290fe47c2a018b80d1a95709c1bf289dfcb577",
+      "sha256": "d31bb30f4c97207b7c9b8ac882ac9bbe58bd0fc2efdaa72f14851e2d89a5e349",
+      "reason": "Optional source_format (tex by default); all original required/default fields retained.",
+      "behavior_regressions": "tests/test_knowledge_api_contract.py; tests/test_library_transfer_api.py; tests/test_question_references_api.py; tests/test_physics_knowledge_points.py; tests/test_pdf_regional_flow.py"
+    },
+    "Body_upload_docx_task_api_upload_docx_task_post": {
+      "previous_sha256": "094fb93f92af3ccd0f162ccfe28d3ec40af01c1ed61c99e8f48ea1371f7417c1",
+      "sha256": "7cfe0a1ff1852002c595dd9029e932ac3a89eeb8476ea56589ec596498753cfb",
+      "reason": "Optional client_request_id/paper_title; verification and answer generation remain false.",
+      "behavior_regressions": "tests/test_knowledge_api_contract.py; tests/test_library_transfer_api.py; tests/test_question_references_api.py; tests/test_physics_knowledge_points.py; tests/test_pdf_regional_flow.py"
+    },
+    "Body_upload_pdf_task_api_upload_pdf_task_post": {
+      "previous_sha256": "1da95b95a152ea934a63845fad5747bf9725005eaaf1d27a67aced266c5c72ce",
+      "sha256": "d6906ef48ff6d2f05559c1a4561444e0248be2e63ea304b50418e55c803a1064",
+      "reason": "Optional client_request_id/paper_title; strategy/defaults retained; verification remains false and PDF project resume disabled.",
+      "behavior_regressions": "tests/test_knowledge_api_contract.py; tests/test_library_transfer_api.py; tests/test_question_references_api.py; tests/test_physics_knowledge_points.py; tests/test_pdf_regional_flow.py"
+    }
+  }
 }

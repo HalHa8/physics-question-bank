@@ -3,14 +3,14 @@
   "baseline_main_lines": 6620,
   "body_sha256": {
     "parse_version_tuple": "117aaa651d284295e0560baf0fa5ee9b776e6098bea7f32314b59fefd5103d58",
-    "normalize_fillin_macro": "5da5509aa6e3cf37a58970e8738e301d29feeab03e023588eed3d1894150557c",
+    "normalize_fillin_macro": "47f54f0cf7555438b0287459002c76d7c8ac7bb33cd0aafa6821a0a2413a9f25",
     "extract_title_from_latex": "f254a072d395069aa1732af4d049a83ccea7deb23af8f8a90545f9bf0b408575",
     "process_ocr_illustrations": "1c5b80bbe2c872ce149de74cbf396cc62c327529321c770c19aa8e729ccc6e0d",
     "find_source_page_by_overlap": "0aad3b3a6b68eab39f7fb08aea90c94594d389dd889bdfb0c791e56b37d754c6",
-    "post_process_pdf_parsed_questions": "40021c8cea981a78fde579661da109659e4ddada85c74d912c31cbf93f97424a",
-    "run_pdf_parsing_task": "15aca35f1790891d9200761b09a1a6a8062a337520a9979fa5cc1304addcb622",
+    "post_process_pdf_parsed_questions": "dedbb5a7bcec321f72731c3a3d013d8fec7448c1dfe285bb177ac649d6347e6a",
+    "run_pdf_parsing_task": "a519b502a188ab88ca186f483b56dd484312969f5a3e2e64eaba7551d5e11e2e",
     "parse_page_range": "e2e521673591307623e82004820f646b25c6bd8600eb823c5afd2ea3e9cf3538",
-    "run_docx_parsing_task": "e15b99804aa1a3c095bc1e847b19d66bff02b74c16056f5af8331f1ad3001e3e"
+    "run_docx_parsing_task": "7f0288ba80c9dafd7af356a5956184cab05307bfa7ee3ae57a580ee4b2e7653c"
   },
   "routes": [
     {
@@ -74,9 +74,59 @@
       "name": "save_metadata_config"
     },
     {
+      "path": "/api/config/sub-knowledge",
+      "method": "GET",
+      "name": "get_sub_knowledge_config"
+    },
+    {
       "path": "/api/correct_tikz",
       "method": "POST",
       "name": "correct_tikz_endpoint"
+    },
+    {
+      "path": "/api/document-projects",
+      "method": "GET",
+      "name": "list_projects"
+    },
+    {
+      "path": "/api/document-projects/{project_id}",
+      "method": "DELETE",
+      "name": "delete_project"
+    },
+    {
+      "path": "/api/document-projects/{project_id}",
+      "method": "GET",
+      "name": "get_project"
+    },
+    {
+      "path": "/api/document-projects/{project_id}/analyze",
+      "method": "POST",
+      "name": "analyze_project"
+    },
+    {
+      "path": "/api/document-projects/{project_id}/draft",
+      "method": "PUT",
+      "name": "save_project_draft"
+    },
+    {
+      "path": "/api/document-projects/{project_id}/fork",
+      "method": "POST",
+      "name": "fork_project"
+    },
+    {
+      "path": "/api/document-projects/{project_id}/open",
+      "method": "POST",
+      "name": "open_project"
+    },
+    {
+      "path": "/api/document-projects/{project_id}/resume",
+      "method": "POST",
+      "name": "resume_project"
+    },
+    {
+      "path": "/api/document-projects/{project_id}/source",
+      "method": "GET",
+      "name": "download_project_source"
     },
     {
       "path": "/api/format/fractions",
@@ -99,6 +149,26 @@
       "name": "add_knowledge_point"
     },
     {
+      "path": "/api/library-transfer/export",
+      "method": "POST",
+      "name": "export_library_transfer"
+    },
+    {
+      "path": "/api/library-transfer/import",
+      "method": "POST",
+      "name": "import_library_transfer"
+    },
+    {
+      "path": "/api/library-transfer/preview",
+      "method": "POST",
+      "name": "preview_library_transfer"
+    },
+    {
+      "path": "/api/library-transfer/select-ids",
+      "method": "POST",
+      "name": "select_library_transfer_ids"
+    },
+    {
       "path": "/api/ocr",
       "method": "POST",
       "name": "ocr_formula"
@@ -117,6 +187,11 @@
       "path": "/api/paper/export/pdf",
       "method": "POST",
       "name": "export_paper_pdf"
+    },
+    {
+      "path": "/api/paper/export/preflight/{report_id}",
+      "method": "GET",
+      "name": "get_paper_export_preflight"
     },
     {
       "path": "/api/paper/export/tex",
@@ -162,6 +237,11 @@
       "path": "/api/questions",
       "method": "POST",
       "name": "create_question"
+    },
+    {
+      "path": "/api/questions/association-candidates",
+      "method": "GET",
+      "name": "list_association_candidates"
     },
     {
       "path": "/api/questions/check-duplicates",
@@ -254,9 +334,34 @@
       "name": "get_db_stats"
     },
     {
+      "path": "/api/tasks/by-request/{client_request_id}/status",
+      "method": "GET",
+      "name": "get_document_task_by_request"
+    },
+    {
+      "path": "/api/tasks/cancel-by-request",
+      "method": "POST",
+      "name": "cancel_document_task_by_request"
+    },
+    {
       "path": "/api/tasks/{task_id}/cancel",
       "method": "POST",
       "name": "cancel_pdf_task"
+    },
+    {
+      "path": "/api/tasks/{task_id}/resume",
+      "method": "POST",
+      "name": "resume_document_task"
+    },
+    {
+      "path": "/api/tasks/{task_id}/retain",
+      "method": "POST",
+      "name": "retain_document_task"
+    },
+    {
+      "path": "/api/tasks/{task_id}/source",
+      "method": "GET",
+      "name": "download_document_source"
     },
     {
       "path": "/api/tasks/{task_id}/status",
@@ -277,6 +382,11 @@
       "path": "/api/upload/docx-task",
       "method": "POST",
       "name": "upload_docx_task"
+    },
+    {
+      "path": "/api/upload/markdown-source",
+      "method": "POST",
+      "name": "upload_markdown_source"
     },
     {
       "path": "/api/upload/pdf-task",
@@ -339,5 +449,31 @@
       }
     ],
     "behavior_regressions": "tests/test_physics_knowledge_points.py"
+  },
+  "intentional_algorithm_updates": {
+    "normalize_fillin_macro": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Repair proven fill-in wrappers/clusters in copies while preserving literal code, subscripts and authored formulas.",
+      "previous_body_sha256": "5da5509aa6e3cf37a58970e8738e301d29feeab03e023588eed3d1894150557c",
+      "behavior_regressions": "tests/test_fillin_math_wrappers.py; tests/test_fillin_placeholder_integration.py; tests/test_physics_v3_sync.py"
+    },
+    "post_process_pdf_parsed_questions": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Keep source-preserved groups byte-faithful, register actual anchored assets and annotate pending point evidence without automatic confirmation.",
+      "previous_body_sha256": "40021c8cea981a78fde579661da109659e4ddada85c74d912c31cbf93f97424a",
+      "behavior_regressions": "tests/test_word_source_metadata_flow.py; tests/test_physics_v3_sync.py; tests/test_pdf_regional_flow.py"
+    },
+    "run_pdf_parsing_task": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Source metadata/partial diagnostics, original preview pixels, compact request-only images, typed failures, one-call budgets and cancellation; PDF project experiments stay off.",
+      "previous_body_sha256": "15aca35f1790891d9200761b09a1a6a8062a337520a9979fa5cc1304addcb622",
+      "behavior_regressions": "tests/test_pdf_regional_flow.py; tests/test_pdf_figures.py; tests/test_pdf_inspector_flow.py; tests/test_backend_decoupling.py"
+    },
+    "run_docx_parsing_task": {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "reason": "Preserve native Word source, formula diagnostics and accepted groups; explicit manual recovery; no extra request after paid metadata failure.",
+      "previous_body_sha256": "e15b99804aa1a3c095bc1e847b19d66bff02b74c16056f5af8331f1ad3001e3e",
+      "behavior_regressions": "tests/test_word_source_metadata_flow.py; tests/test_source_metadata.py; tests/test_docx_source_verify_flow.py; tests/test_backend_decoupling.py"
+    }
   }
 }

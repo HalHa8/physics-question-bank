@@ -54,7 +54,7 @@ def test_startup_preserves_stored_labels_and_physics_book_names(
     main.heal_database_curriculum_names()
     main.heal_database_curriculum_names()
     db_session.expire_all()
-    expected_main_book = "必修一" if active_version == "A" and compulsory == "必修第一册" else compulsory
+    expected_main_book = compulsory  # A P-only question is never a proven legacy alias.
     assert (question.category_compulsory, question.category_chapter) == (expected_main_book, chapter)
     assert (mirror.compulsory, mirror.chapter, mirror.version_code) == (compulsory, chapter, "P")
     assert (question.category_knowledge, mirror.knowledge) == original

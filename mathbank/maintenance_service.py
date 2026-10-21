@@ -1,34 +1,41 @@
 """Maintenance service; all application dependencies are explicit."""
 
+from typing import List, Optional
+from pathlib import Path
+from fastapi import BackgroundTasks, Depends, File, Form, Header, HTTPException, Query, Request, Response, UploadFile
+from sqlalchemy.orm import Session
+from mathbank.database import get_db
 from dataclasses import dataclass
 from typing import Any, Callable
-
 from mathbank.application_state import RuntimeState
-from fastapi import BackgroundTasks
 
 
 @dataclass(frozen=True)
 class MaintenanceServiceDependencies:
-    state: RuntimeState
     DATABASE_PATH: Any
     PROJECT_ROOT: Any
+    Path: Any
     Question: Any
     QuestionCurriculum: Any
-    clean_orphaned_images: Callable
+    _referenced_question_assets: Any
+    clean_orphaned_images: Any
     create_full_backup_if_due: Any
     export_database_to_files: Any
     fingerprint_for_question: Any
-    get_active_version_code: Callable
-    get_current_curriculum: Callable
-    heal_database_curriculum_names: Callable
+    get_active_version_code: Any
+    get_current_curriculum: Any
+    heal_database_curriculum_names: Any
     is_pdf_inspector_available: Any
     json: Any
     load_curriculum: Any
     os: Any
-    print_optional_tool_diagnostics: Callable
+    print_optional_tool_diagnostics: Any
+    quarantine_asset: Any
     rebuild_all_missing_fingerprints: Any
-    recalibrate_usage_counts: Callable
+    recalibrate_usage_counts: Any
+    resolve_upload_asset: Any
     shutil: Any
+    state: RuntimeState
     sys: Any
     time: Any
     upsert_question_fingerprint: Any
@@ -39,20 +46,16 @@ def schedule_database_export(background_tasks: BackgroundTasks, *, operation: st
 
     def run_export_safely() -> None:
         try:
-            dependencies.export_database_to_files()
+            if dependencies.state.IS_TESTING:
+                dependencies.export_database_to_files()
+            else:
+                dependencies.state.DATABASE_EXPORT_QUEUE.request(operation=operation)
         except Exception as exc:
-            print(
-                f"[Database Export] Post-commit export failed for {operation} "
-                f"(type={type(exc).__name__}); the next write/startup export can retry."
-            )
-
+            print(f'[Database Export] Post-commit export failed for {operation} (type={type(exc).__name__}); the next write/startup export can retry.')
     try:
         background_tasks.add_task(run_export_safely)
     except Exception as exc:
-        print(
-            f"[Database Export] Post-commit scheduling failed for {operation} "
-            f"(type={type(exc).__name__}); the next write/startup export can retry."
-        )
+        print(f'[Database Export] Post-commit scheduling failed for {operation} (type={type(exc).__name__}); the next write/startup export can retry.')
 
 
 def schedule_question_fingerprint_retry(background_tasks: BackgroundTasks, *, question_id: int, operation: str, dependencies: MaintenanceServiceDependencies) -> None:
@@ -151,7 +154,11 @@ def heal_database_curriculum_names(*, dependencies: MaintenanceServiceDependenci
         }
         updated_questions = 0
         for old, new in mappings.items():
-            res = db.query(dependencies.Question).filter(dependencies.Question.category_compulsory == old).update(
+            res = db.query(dependencies.Question).filter(
+                dependencies.Question.category_compulsory == old,
+                dependencies.Question.curriculum_mappings.any(
+                    dependencies.QuestionCurriculum.version_code == dependencies.get_active_version_code()),
+            ).update(
                 {dependencies.Question.category_compulsory: new}, synchronize_session=False
             )
             updated_questions += res
@@ -179,68 +186,50 @@ def heal_database_curriculum_names(*, dependencies: MaintenanceServiceDependenci
 
 
 def clean_orphaned_images(*, dependencies: MaintenanceServiceDependencies):
-    """扫描 static/uploads 目录及其 tmp 子目录，安全彻底擦除未被数据库引用的孤儿图片与旧残留临时图片"""
+    """Retain unregistered images recoverably; old browser drafts remain usable."""
     try:
         from mathbank.database import SessionLocal, Question
         db = SessionLocal()
         try:
-            # 1. 搜集数据库中所有题目引用的图片路径
-            questions = db.query(Question._image_paths).all()
-            referenced_images = set()
-            for (img_paths_str,) in questions:
-                if img_paths_str:
-                    try:
-                        paths = dependencies.json.loads(img_paths_str)
-                        for path in paths:
-                            referenced_images.add(path.lstrip("/").lower())
-                    except Exception:
-                        pass
-
-            # 2. 遍历本地图片目录及 tmp 子目录
+            referenced_images = dependencies._referenced_question_assets(db)
+            if dependencies.state.DOCUMENT_PROJECTS:
+                for url in dependencies.state.DOCUMENT_PROJECTS.referenced_assets():
+                    referenced_images.add(dependencies.resolve_upload_asset(url, uploads_dir=dependencies.state.UPLOAD_DIR, url_prefix=dependencies.state.UPLOAD_DIR_REL, require_file=False))
             upload_dir = dependencies.state.UPLOAD_DIR
             if not dependencies.os.path.exists(upload_dir):
                 return
-
             cleaned_count = 0
             now = dependencies.time.time()
             one_hour_seconds = 3600
-
-            # 清理 static/uploads/ 根目录下未引用的孤儿图片
             for filename in dependencies.os.listdir(upload_dir):
                 full_path = dependencies.os.path.join(upload_dir, filename)
-                if dependencies.os.path.isfile(full_path) and not filename.startswith("."):
-                    local_rel_path = f"{dependencies.state.UPLOAD_DIR_REL}/{filename}".lower()
-                    if local_rel_path not in referenced_images:
+                if dependencies.os.path.isfile(full_path) and (not filename.startswith('.')):
+                    if dependencies.Path(full_path).resolve() not in referenced_images:
                         try:
                             mtime = dependencies.os.path.getmtime(full_path)
                             if now - mtime > one_hour_seconds:
-                                dependencies.os.remove(full_path)
-                                cleaned_count += 1
+                                cleaned_count += int(dependencies.quarantine_asset(f'/{dependencies.state.UPLOAD_DIR_REL}/{filename}', uploads_dir=dependencies.state.UPLOAD_DIR, url_prefix=dependencies.state.UPLOAD_DIR_REL, reason='startup-unregistered'))
                         except Exception:
                             pass
-
-            # 清理 static/uploads/tmp/ 子目录下残留的所有旧拆卷/OCR临时切片图
-            tmp_dir = dependencies.os.path.join(upload_dir, "tmp")
+            tmp_dir = dependencies.os.path.join(upload_dir, 'tmp')
             if dependencies.os.path.exists(tmp_dir):
                 for filename in dependencies.os.listdir(tmp_dir):
                     full_path = dependencies.os.path.join(tmp_dir, filename)
-                    if dependencies.os.path.isfile(full_path) and not filename.startswith("."):
-                        local_rel_path = f"{dependencies.state.UPLOAD_DIR_REL}/tmp/{filename}".lower()
-                        if local_rel_path not in referenced_images:
+                    if dependencies.os.path.isfile(full_path) and (not filename.startswith('.')):
+                        if dependencies.Path(full_path).resolve() not in referenced_images:
                             try:
                                 mtime = dependencies.os.path.getmtime(full_path)
-                                if now - mtime > 600:  # 超过 10 分钟未被使用的 tmp 切片立即清理
-                                    dependencies.os.remove(full_path)
-                                    cleaned_count += 1
+                                if now - mtime > 600:
+                                    cleaned_count += int(dependencies.quarantine_asset(f'/{dependencies.state.UPLOAD_DIR_REL}/tmp/{filename}', uploads_dir=dependencies.state.UPLOAD_DIR, url_prefix=dependencies.state.UPLOAD_DIR_REL, reason='startup-temporary'))
                             except Exception:
                                 pass
-
             if cleaned_count > 0:
-                print(f"[Storage Cleanup] 成功检测并清除 {cleaned_count} 个残留的旧临时图片与孤儿文件，磁盘无痕瘦身成功！")
+                print(f'[Storage Retention] 已将 {cleaned_count} 个暂未登记图片移入可恢复保留区；原地址访问时自动恢复，未永久删除。')
         finally:
             db.close()
     except Exception as e:
-        print(f"[Storage Cleanup Error] 执行静默图片净化时发生异常: {str(e)}")
+        print(f'[Storage Cleanup Error] 执行静默图片净化时发生异常: {str(e)}')
+
 
 
 def recalibrate_usage_counts(*, dependencies: MaintenanceServiceDependencies):
@@ -250,21 +239,14 @@ def recalibrate_usage_counts(*, dependencies: MaintenanceServiceDependencies):
         from sqlalchemy import func
         db = SessionLocal()
         try:
-            counts = db.query(PaperQuestion.question_id, func.count(PaperQuestion.id)).group_by(PaperQuestion.question_id).all()
-            ref_map = dict(counts)
-            questions = db.query(Question).all()
-            changed = False
-            for q in questions:
-                actual_ref = ref_map.get(q.id, 0)
-                if (q.usage_count or 0) != actual_ref:
-                    q.usage_count = actual_ref
-                    changed = True
+            actual_ref = db.query(func.count(PaperQuestion.id)).filter(PaperQuestion.question_id == Question.id).correlate(Question).scalar_subquery()
+            changed = db.query(Question).filter(func.coalesce(Question.usage_count, 0) != actual_ref).update({Question.usage_count: actual_ref}, synchronize_session=False)
             if changed:
                 db.commit()
         finally:
             db.close()
     except Exception as e:
-        print(f"[Usage Calibration Error] {e}")
+        print(f'[Usage Calibration Error] {e}')
 
 
 def start_startup_cleanup(*, dependencies: MaintenanceServiceDependencies):
@@ -301,3 +283,7 @@ def start_startup_cleanup(*, dependencies: MaintenanceServiceDependencies):
             f"(type={type(exc).__name__}); duplicate checks will report partial coverage."
         )
     dependencies.print_optional_tool_diagnostics()
+
+
+def _report_database_export_error(exc: Exception, operation: str, *, dependencies: MaintenanceServiceDependencies) -> None:
+    print(f'[Database Export] Post-commit export failed for {operation} (type={type(exc).__name__}); the next write can retry.')

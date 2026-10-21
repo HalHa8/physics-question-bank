@@ -78,7 +78,9 @@ def test_qa_answers_match_physics_product_and_source_boundaries():
     assert '独立目录与数据库' in answers('migrate-computer')
     index = (ROOT / 'static/index.html').read_text(encoding='utf-8')
     assert 'qaSafeSharing' in index
-    assert '尚未提供' in index
+    assert '系统设置 → 题库分享' in index
+    assert '重复导入会重复添加' in index
+    assert '专门的「题目共享包」尚未提供' not in index
     assert 'qaSearchInput' in index and 'qaResetFilters' in index
 
 

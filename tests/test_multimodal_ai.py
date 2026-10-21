@@ -36,10 +36,11 @@ def test_ocr_prompt_compactly_preserves_tables_and_multi_figure_anchors():
     assert "明确的粗体正体保留 `\\mathbf`" in prompt
     assert r"完整 `\begin{choices}...\end{choices}`" in prompt
     assert "去掉原 A/B/C/D 标号" in prompt
-    assert "看不清公式/符号标[公式待核对]" in prompt
+    assert "仅原图确实看不清公式/符号时标[公式待核对]" in prompt
     assert "勿描述、猜测或重绘" in prompt
     assert "独立 equation/align/gather/multline、tabular 原样" in prompt
-    assert len(prompt) <= 1250
+    from mathbank.prompts import FILLIN_STYLE_RULE
+    assert len(prompt) <= 1250 + len(FILLIN_STYLE_RULE)
 
 
 @pytest.mark.parametrize("base", ["https://api.openai.com/v1", "https://vision.example/v1"])
@@ -130,11 +131,11 @@ def test_ocr_read_timeout_is_not_retried(tmp_path):
 def test_pdf_ocr_does_not_fallback_after_ambiguous_read_timeout():
     providers = [MagicMock(provider_label="first"), MagicMock(provider_label="second")]
 
-    with patch("main.resolve_ocr_fallbacks", return_value=providers), patch(
+    with patch("main.resolve_ocr_provider", return_value=providers[0]), patch(
         "main.ocr_via_provider",
         side_effect=requests.exceptions.ReadTimeout("unknown provider state"),
     ) as mock_ocr:
-        with pytest.raises(RuntimeError, match="避免重复计费"):
+        with pytest.raises(requests.exceptions.ReadTimeout):
             ocr_pdf_page_image("/tmp/page.png")
 
     mock_ocr.assert_called_once()

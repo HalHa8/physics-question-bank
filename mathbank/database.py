@@ -19,9 +19,11 @@ from sqlalchemy import (
 )
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import declarative_base, sessionmaker, relationship
+from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 from mathbank.paths import DATABASE_FILE, sqlite_url
 from mathbank.question_types import normalize_section_order
+from mathbank.question_assets import without_review_only_assets
+from mathbank.sub_knowledge import normalize_sub_knowledge, resolve_active_version
 
 
 FIGURE_ALIGN_VALUES = frozenset({"right", "center", "bottom_left", "bottom_right"})
@@ -115,8 +117,22 @@ def configure_sqlite_wal(database_engine: Engine) -> str | None:
         pass
     return mode
 
+class DocumentImportReceipt(Base):
+    """A committed card remains idempotent after its seven-day project expires."""
+    __tablename__ = "document_import_receipts"
+    __table_args__ = (UniqueConstraint("project_id", "card_id", name="uq_document_import_card"),)
+    id = Column(Integer, primary_key=True)
+    project_id = Column(String(36), nullable=False)
+    card_id = Column(String(160), nullable=False)
+    payload_sha256 = Column(String(64), nullable=False)
+    draft_revision = Column(Integer, nullable=False)
+    question_id = Column(Integer, ForeignKey("questions.id", ondelete="SET NULL"), nullable=True, index=True)
+    created_at = Column(DateTime, nullable=False, default=_utcnow_naive)
+
+
 class Question(Base):
     __tablename__ = "questions"
+    __table_args__ = (Index("idx_questions_created_at_id", "created_at", "id"),)
 
     id = Column(Integer, primary_key=True, index=True)
     content = Column(Text, nullable=False)  # 题干 (LaTeX + markdown)
@@ -146,11 +162,21 @@ class Question(Base):
     usage_count = Column(Integer, default=0, index=True)  # 组卷引用次数
     created_at = Column(DateTime, default=_utcnow_naive)
 
+    curriculum_mappings = relationship("QuestionCurriculum", back_populates="question", cascade="all, delete-orphan")
     knowledge_points = relationship(
         "QuestionKnowledgePoint", back_populates="question",
         cascade="all, delete-orphan", order_by="QuestionKnowledgePoint.position",
         lazy="selectin",
     )
+
+    def sub_knowledge_for_version(self, version_code: str | None = None):
+        version_code = version_code or resolve_active_version()
+        mapping = next((row for row in self.curriculum_mappings if row.version_code == version_code), None)
+        return mapping.sub_knowledge if mapping is not None else []
+
+    @property
+    def sub_knowledge(self):
+        return self.sub_knowledge_for_version()
 
     @property
     def image_layouts(self):
@@ -212,7 +238,7 @@ class Question(Base):
 
     @property
     def display_image_paths(self):
-        """Return question figures while keeping AI-only references hidden."""
+        """Return ordinary figures, hiding AI references and review-only images."""
 
         hidden_references = {
             str(self.tikz_reference_image_path or "").strip()
@@ -224,17 +250,21 @@ class Question(Base):
             if reference:
                 hidden_references.add(reference)
         hidden_references.discard("")
-        return [path for path in self.image_paths if path not in hidden_references]
+        return without_review_only_assets(
+            [path for path in self.image_paths if path not in hidden_references],
+            self.content or "", self.answer_markdown or "", self.review or "",
+        )
 
-    def to_dict(self):
+    def to_dict(self, version_code: str | None = None, *, sub_knowledge=None):
         return {
             "id": self.id,
-            "knowledge_points": [row.to_dict() for row in self.knowledge_points],
             "content": self.content,
             "question_type": self.question_type,
             "category_compulsory": self.category_compulsory,
             "category_chapter": self.category_chapter,
             "category_knowledge": self.category_knowledge,
+            "sub_knowledge": self.sub_knowledge_for_version(version_code) if sub_knowledge is None else sub_knowledge,
+            "knowledge_points": [row.to_dict() for row in self.knowledge_points],
             "difficulty": self.difficulty,
             "source": self.source,
             "answer_markdown": self.answer_markdown,
@@ -255,15 +285,21 @@ class Question(Base):
             "created_at": (self.created_at.isoformat() + "Z") if self.created_at else None
         }
 
-    def to_summary_dict(self):
+    def to_summary_dict(
+        self, version_code: str | None = None, *, compact_knowledge_points: bool = True
+    ):
         return {
             "id": self.id,
-            "knowledge_points": [row.to_summary_dict() for row in self.knowledge_points],
             "content": self.content,
             "question_type": self.question_type,
             "category_compulsory": self.category_compulsory,
             "category_chapter": self.category_chapter,
             "category_knowledge": self.category_knowledge,
+            "sub_knowledge": self.sub_knowledge_for_version(version_code),
+            "knowledge_points": [
+                row.to_summary_dict() if compact_knowledge_points else row.to_dict()
+                for row in self.knowledge_points
+            ],
             "difficulty": self.difficulty,
             "source": self.source,
             "has_answer": bool((self.answer_markdown or "").strip()),
@@ -301,6 +337,24 @@ class QuestionCurriculum(Base):
     compulsory = Column(String(100), default="", index=True)
     chapter = Column(String(100), default="", index=True)
     knowledge = Column(String(100), default="", index=True)
+    question = relationship("Question", back_populates="curriculum_mappings")
+    sub_knowledge_rows = relationship("QuestionSubKnowledge", back_populates="curriculum", cascade="all, delete-orphan", order_by="QuestionSubKnowledge.position")
+
+    @property
+    def sub_knowledge(self):
+        return [row.to_dict() for row in sorted(self.sub_knowledge_rows, key=lambda row: row.position)]
+
+    @sub_knowledge.setter
+    def sub_knowledge(self, value):
+        paths = normalize_sub_knowledge(value)
+        existing = {(row.compulsory, row.chapter, row.knowledge): row for row in self.sub_knowledge_rows}
+        rows = []
+        for position, path in enumerate(paths):
+            key = (path["compulsory"], path["chapter"], path["knowledge"])
+            row = existing.get(key) or QuestionSubKnowledge(**path)
+            row.position = position
+            rows.append(row)
+        self.sub_knowledge_rows = rows
 
     def to_dict(self):
         return {
@@ -309,8 +363,28 @@ class QuestionCurriculum(Base):
             "version_code": self.version_code,
             "compulsory": self.compulsory,
             "chapter": self.chapter,
-            "knowledge": self.knowledge
+            "knowledge": self.knowledge,
+            "sub_knowledge": self.sub_knowledge,
         }
+
+
+class QuestionSubKnowledge(Base):
+    __tablename__ = "question_sub_knowledge"
+    __table_args__ = (
+        UniqueConstraint("curriculum_id", "compulsory", "chapter", "knowledge", name="uq_question_sub_knowledge_path"),
+        CheckConstraint("position >= 0", name="ck_question_sub_knowledge_position"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    curriculum_id = Column(Integer, ForeignKey("question_curriculums.id", ondelete="CASCADE"), nullable=False, index=True)
+    compulsory = Column(String(100), nullable=False)
+    chapter = Column(String(100), nullable=False)
+    knowledge = Column(String(100), nullable=False)
+    position = Column(Integer, nullable=False, default=0, server_default="0")
+    curriculum = relationship("QuestionCurriculum", back_populates="sub_knowledge_rows")
+
+    def to_dict(self):
+        return {"compulsory": self.compulsory, "chapter": self.chapter, "knowledge": self.knowledge}
 
 
 class KnowledgePoint(Base):
@@ -412,6 +486,49 @@ class QuestionKnowledgePoint(Base):
                 "scope", "evidence_source", "evidence", "reason", "origin",
             )},
         }
+
+
+class QuestionSourceLabel(Base):
+    """Explicit book source numbers; duplicate targets remain detectable."""
+
+    __tablename__ = "question_source_labels"
+    __table_args__ = (
+        UniqueConstraint("question_id", "book_key", "label_key", name="uq_question_source_label"),
+        Index("idx_question_source_labels_lookup", "book_key", "label_key", "question_id"),
+    )
+    id = Column(Integer, primary_key=True)
+    question_id = Column(Integer, ForeignKey("questions.id", ondelete="CASCADE"), nullable=False, index=True)
+    book_key = Column(String(200), nullable=False)
+    label_key = Column(String(100), nullable=False)
+    original_label = Column(String(200), nullable=False)
+
+
+class QuestionReference(Base):
+    """One prose occurrence bound to an identity, independently of variants."""
+
+    __tablename__ = "question_references"
+    __table_args__ = (
+        UniqueConstraint("source_question_id", "field", "start", "end", "label_key", name="uq_question_reference_occurrence"),
+        CheckConstraint("field IN ('content', 'answer_markdown', 'review')", name="ck_question_reference_field"),
+        CheckConstraint("start >= 0 AND end > start", name="ck_question_reference_span"),
+        CheckConstraint("resolution_state IN ('resolved', 'unresolved', 'ambiguous')", name="ck_question_reference_state"),
+        CheckConstraint("resolution_state = 'resolved' OR target_question_id IS NULL", name="ck_question_reference_target_state"),
+        Index("idx_question_references_unresolved", "book_key", "label_key", "resolution_state"),
+    )
+    id = Column(Integer, primary_key=True)
+    source_question_id = Column(Integer, ForeignKey("questions.id", ondelete="CASCADE"), nullable=False, index=True)
+    target_question_id = Column(Integer, ForeignKey("questions.id", ondelete="SET NULL"), nullable=True, index=True)
+    field = Column(String(30), nullable=False)
+    start = Column(Integer, nullable=False)
+    end = Column(Integer, nullable=False)
+    text = Column(Text, nullable=False)
+    label_key = Column(String(100), nullable=False, default="", server_default="")
+    book_key = Column(String(200), nullable=False, default="", server_default="")
+    field_sha256 = Column(String(64), nullable=False)
+    prefix = Column(Text, nullable=False, default="", server_default="")
+    suffix = Column(Text, nullable=False, default="", server_default="")
+    resolution_state = Column(String(20), nullable=False, default="unresolved", server_default="unresolved")
+    reason = Column(String(100), nullable=False, default="", server_default="")
 
 
 class QuestionFingerprint(Base):
@@ -679,6 +796,7 @@ def init_db():
         LATEST_SCHEMA_VERSION,
         REQUIRED_TABLES,
         create_pre_migration_backup,
+        ensure_question_sort_index,
         migrate_database,
         schema_version,
     )
@@ -846,10 +964,15 @@ def init_db():
     migration_result = migrate_database(
         engine, pre_migration_backup=pre_migration_backup
     )
+    migration_result.update(ensure_question_sort_index(
+        engine,
+        pre_migration_backup=(pre_migration_backup or migration_result.get("backup")),
+    ))
     from mathbank.knowledge_points import seed_catalog
     with sessionmaker(bind=engine)() as catalog_session:
         seed_catalog(catalog_session)
         catalog_session.commit()
     configure_sqlite_wal(engine)
-    if migration_result.get("from_version") != migration_result.get("to_version"):
+    if (migration_result.get("from_version") != migration_result.get("to_version")
+            or migration_result.get("added_question_sort_indexes")):
         print(f"[Database] Schema migration complete: {migration_result}")

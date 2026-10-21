@@ -1,26 +1,30 @@
 """Image upload service; all application dependencies are explicit."""
 
+from typing import List, Optional
+from pathlib import Path
+from fastapi import BackgroundTasks, Depends, File, Form, Header, HTTPException, Query, Request, Response, UploadFile
+from sqlalchemy.orm import Session
+from mathbank.database import get_db
 from dataclasses import dataclass
 from typing import Any, Callable
-
 from mathbank.application_state import RuntimeState
-from typing import List
-from fastapi import UploadFile, File
 
 
 @dataclass(frozen=True)
 class ImageUploadServiceDependencies:
-    state: RuntimeState
     Image: Any
     InvalidImageError: Any
     JSONResponse: Any
+    MAX_MARKDOWN_BYTES: Any
     MAX_SINGLE_IMAGE_BYTES: Any
     MAX_TEX_BYTES: Any
     UploadTooLargeError: Any
+    decode_and_prepare_markdown: Any
     decode_and_prepare_tex: Any
     normalize_raster_image: Any
     os: Any
     read_stream_limited: Any
+    state: RuntimeState
     tex_asset_basename: Any
     uuid: Any
 
@@ -168,3 +172,16 @@ def upload_batch_images(files: List[UploadFile]=File(...), *, dependencies: Imag
             content={"status": "error", "message": f"批量图片上传失败: {str(e)}"},
             status_code=400
         )
+
+
+def upload_markdown_source(file: UploadFile=File(...), *, dependencies: ImageUploadServiceDependencies):
+    """Decode a bounded Markdown source without reading its linked assets."""
+    if not (file.filename or '').lower().endswith('.md'):
+        return dependencies.JSONResponse(content={'status': 'error', 'message': '上传文件格式不正确，必须为 .md 格式！'}, status_code=400)
+    try:
+        result = dependencies.decode_and_prepare_markdown(dependencies.read_stream_limited(file.file, dependencies.MAX_MARKDOWN_BYTES))
+        return {'status': 'success', 'source': result['source'], 'title': result['title'], 'diagnostics': result['diagnostics']}
+    except dependencies.UploadTooLargeError:
+        return dependencies.JSONResponse(content={'status': 'error', 'message': 'Markdown 文件过大，请上传 5MB 以内的单文件试卷源码！'}, status_code=413)
+    except ValueError as exc:
+        return dependencies.JSONResponse(content={'status': 'error', 'message': str(exc)}, status_code=400)

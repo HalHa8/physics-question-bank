@@ -457,6 +457,8 @@ def test_asset_cleanup_loads_question_references_only_once(
 
     upload_dir = tmp_path / "uploads"
     upload_dir.mkdir()
+    from mathbank.asset_lifecycle import register_asset_store
+    register_asset_store(upload_dir, tmp_path / "retained")
     first = upload_dir / "first.png"
     second = upload_dir / "second.png"
     _write_png(first)
@@ -591,5 +593,6 @@ def test_metadata_save_succeeds_when_post_commit_export_scheduling_fails(
     )
 
     assert response.status_code == 200
-    assert json.loads(metadata_path.read_text(encoding="utf-8")) == new_metadata
-    assert main.METADATA_CACHE == new_metadata
+    expected_metadata = {**new_metadata, "curriculum_version": "B"}
+    assert json.loads(metadata_path.read_text(encoding="utf-8")) == expected_metadata
+    assert main.METADATA_CACHE == expected_metadata

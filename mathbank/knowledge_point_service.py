@@ -18,10 +18,10 @@ class KnowledgePointServiceDependencies:
 
 
 def get_knowledge_points(q: str = "", compulsory: str = "", chapter: str = "", knowledge: str = "",
-                         limit: int = 100, offset: int = 0, db: Session = Depends(get_db), *,
+                         limit: int = 100, offset: int = 0, version_code: str = "P", db: Session = Depends(get_db), *,
                          dependencies: KnowledgePointServiceDependencies):
     try:
-        return list_catalog(db, q, compulsory, chapter, knowledge, limit, offset)
+        return list_catalog(db, q, compulsory, chapter, knowledge, limit, offset, version_code=version_code)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -41,4 +41,4 @@ def add_knowledge_point(payload: dict, background_tasks: BackgroundTasks, db: Se
         db.rollback()
         raise
     dependencies.schedule_database_export(background_tasks, operation="add_knowledge_point")
-    return {"status": "success", "point": result}
+    return {**result, "status": "success", "point": result}

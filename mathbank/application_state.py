@@ -26,3 +26,13 @@ class RuntimeState:
     _RUNTIME_LOCK: Any = None
     _SHUTDOWN_SCHEDULED: Any = None
     _SHUTDOWN_SCHEDULE_LOCK: Any = None
+    _METADATA_SAVE_LOCK: Any = None
+    DATABASE_EXPORT_QUEUE: Any = None
+    DOCUMENT_TASK_STORE: Any = None
+    DOCUMENT_PROJECTS: Any = None
+    DOCUMENT_TASK_INPUTS: dict = field(default_factory=dict)
+    _DOCUMENT_PROJECT_STOP: Any = None
+    PDF_OCR_CAPACITY: Any = None
+    # Match the released upstream boundary: retained PDF project experiments
+    # are not product features until a separate acceptance enables them.
+    PDF_CLOUD_ONLY: bool = True

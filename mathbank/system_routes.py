@@ -1,15 +1,17 @@
 """System routes; all application dependencies are explicit."""
 
+from typing import List, Optional
+from pathlib import Path
+from fastapi import BackgroundTasks, Depends, File, Form, Header, HTTPException, Query, Request, Response, UploadFile
+from sqlalchemy.orm import Session
+from mathbank.database import get_db
 from dataclasses import dataclass
 from typing import Any, Callable
-
 from mathbank.application_state import RuntimeState
-from fastapi import Form
 
 
 @dataclass(frozen=True)
 class SystemRoutesDependencies:
-    state: RuntimeState
     JSONResponse: Any
     PANDOC_INSTALL_MANAGER: Any
     PROJECT_ROOT: Any
@@ -17,23 +19,27 @@ class SystemRoutesDependencies:
     STATIC_DIR: Any
     STATIC_JS_DIR: Any
     engine: Any
+    get_pdf_inspector_version: Any
     normalize_fraction_style: Any
     pandoc_status: Any
     readiness_report: Any
+    state: RuntimeState
     version_updates: Any
     web_assets: Any
 
 
 def healthz(*, dependencies: SystemRoutesDependencies):
     report = dependencies.readiness_report(dependencies.engine)
-    report["server_instance_id"] = dependencies.state.SERVER_INSTANCE_ID
-    return dependencies.JSONResponse(report, status_code=200 if report["ready"] else 503)
+    report['server_instance_id'] = dependencies.state.SERVER_INSTANCE_ID
+    report['pdf_inspector_version'] = dependencies.get_pdf_inspector_version()
+    return dependencies.JSONResponse(report, status_code=200 if report['ready'] else 503)
 
 
 def read_index(*, dependencies: SystemRoutesDependencies):
     return dependencies.web_assets.build_index_response(
         static_dir=dependencies.STATIC_DIR, js_dir=dependencies.STATIC_JS_DIR, css_dir=dependencies.STATIC_CSS_DIR,
         local_token=dependencies.state.LOCAL_TOKEN, server_instance_id=dependencies.state.SERVER_INSTANCE_ID,
+        pdf_cloud_only=dependencies.state.PDF_CLOUD_ONLY,
     )
 
 
