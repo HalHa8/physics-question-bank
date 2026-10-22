@@ -13,6 +13,7 @@ from starlette.testclient import TestClient
 
 from mathbank import asset_lifecycle as lifecycle
 from mathbank.asset_security import AssetSecurityError, resolve_upload_asset
+from tests.platform_checks import symlink_or_skip
 
 
 @pytest.fixture
@@ -47,7 +48,7 @@ def test_retained_image_recovers_with_same_url_after_registry_restart(store, rel
     assert not image.exists()
     retained = recovery / "files" / relative
     assert retained.read_bytes() == b"original image bytes"
-    metadata = json.loads((recovery / "metadata" / (relative + ".json")).read_text())
+    metadata = json.loads((recovery / "metadata" / (relative + ".json")).read_text(encoding='utf-8'))
     assert metadata["original_url"] == reference
     assert metadata["reason"] == "startup-unused"
     assert str(uploads) not in json.dumps(metadata)
@@ -179,14 +180,14 @@ def test_symlink_is_rejected_without_touching_target(store, tmp_path, location):
     outside.write_bytes(b"do not touch")
     if location == "upload":
         image.unlink()
-        image.symlink_to(outside)
+        symlink_or_skip(image, outside)
         with pytest.raises(AssetSecurityError):
             retire(store, reference)
     else:
         retire(store, reference)
         link = recovery / ("files/example.png" if location == "retained" else "metadata/example.png.json")
         link.unlink()
-        link.symlink_to(outside)
+        symlink_or_skip(link, outside)
         with pytest.raises(AssetSecurityError):
             resolve_upload_asset(reference, uploads_dir=uploads, url_prefix="static/uploads")
     assert outside.read_bytes() == b"do not touch"
@@ -204,7 +205,7 @@ def test_recovery_ancestor_symlink_is_rejected_at_registration(tmp_path):
     uploads = tmp_path / "static/uploads"
     outside = tmp_path / "elsewhere"
     outside.mkdir()
-    (tmp_path / ".system_generated").symlink_to(outside, target_is_directory=True)
+    symlink_or_skip(tmp_path / ".system_generated", outside, target_is_directory=True)
     with pytest.raises(lifecycle.AssetLifecycleError, match="符号链接"):
         lifecycle.register_asset_store(uploads, tmp_path / ".system_generated/retained_uploads/uploads")
 
@@ -214,7 +215,7 @@ def test_recovery_ancestor_replaced_by_symlink_after_registration_is_rejected(st
     image, reference = write_image(uploads)
     outside = tmp_path / "elsewhere"
     outside.mkdir()
-    recovery.parent.symlink_to(outside, target_is_directory=True)
+    symlink_or_skip(recovery.parent, outside, target_is_directory=True)
     with pytest.raises(lifecycle.AssetLifecycleError, match="符号链接"):
         retire(store, reference)
     assert image.exists()
@@ -244,7 +245,7 @@ def test_static_image_get_head_cache_and_other_static_files(store):
         assert head.status_code == 200 and head.content == b""
         assert head.headers["content-length"] == str(len(response.content))
         assert client.post(reference).status_code == 405
-        assert client.get("/static/app.css").text == css.read_text()
+        assert client.get("/static/app.css").text == css.read_text(encoding='utf-8')
         assert client.get("/static/.system_generated/retained_uploads/files/example.png").status_code == 404
 
 

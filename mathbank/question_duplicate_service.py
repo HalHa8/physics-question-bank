@@ -14,6 +14,7 @@ import datetime as dt
 from collections import Counter
 from dataclasses import dataclass
 from functools import lru_cache
+from itertools import islice
 from pathlib import Path
 from typing import Iterable, Mapping, Sequence
 
@@ -21,7 +22,7 @@ from PIL import Image, ImageOps
 from sqlalchemy import and_, func, literal, select, union_all
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import OperationalError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, noload
 
 from mathbank.asset_security import resolve_upload_asset
 from mathbank.database import Question, QuestionFingerprint as StoredFingerprint
@@ -100,13 +101,17 @@ def select_visible_question_images(
     answer_markdown: str,
     image_paths: Iterable[str],
     content_tikz_assets: object,
-    *, review: str = "",
+    *,
+    review: str = "",
 ) -> list[str]:
-    """Keep prompt figures while excluding answer-only and AI reference assets."""
+    """Keep prompt/legacy figures, excluding answer, review and AI-only assets."""
 
-    paths = [str(path or "").strip() for path in image_paths if str(path or "").strip()]
     from mathbank.question_assets import without_review_only_assets
-    paths = without_review_only_assets(paths, content, answer_markdown, review)
+
+    paths = without_review_only_assets(
+        [str(path or "").strip() for path in image_paths if str(path or "").strip()],
+        content, answer_markdown, review,
+    )
     hidden_references: set[str] = set()
     assets = content_tikz_assets if isinstance(content_tikz_assets, list) else []
     for asset in assets:
@@ -215,6 +220,7 @@ def duplicate_input_for_question(
                 question.answer_markdown or "",
                 display_paths,
                 question.content_tikz_assets,
+                review=question.review or "",
             ),
             uploads_dir=uploads_dir,
             url_prefix=url_prefix,
@@ -290,6 +296,55 @@ def upsert_question_fingerprint(
         set_=update_values,
     )
     db.execute(statement)
+
+
+def upsert_question_fingerprints(
+    db: Session,
+    fingerprints: Iterable[tuple[Question, QuestionFingerprint]],
+    *,
+    batch_size: int = 128,
+) -> None:
+    """Store complete fingerprints in bounded batches in the caller's transaction.
+
+    Each question must occur once.  Other algorithm versions are retired just
+    as in the single-row writer; no commit or partial-success fallback occurs.
+    DBAPI executemany keeps the SQLite parameter count independent of batch
+    size, including older SQLite builds shipped on Windows.
+    """
+
+    if not isinstance(batch_size, int) or isinstance(batch_size, bool) or not 1 <= batch_size <= 500:
+        raise ValueError("fingerprint batch_size must be between 1 and 500")
+    iterator = iter(fingerprints)
+    seen_question_ids: set[int] = set()
+    table = StoredFingerprint.__table__
+    statement = sqlite_insert(table)
+    statement = statement.on_conflict_do_update(
+        index_elements=["question_id", "fingerprint_version"],
+        set_={
+            column.name: statement.excluded[column.name]
+            for column in table.columns
+            if column.name not in {"id", "question_id", "fingerprint_version"}
+        },
+    )
+    while batch := list(islice(iterator, batch_size)):
+        retired_ids: dict[int, list[int]] = {}
+        rows = []
+        for question, fingerprint in batch:
+            if question.id is None or question.id in seen_question_ids:
+                raise ValueError("fingerprint batch requires distinct persisted questions")
+            seen_question_ids.add(question.id)
+            retired_ids.setdefault(fingerprint.fingerprint_version, []).append(question.id)
+            rows.append({
+                "question_id": question.id,
+                "fingerprint_version": fingerprint.fingerprint_version,
+                **_stored_values(fingerprint),
+            })
+        for version, question_ids in retired_ids.items():
+            db.query(StoredFingerprint).filter(
+                StoredFingerprint.question_id.in_(question_ids),
+                StoredFingerprint.fingerprint_version != version,
+            ).delete(synchronize_session=False)
+        db.execute(statement, rows)
 
 
 def fingerprint_for_question(
@@ -664,6 +719,9 @@ def backfill_missing_fingerprints(
 ) -> int | tuple[int, int]:
     missing = (
         db.query(Question)
+        # Fingerprints depend on question text and assets, never on annotation
+        # evidence.  Override the model's selectin default for startup batches.
+        .options(noload(Question.knowledge_points))
         .outerjoin(
             StoredFingerprint,
             and_(

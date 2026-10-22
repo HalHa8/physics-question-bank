@@ -8,8 +8,8 @@ from mathbank.pdf_hybrid_request import PdfHybridMessageBudgetError, request_pdf
 from mathbank.source_metadata import SourceMetadataContractError, SourceMetadataMessageBudgetError
 from mathbank.task_manager import TaskCancelled
 from mathbank.word_hybrid_request import WordHybridMessageBudgetError, request_word_hybrid
-from test_pdf_hybrid_safety import prepared, CURRICULUM as PDF_CURRICULUM, PROVIDER as PDF_PROVIDER
-from test_word_hybrid_safety import native_plan, CURRICULUM as WORD_CURRICULUM, PROVIDER as WORD_PROVIDER
+from pdf_hybrid_fixtures import prepared, CURRICULUM as PDF_CURRICULUM, PROVIDER as PDF_PROVIDER
+from word_hybrid_fixtures import native_plan, CURRICULUM as WORD_CURRICULUM, PROVIDER as WORD_PROVIDER
 
 
 @pytest.fixture(params=["word", "pdf_hybrid", "pdf_whole_metadata"])
@@ -69,6 +69,15 @@ def test_prompt_budget_does_not_retry_a_failed_old_path(request_case, monkeypatc
     with pytest.raises(RuntimeError, match="Old path failed"):
         run(full_source_fallback=failed_fallback)
     assert posts == [] and fallbacks == [True]
+
+
+def test_shared_request_sends_the_knowledge_catalogue_once(request_case, monkeypatch):
+    plan, curriculum, *_ = request_case
+    monkeypatch.setattr(source_hybrid_request, "load_ai_knowledge_catalog", lambda: [
+        {"code": "local:one-directory-copy", "name": "混合请求知识点", "original_name": "原名", "aliases": []}
+    ])
+    messages, _locks = source_hybrid_request.build_source_hybrid_messages(plan, curriculum, plan["groups"])
+    assert messages[0]["content"].count("local:one-directory-copy") == 1
 
 
 def test_cancellation_during_budget_preparation_prevents_any_old_path(request_case, monkeypatch):

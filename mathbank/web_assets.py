@@ -14,14 +14,14 @@ def set_no_cache_headers(response):
 
 
 def build_index_response(*, static_dir: Path, js_dir: Path, css_dir: Path,
-                         local_token: str, server_instance_id: str):
+                         local_token: str, server_instance_id: str, pdf_cloud_only: bool = True):
     index_path = str(static_dir / "index.html")
     if os.path.exists(index_path):
         with open(index_path, "r", encoding="utf-8") as f:
             html_content = f.read()
 
         # Inject dynamic cache-busting version parameter based on file mtime
-        js_files = ["api.js", "editor.js", "ocr.js", "import.js", "image-import.js", "paper.js", "dashboard.js", "qa-data.js", "qa.js"]
+        js_files = ["api.js", "knowledge-points.js", "editor.js", "ocr.js", "import.js", "image-import.js", "document-import-session.js", "paper.js", "dashboard.js", "qa-data.js", "qa.js"]
         for js in js_files:
             js_path = str(js_dir / js)
             mtime = int(os.path.getmtime(js_path)) if os.path.exists(js_path) else 0
@@ -40,7 +40,7 @@ def build_index_response(*, static_dir: Path, js_dir: Path, css_dir: Path,
         html_content = html_content.replace('/static/favicon.png', f'/static/favicon.png?v={fav_mtime}')
 
         # Inject the token and server_instance_id directly into index.html to bypass any cookie blocking policies
-        token_script = f'<script>window.__localToken = "{local_token}"; window.__serverInstanceId = "{server_instance_id}";</script>'
+        token_script = f'<script>window.__localToken = "{local_token}"; window.__serverInstanceId = "{server_instance_id}"; window.__pdfCloudOnly = {str(pdf_cloud_only).lower()};</script>'
         html_content = html_content.replace('<head>', f'<head>\n    {token_script}')
 
         res = HTMLResponse(content=html_content)

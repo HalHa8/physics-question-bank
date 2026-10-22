@@ -14,6 +14,18 @@ Whole-page / multiple-question mode accepts up to 20 ordered images (10MB each,
 splitting and question-review workflow. Choosing/reordering images stays local;
 recognition starts only when requested. Multi-question mode needs both image OCR
 and paper-parsing models. TeX companion illustrations remain a separate input.
+Independent physics points are now separate from textbook placement and personal
+tags. The editor supports manual main/auxiliary labels, 80 starter points,
+aliases, teacher-created points and draft persistence. Bank filters support
+ANY/ALL, main-only and unlabeled questions. Optional AI classification uses the
+existing request to suggest points with literal evidence; suggestions remain
+pending until a teacher confirms them. Manual editing/search makes no AI calls.
+The `main` branch integrates reusable MathBank 3.0 and 3.0.1 improvements while retaining physics
+content rules, screenshot corrections and per-paper image scales. PhysicsBank's own schema is v12 (not MathBank's version numbering),
+with a database snapshot before migration; existing questions are not relabeled.
+Make a full backup and close the service before upgrading. Older programs cannot
+open the upgraded database; rollback requires the pre-upgrade full backup and
+separate preservation of any newly added data. Portable packages are unchanged.
 
 Screenshot OCR now crops figures directly from the original image, preserving
 their text, option or table positions. Original-image mode is enabled by default.
@@ -26,6 +38,26 @@ enables extra paid TikZ drawing calls per figure.
 These changes and all three backend-decoupling stages are integrated into the
 `main` source. Existing Windows portable packages are not rebuilt by a local
 source update; check the downloaded build's commit and back up personal data.
+
+Settings → Library sharing exports selected questions, answers, labels and
+referenced images as a ZIP without credentials or runtime configuration. Import
+validates the package, creates a full backup, and appends without overwriting.
+Repeated imports append again; they do not automatically merge duplicates.
+Sharing now shows task stages and progress. Refreshing or reconnecting queries
+the original task without uploading again. If the commit outcome is uncertain,
+check your library and backup before importing again. An intentional repeat
+requires explicit confirmation. Storage preflight reports permission, space
+and file-lock problems without elevating privileges or moving your data.
+Check content permissions and personal information before sharing.
+
+Markdown import, source-preserving classification, batch figure crops, tables,
+lists, image profiles and missing-asset export preflight are supported. Extra
+PDF/Word visual verification remains opt-in and may cost money. Failed paid
+requests are not automatically retried or silently routed to another provider.
+Word recovery requires an explicit click and may send unfinished requests.
+Upstream PDF local-project/fragment/checkpoint experiments remain disabled.
+
+See the [adaptation scope and acceptance record](docs/mathbank-3-physics-adaptation.md) for included features and deliberate differences.
 
 [简体中文](README.md) · [AGPL-3.0 license](LICENSE) · [Notices](NOTICE.md)
 

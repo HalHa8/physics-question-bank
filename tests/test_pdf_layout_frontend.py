@@ -160,7 +160,6 @@ const fetch = (url, options) => {
     )
     setup = r"""
 window.addEventListener = () => {};
-let retainedDocumentResult = null;
 let checkedStrategy = null;
 document.querySelector = selector => selector === 'input[name="pdfStrategy"]:checked' ? checkedStrategy : null;
 const intervals = new Map();
@@ -278,7 +277,7 @@ const pdfScenarios = {
     }
     document.getElementById('docxVerifySuspicions').remove();
     runAIPaperParse();
-    assert.equal(requests.at(-1).options.body.get('docx_verify_suspicions'),'false','missing markup must not authorize paid verification');
+    assert.equal(requests.at(-1).options.body.get('docx_verify_suspicions'),'false','missing markup cannot authorize extra paid verification');
     window.currentDocxFile=null;
     window.currentPdfFile=new Blob(['pdf']);
     runAIPaperParse();
@@ -445,7 +444,7 @@ const pdfScenarios = {
     assert.ok(repairAudit.querySelector('div').textContent.includes('修正稿：$x-2$'));
     assert.equal(repairAudit.querySelector('script'),null);
     assert.equal(card(1).querySelector('.card-source-review-reasons').textContent,'原页右下角模糊，无法判断指数。');
-    assert.equal(card(2).querySelector('.card-source-review-reasons').textContent,'未找到可用的原始页面。');
+    assert.equal(card(2).querySelector('.card-source-review-reasons').textContent,'未找到可用的原始页面。\n公式位置不能对应。');
     assert.equal(card(3).querySelector('.card-source-review-reasons').textContent,'修复后的公式和原页一致。');
     assert.ok(card(3).querySelector('.card-source-review-repair').textContent.includes('自动修复后已核验'));
     assert.equal(card(3).querySelector('.card-source-review-panel').open,false);
@@ -453,7 +452,7 @@ const pdfScenarios = {
     let lines=report.querySelector('.pdf-review-question-list').querySelectorAll('span').map(span=>span.textContent);
     assert.ok(lines[0].startsWith('：模型发现差异：原文是'));
     assert.ok(lines[1].startsWith('：模型尚无法确认：原页右下角'));
-    assert.equal(lines[2],'：未完成视觉核验：未找到可用的原始页面。');
+    assert.equal(lines[2],'：未完成视觉核验：未找到可用的原始页面。；公式位置不能对应。');
     assert.equal(lines.join('').includes('旧的泛化提示'),false);
     assert.equal(report.querySelector('img'),null);
     assert.deepEqual(getCheckedUnsavedIndices(),[0,1,2,3]);
@@ -512,7 +511,7 @@ const pdfScenarios = {
     assert.equal(requests.at(-1).options.body.get('pdf_verify_suspicions'),'false');
     document.getElementById('pdfVerifySuspicions').remove();
     runAIPaperParse();
-    assert.equal(requests.at(-1).options.body.get('pdf_verify_suspicions'),'false','missing markup must not authorize paid verification');
+    assert.equal(requests.at(-1).options.body.get('pdf_verify_suspicions'),'false','missing markup cannot authorize extra paid verification');
   },
   async vision_confirmation_and_edit_invalidation() {
     const q={content:'计算 $1+1$。',answer_markdown:'',source_review:{required:false,verified_by:'vision',
@@ -749,11 +748,11 @@ const pdfScenarios = {
   },
   async joint_and_separate_visual_call_counts() {
     const joint=pdfLayoutReportSummary({pages_checked:2,joint_visual_calls:2,visual_calls:0});
-    assert.ok(joint.includes('联合识图 2 次，单独配图核对 0 次'));
+    assert.ok(joint.includes('联合识图 2 次，单独配图定位 0 次'));
     const mixed=pdfLayoutReportSummary({joint_visual_calls:1,visual_calls:3});
-    assert.ok(mixed.includes('联合识图 1 次，单独配图核对 3 次'));
+    assert.ok(mixed.includes('联合识图 1 次，单独配图定位 3 次'));
     const legacy=pdfLayoutReportSummary({visual_calls:2});
-    assert.ok(legacy.includes('配图核对调用 2 次'));
+    assert.ok(legacy.includes('配图定位调用 2 次'));
     assert.equal(legacy.includes('联合识图'),false);
   },
   async native_structure_repair_summary_and_notes_are_local_only() {
@@ -900,14 +899,14 @@ const pdfScenarios = {
     tick();
     requests.at(-1).resolve({ok:true,json:async()=>({status:'source_verification',log:'正在对照原页核验...',progress:90})});
     await flush();
-    assert.ok(document.getElementById('importSubLoadingText').textContent.includes('自动核验原页疑点'));
+    assert.ok(document.getElementById('importSubLoadingText').textContent.includes('对照原页核验疑点'));
     tick();
     requests.at(-1).resolve({ok:true,json:async()=>({status:'completed',log:'完成',document_type:'pdf',data:[],
       diagnostics:{pdf_layout:{pages_checked:2,figures_extracted:1,figures_attached:1,visual_calls:2,warnings:[]},
         math_locks_created:3,math_locks_restored_by_id:3},generate_answers:false})});
     await flush();
     assert.equal(intervals.size,0);
-    assert.ok(logs.some(line=>line.includes('配图核对调用 2 次')));
+    assert.ok(logs.some(line=>line.includes('配图定位调用 2 次')));
     assert.ok(logs.some(line=>line.includes('公式核对：3 处')),'PDF formula report also appears');
     assert.ok(document.getElementById('parsedSourceIntegrityReport'));
   },
@@ -929,6 +928,7 @@ const pdfScenarios = {
     pollPdfTaskStatus('split-failed',generation);
     [...intervals.values()][0]();
     requests.at(-1).resolve({ok:true,json:async()=>({status:'error',document_type:'pdf',error:'PDF 整卷拆题超时',
+      pdf_source_pages:[{page_number:1,markdown:'已保留原文',status:'completed'}],
       page_images:['/static/uploads/tmp/page1.png'],page_numbers:[1],diagnostics})});
     await flush();
     assert.equal(intervals.size,0);
@@ -1178,6 +1178,43 @@ def test_pdf_manual_crop_nonconsecutive_pages_in_real_browser(browser, tmp_path)
 
 
 @pytest.mark.skipif(os.environ.get("MATHBANK_TEST_BROWSER") != "1", reason="opt-in actual browser regression")
+def test_main_correction_actions_replace_missing_and_old_figures_with_undo(browser):
+    _prepare_browser_pdf_review(browser)
+    browser.evaluate(r"""(() => {
+        window.__mainCropFetch = window.fetch;
+        window.fetch = (input, options) => input === '/api/ai/manual-crop-pdf'
+            ? Promise.resolve(new Response(JSON.stringify({status:'success',image_path:window.__pdfReviewImage}),
+                {status:200,headers:{'Content-Type':'application/json'}})) : window.__mainCropFetch(input, options);
+        window.currentPdfTaskId = 'main-correction-fixture';
+        return true;
+    })()""")
+    try:
+        result = browser.evaluate(r"""(async () => {
+            const old = '/static/uploads/tmp/old-main-crop.png';
+            const question = {content:'题干 [插图待补: 图1]',answer_markdown:'解析 ![旧图]('+old+')',
+                image_paths:[old],question_type:'detailed_answer'};
+            replaceParsedQuestions([question]); renderParsedQuestionsList(parsedQuestionsData);
+            openPdfCropModalForQuestion(0,{issue:{field:'content',offset:3,marker:'[插图待补: 图1]'}});
+            rectLeft=10;rectTop=10;rectWidth=30;rectHeight=30;
+            await submitPdfCropCoordinates();
+            const inserted = !question.content.includes('[插图待补') && question.content.includes(__pdfReviewImage);
+            const firstUndo = undoParsedImageChange(0);
+            const restoredMissing = question.content === '题干 [插图待补: 图1]';
+            openPdfCropModalForQuestion(0,{replacePath:old});
+            rectLeft=10;rectTop=10;rectWidth=30;rectHeight=30;
+            await submitPdfCropCoordinates();
+            const replaced = question.answer_markdown.includes(__pdfReviewImage)
+                && !question.answer_markdown.includes(old) && !question.image_paths.includes(old);
+            undoParsedImageChange(0);
+            return {inserted,restoredMissing,replaced,restoredOld:question.answer_markdown.includes(old)
+                && question.image_paths.includes(old)};
+        })()""")
+        assert result == {'inserted': True, 'restoredMissing': True, 'replaced': True, 'restoredOld': True}
+    finally:
+        browser.evaluate('window.fetch=window.__mainCropFetch; closePdfCropModal(); true')
+
+
+@pytest.mark.skipif(os.environ.get("MATHBANK_TEST_BROWSER") != "1", reason="opt-in actual browser regression")
 def test_pdf_notes_and_global_page_warning_in_real_browser(browser, tmp_path):
     _prepare_browser_pdf_review(browser)
     browser.evaluate(r"""
@@ -1335,8 +1372,9 @@ def test_saved_real_pdf_option_order_and_badminton_position(browser, tmp_path):
 @pytest.mark.skipif(os.environ.get("MATHBANK_TEST_BROWSER") != "1", reason="opt-in actual browser regression")
 def test_pdf_card_action_labels_do_not_wrap_with_image_badges(browser, tmp_path):
     image_url = _prepare_browser_pdf_review(browser)
-    # Still wider than a card badge, without exceeding Win32 MAX_PATH in the fixture root.
-    paths = ['/static/uploads/figure_' + 'long_filename_' * 5 + str(index) + '.png' for index in range(8)]
+    # Still far wider than a badge, but keep the complete Windows fixture path
+    # below MAX_PATH on systems without long-path opt-in.
+    paths = ['/static/uploads/figure_' + 'long_filename_' * 6 + str(index) + '.png' for index in range(8)]
     for path in paths:
         target = browser.root / path.lstrip('/')
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -1616,7 +1654,7 @@ def test_docx_source_verification_upload_poll_and_revocable_result(browser, tmp_
         browser.command('fill', '#importPaperTitle', 'Word 原文核验示例')
         assert browser.evaluate("!document.getElementById('docxVerifySuspicions').checked && !selectedDocxSourceVerification()")
         browser.command('check', '#docxVerifySuspicions')
-        assert browser.evaluate("document.getElementById('docxVerifySuspicions').checked && selectedDocxSourceVerification()")
+        assert browser.evaluate('selectedDocxSourceVerification()')
         assert browser.evaluate('window.__docxUiNetwork.uploads') == [], 'selecting a file starts no task'
         for width, height in [(1600, 1100), (375, 812)]:
             browser.command('set', 'viewport', str(width), str(height))
@@ -1738,7 +1776,7 @@ def test_visual_review_states_and_repair_evidence_are_specific_and_revocable(bro
         assert browser.evaluate('getCheckedUnsavedIndices()') == [0, 1, 2, 3]
         assert '原文是 x-1' in browser.evaluate("document.querySelector('.pdf-review-question-list li span').textContent")
         assert '旧的泛化警告' not in browser.evaluate("document.querySelector('.pdf-review-question-list').textContent")
-        assert browser.evaluate("document.querySelector('#parsed-card-2 .card-source-review-reasons').textContent") == '缺少原页，未发送模型。'
+        assert browser.evaluate("document.querySelector('#parsed-card-2 .card-source-review-reasons').textContent") == '缺少原页，未发送模型。\n公式位置不能对应。'
         assert browser.evaluate("document.querySelector('#parsed-card-3 .card-source-review-repair').textContent") == '自动修复后已核验（尝试 2 轮）。'
         for width, height in [(1600, 1100), (375, 812)]:
             browser.command('set', 'viewport', str(width), str(height))

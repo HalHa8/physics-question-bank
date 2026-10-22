@@ -1,39 +1,49 @@
 """Question queries; all application dependencies are explicit."""
 
+from typing import List, Optional
+from pathlib import Path
+from fastapi import BackgroundTasks, Depends, File, Form, Header, HTTPException, Query, Request, Response, UploadFile
+from sqlalchemy.orm import Session
+from mathbank.database import get_db
 from dataclasses import dataclass
 from typing import Any, Callable
-
 from mathbank.application_state import RuntimeState
-from typing import Optional
-from fastapi import Depends
-from sqlalchemy.orm import Session
-from mathbank.database import Question, get_db
+from mathbank.database import Question
 from mathbank.question_duplicates import QuestionDuplicateInput
+from mathbank.knowledge_points import apply_knowledge_point_filters
 
 
 @dataclass(frozen=True)
 class QuestionQueriesDependencies:
-    state: RuntimeState
     HTTPException: Any
     JSONResponse: Any
     Question: Any
+    QuestionCurriculum: Any
     QuestionDuplicateInput: Any
-    _duplicate_input_from_payload: Callable
-    _duplicate_payload_list: Callable
-    _prompt_visible_image_paths: Callable
+    _duplicate_input_from_payload: Any
+    _duplicate_payload_list: Any
+    _prompt_visible_image_paths: Any
+    apply_curriculum_filters: Any
+    apply_knowledge_point_filters: Any
     batch_local_matches: Any
     build_question_fingerprint: Any
     build_tikz_signatures: Any
     build_visible_image_signatures: Any
     datetime: Any
     duplicate_index_status: Any
+    find_association_candidates: Any
     find_indexed_candidates: Any
-    get_current_curriculum: Callable
-    get_seq_mapping: Callable
+    get_active_version_code: Any
+    get_current_curriculum: Any
+    get_seq_mapping: Any
     json: Any
     normalize_fillin_macro: Any
+    question_summary_load_options: Any
+    reference_payloads: Any
     select_answer_images: Any
     select_visible_question_images: Any
+    selectinload: Any
+    state: RuntimeState
 
 
 def get_seq_mapping(db: Session, question_ids=None, *, dependencies: QuestionQueriesDependencies):
@@ -58,96 +68,65 @@ def get_seq_mapping(db: Session, question_ids=None, *, dependencies: QuestionQue
     return {question_id: int(seq_num) for question_id, seq_num in rows}
 
 
-def list_questions(q: str=None, search: str=None, compulsory: str=None, category_compulsory: str=None, chapter: str=None, category_chapter: str=None, knowledge: str=None, category_knowledge: str=None, qtype: str=None, question_type: str=None, difficulty: str=None, source: str=None, page: Optional[int]=None, page_size: int=20, sort: str='desc', db: Session=Depends(get_db), *, dependencies: QuestionQueriesDependencies):
+def list_questions(q: str=None, search: str=None, compulsory: str=None, category_compulsory: str=None, chapter: str=None, category_chapter: str=None, knowledge: str=None, category_knowledge: str=None, include_sub_knowledge: bool=False, sub_knowledge: Optional[List[str]]=Query(None), sub_knowledge_mode: str='any', knowledge_point_codes: Optional[List[str]]=Query(None), knowledge_point_mode: str='any', knowledge_point_role: str='main', knowledge_point_status: str='all', knowledge_point_unlabeled: bool=False, qtype: str=None, question_type: str=None, difficulty: str=None, source: str=None, page: Optional[int]=None, page_size: int=20, sort: str='desc', knowledge_points: Optional[str]=None, point_match: str='any', point_role: str='all', point_unlabeled: bool=False, db: Session=Depends(get_db), *, dependencies: QuestionQueriesDependencies):
     search_q = q or search
     comp_val = compulsory or category_compulsory
     chap_val = chapter or category_chapter
     know_val = knowledge or category_knowledge
     type_val = qtype or question_type
-
     query = db.query(dependencies.Question)
-
-    # Check if searching for a specific display sequence number
+    # Keep the optional phase-one PhysicsBank filter names for existing clients.
+    try:
+        query = dependencies.apply_knowledge_point_filters(query, knowledge_points or [],
+            match_mode=point_match, role_scope=point_role, status_scope='confirmed', unlabeled=point_unlabeled)
+    except (ValueError, TypeError) as exc:
+        raise dependencies.HTTPException(400, str(exc)) from exc
+    if page is not None:
+        query = query.options(*dependencies.question_summary_load_options())
+    else:
+        query = query.options(dependencies.selectinload(dependencies.Question.curriculum_mappings).selectinload(dependencies.QuestionCurriculum.sub_knowledge_rows), dependencies.selectinload(dependencies.Question.knowledge_points))
     target_id_by_seq = None
     if search_q:
         clean_q = search_q.strip()
-        if clean_q.startswith("#"):
+        if clean_q.startswith('#'):
             clean_q = clean_q[1:]
         if clean_q.isdigit():
             seq_val = int(clean_q)
             if seq_val >= 1:
-                row = (
-                    db.query(dependencies.Question.id)
-                    .order_by(dependencies.Question.id.asc())
-                    .offset(seq_val - 1)
-                    .limit(1)
-                    .first()
-                )
+                row = db.query(dependencies.Question.id).order_by(dependencies.Question.id.asc()).offset(seq_val - 1).limit(1).first()
                 if row:
                     target_id_by_seq = row[0]
-
     if search_q:
         if target_id_by_seq is not None:
-            query = query.filter(
-                (dependencies.Question.id == target_id_by_seq) |
-                (dependencies.Question.content.like(f"%{search_q}%")) |
-                (dependencies.Question.source.like(f"%{search_q}%")) |
-                (dependencies.Question.answer_markdown.like(f"%{search_q}%")) |
-                (dependencies.Question.review.like(f"%{search_q}%")) |
-                (dependencies.Question.tags.like(f"%{search_q}%"))
-            )
+            query = query.filter((dependencies.Question.id == target_id_by_seq) | dependencies.Question.content.like(f'%{search_q}%') | dependencies.Question.source.like(f'%{search_q}%') | dependencies.Question.answer_markdown.like(f'%{search_q}%') | dependencies.Question.review.like(f'%{search_q}%') | dependencies.Question.tags.like(f'%{search_q}%'))
         else:
-            query = query.filter(
-                (dependencies.Question.content.like(f"%{search_q}%")) |
-                (dependencies.Question.source.like(f"%{search_q}%")) |
-                (dependencies.Question.answer_markdown.like(f"%{search_q}%")) |
-                (dependencies.Question.review.like(f"%{search_q}%")) |
-                (dependencies.Question.tags.like(f"%{search_q}%"))
-            )
-    if comp_val:
-        query = query.filter(dependencies.Question.category_compulsory == comp_val)
-    if chap_val:
-        query = query.filter(dependencies.Question.category_chapter == chap_val)
-    if know_val:
-        query = query.filter(dependencies.Question.category_knowledge == know_val)
+            query = query.filter(dependencies.Question.content.like(f'%{search_q}%') | dependencies.Question.source.like(f'%{search_q}%') | dependencies.Question.answer_markdown.like(f'%{search_q}%') | dependencies.Question.review.like(f'%{search_q}%') | dependencies.Question.tags.like(f'%{search_q}%'))
+    try:
+        paths = [dependencies.json.loads(path) for path in sub_knowledge or []]
+        query = dependencies.apply_curriculum_filters(query, comp_val, chap_val, know_val, include_sub_knowledge=include_sub_knowledge, sub_knowledge=paths, sub_knowledge_mode=sub_knowledge_mode)
+        query = dependencies.apply_knowledge_point_filters(query, knowledge_point_codes or [], match_mode=knowledge_point_mode, role_scope=knowledge_point_role, status_scope=knowledge_point_status, unlabeled=knowledge_point_unlabeled)
+    except (ValueError, TypeError) as exc:
+        raise dependencies.HTTPException(status_code=400, detail=str(exc)) from exc
     if type_val:
         query = query.filter(dependencies.Question.question_type == type_val)
     if difficulty:
         query = query.filter(dependencies.Question.difficulty == difficulty)
     if source:
-        query = query.filter(dependencies.Question.source.like(f"%{source}%"))
-
-    order_columns = (
-        (dependencies.Question.created_at.asc(), dependencies.Question.id.asc())
-        if str(sort).lower() == "asc"
-        else (dependencies.Question.created_at.desc(), dependencies.Question.id.desc())
-    )
+        query = query.filter(dependencies.Question.source.like(f'%{source}%'))
+    order_columns = (dependencies.Question.created_at.asc(), dependencies.Question.id.asc()) if str(sort).lower() == 'asc' else (dependencies.Question.created_at.desc(), dependencies.Question.id.desc())
     if page is not None:
         safe_page_size = max(1, min(int(page_size), 100))
         total = query.count()
         total_pages = max(1, (total + safe_page_size - 1) // safe_page_size)
         safe_page = max(1, min(int(page), total_pages))
-        questions = (
-            query.order_by(*order_columns)
-            .offset((safe_page - 1) * safe_page_size)
-            .limit(safe_page_size)
-            .all()
-        )
+        questions = query.order_by(*order_columns).offset((safe_page - 1) * safe_page_size).limit(safe_page_size).all()
         seq_map = dependencies.get_seq_mapping(db, [item.id for item in questions])
-        return {
-            "items": [
-                {**item.to_summary_dict(), "seq_num": seq_map.get(item.id)}
-                for item in questions
-            ],
-            "total": total,
-            "page": safe_page,
-            "page_size": safe_page_size,
-            "total_pages": total_pages,
-        }
-
+        refs_by_id = dependencies.reference_payloads(db, questions)
+        return {'items': [{**item.to_summary_dict(dependencies.get_active_version_code(), compact_knowledge_points=True), 'question_references': refs_by_id.get(item.id, []), 'seq_num': seq_map.get(item.id), 'version_code': dependencies.get_active_version_code(), 'active_version_code': dependencies.get_active_version_code()} for item in questions], 'total': total, 'page': safe_page, 'page_size': safe_page_size, 'total_pages': total_pages}
     questions = query.order_by(*order_columns).all()
     seq_map = dependencies.get_seq_mapping(db, [item.id for item in questions])
-    return [{**item.to_summary_dict(), "seq_num": seq_map.get(item.id)} for item in questions]
+    refs_by_id = dependencies.reference_payloads(db, questions)
+    return [{**item.to_summary_dict(dependencies.get_active_version_code()), 'question_references': refs_by_id.get(item.id, []), 'seq_num': seq_map.get(item.id), 'version_code': dependencies.get_active_version_code(), 'active_version_code': dependencies.get_active_version_code()} for item in questions]
 
 
 def _duplicate_payload_list(value, *, field_name: str, max_items: int=50, dependencies: QuestionQueriesDependencies):
@@ -166,83 +145,30 @@ def _duplicate_payload_list(value, *, field_name: str, max_items: int=50, depend
 
 
 def _duplicate_input_from_payload(item: dict, *, dependencies: QuestionQueriesDependencies) -> QuestionDuplicateInput:
-    content = dependencies.normalize_fillin_macro(str(item.get("content") or ""))
+    content = dependencies.normalize_fillin_macro(str(item.get('content') or ''))
     if not content.strip():
-        raise ValueError("题干内容不能为空")
-    if len(content) > 200_000:
-        raise ValueError("单题题干过长")
-    answer_markdown = str(item.get("answer_markdown") or "")
-    if len(answer_markdown) > 500_000:
-        raise ValueError("单题解析过长")
-    image_paths = [
-        str(path or "").strip()
-        for path in dependencies._duplicate_payload_list(
-            item.get("image_paths"), field_name="image_paths"
-        )
-        if str(path or "").strip()
-    ]
-    content_assets = dependencies._duplicate_payload_list(
-        item.get("content_tikz_assets"),
-        field_name="content_tikz_assets",
-    )
-    answer_assets = dependencies._duplicate_payload_list(
-        item.get("answer_tikz_assets"),
-        field_name="answer_tikz_assets",
-    )
-    legacy_reference = str(item.get("tikz_reference_image_path") or "").strip()
+        raise ValueError('题干内容不能为空')
+    if len(content) > 200000:
+        raise ValueError('单题题干过长')
+    answer_markdown = str(item.get('answer_markdown') or '')
+    if len(answer_markdown) > 500000:
+        raise ValueError('单题解析过长')
+    image_paths = [str(path or '').strip() for path in dependencies._duplicate_payload_list(item.get('image_paths'), field_name='image_paths') if str(path or '').strip()]
+    content_assets = dependencies._duplicate_payload_list(item.get('content_tikz_assets'), field_name='content_tikz_assets')
+    answer_assets = dependencies._duplicate_payload_list(item.get('answer_tikz_assets'), field_name='answer_tikz_assets')
+    legacy_reference = str(item.get('tikz_reference_image_path') or '').strip()
     hidden_references = {legacy_reference}
     for asset in [*content_assets, *answer_assets]:
         if isinstance(asset, dict):
-            hidden_references.add(str(asset.get("reference_image_path") or "").strip())
-    hidden_references.discard("")
-    evidence_image_paths = [
-        path for path in image_paths if path not in hidden_references
-    ]
-    from mathbank.question_assets import without_review_only_assets
-    evidence_image_paths = without_review_only_assets(
-        evidence_image_paths, content, answer_markdown, item.get("review") or ""
-    )
-    visible_paths = dependencies.select_visible_question_images(
-        content,
-        answer_markdown,
-        evidence_image_paths,
-        content_assets,
-    )
-    return dependencies.QuestionDuplicateInput(
-        content=content,
-        answer_markdown=answer_markdown,
-        question_type=str(item.get("question_type") or ""),
-        visible_image_signatures=dependencies.build_visible_image_signatures(
-            visible_paths,
-            uploads_dir=dependencies.state.UPLOAD_DIR,
-            url_prefix=dependencies.state.UPLOAD_DIR_REL,
-        ),
-        tikz_signatures=dependencies.build_tikz_signatures(
-            content_assets,
-            str(item.get("tikz_code") or ""),
-        ),
-        answer_asset_signatures=(
-            dependencies.build_visible_image_signatures(
-                dependencies.select_answer_images(
-                    answer_markdown,
-                    evidence_image_paths,
-                    answer_assets,
-                ),
-                uploads_dir=dependencies.state.UPLOAD_DIR,
-                url_prefix=dependencies.state.UPLOAD_DIR_REL,
-            )
-            + dependencies.build_tikz_signatures(answer_assets)
-        ),
-    )
+            hidden_references.add(str(asset.get('reference_image_path') or '').strip())
+    hidden_references.discard('')
+    evidence_image_paths = [path for path in image_paths if path not in hidden_references]
+    visible_paths = dependencies.select_visible_question_images(content, answer_markdown, evidence_image_paths, content_assets, review=str(item.get('review') or ''))
+    return dependencies.QuestionDuplicateInput(content=content, answer_markdown=answer_markdown, question_type=str(item.get('question_type') or ''), visible_image_signatures=dependencies.build_visible_image_signatures(visible_paths, uploads_dir=dependencies.state.UPLOAD_DIR, url_prefix=dependencies.state.UPLOAD_DIR_REL), tikz_signatures=dependencies.build_tikz_signatures(content_assets, str(item.get('tikz_code') or '')), answer_asset_signatures=dependencies.build_visible_image_signatures(dependencies.select_answer_images(answer_markdown, evidence_image_paths, answer_assets), uploads_dir=dependencies.state.UPLOAD_DIR, url_prefix=dependencies.state.UPLOAD_DIR_REL) + dependencies.build_tikz_signatures(answer_assets))
 
 
 def _prompt_visible_image_paths(question: Question, *, dependencies: QuestionQueriesDependencies) -> list[str]:
-    return dependencies.select_visible_question_images(
-        question.content or "",
-        question.answer_markdown or "",
-        question.display_image_paths,
-        question.content_tikz_assets,
-    )
+    return dependencies.select_visible_question_images(question.content or '', question.answer_markdown or '', question.display_image_paths, question.content_tikz_assets, review=question.review or '')
 
 
 def check_question_duplicates(payload: dict, db: Session=Depends(get_db), *, dependencies: QuestionQueriesDependencies):
@@ -403,10 +329,14 @@ def check_question_duplicates(payload: dict, db: Session=Depends(get_db), *, dep
 def get_question(question_id: int, db: Session=Depends(get_db), *, dependencies: QuestionQueriesDependencies):
     q = db.query(dependencies.Question).filter(dependencies.Question.id == question_id).first()
     if not q:
-        raise dependencies.HTTPException(status_code=404, detail="未找到对应的题目")
+        raise dependencies.HTTPException(status_code=404, detail='未找到对应的题目')
     seq_map = dependencies.get_seq_mapping(db, [q.id])
-    q_dict = q.to_dict()
-    q_dict["seq_num"] = seq_map.get(q.id)
+    q_dict = q.to_dict(dependencies.get_active_version_code())
+    q_dict['question_references'] = dependencies.reference_payloads(db, [q]).get(q.id, [])
+    q_dict['version_code'] = dependencies.get_active_version_code()
+    q_dict['active_version_code'] = dependencies.get_active_version_code()
+    q_dict['curriculum_mappings'] = [mapping.to_dict() for mapping in q.curriculum_mappings]
+    q_dict['seq_num'] = seq_map.get(q.id)
     return q_dict
 
 
@@ -518,3 +448,11 @@ def get_sources(db: Session=Depends(get_db), *, dependencies: QuestionQueriesDep
     # Sort alphabetically (case-insensitive)
     sources.sort(key=str.lower)
     return sources
+
+
+def list_association_candidates(q: str='', page: int=Query(1, ge=1), page_size: int=Query(20, ge=1), exclude_id: Optional[int]=Query(None, ge=1), seq_num: Optional[int]=Query(None, ge=1), question_id: Optional[int]=Query(None, ge=1), db: Session=Depends(get_db), *, dependencies: QuestionQueriesDependencies):
+    result = dependencies.find_association_candidates(db, q=q, page=page, page_size=page_size, exclude_id=exclude_id, seq_num=seq_num, question_id=question_id)
+    sequences = dependencies.get_seq_mapping(db, [item['id'] for item in result['items']])
+    for item in result['items']:
+        item['seq_num'] = sequences.get(item['id'])
+    return result

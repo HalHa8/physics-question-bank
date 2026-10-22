@@ -48,6 +48,14 @@ def test_exif_rotated_photo_uses_transposed_dimensions_without_stretching():
         assert (raster.width, raster.height) == (40, 80)
 
 
+def test_converted_pdf_identity_depends_on_content_and_page_order_not_random_ids():
+    def convert(colors):
+        return image_pages_to_pdf([upload(picture(color)) for color in colors])
+    assert convert(["red", "blue"]) == convert(["red", "blue"])
+    assert convert(["red", "blue"]) != convert(["blue", "red"])
+    assert convert(["red"]) != convert(["blue"])
+
+
 @pytest.mark.parametrize("items", [[], [upload(picture()) for _ in range(21)]])
 def test_page_limit_rejects_before_creating_a_task(items):
     with pytest.raises(ValueError, match="1 至 20"):
@@ -118,3 +126,25 @@ def test_full_queue_returns_existing_429_without_adding_a_second_queue(client, m
         files=[("files", ("page.png", picture(), "image/png"))])
     assert response.status_code == 429
     assert "队列已满" in response.json()["message"]
+
+
+def test_repeated_image_request_reuses_one_task_and_changed_source_conflicts(client, monkeypatch):
+    import main
+    calls = []
+    def process(task_id, *args):
+        calls.append(task_id)
+        main.DOCUMENT_TASKS.update(task_id, status="completed", result=[])
+    monkeypatch.setattr(main, "run_pdf_parsing_task", process)
+    def send(color):
+        return client.post("/api/upload/image-task", headers={"X-Local-Token": main.LOCAL_TOKEN},
+            data={"client_request_id": "image-merge-idempotent-20261022", "paper_title": "物理图片"},
+            files=[("files", ("page.png", picture(color), "image/png"))])
+    first, repeated = send("red"), send("red")
+    assert first.status_code == repeated.status_code == 200
+    assert first.json()["task_id"] == repeated.json()["task_id"]
+    changed = send("blue")
+    assert changed.status_code == 409
+    deadline = time.monotonic() + 2
+    while not calls and time.monotonic() < deadline:
+        time.sleep(.01)
+    assert calls == [first.json()["task_id"]]

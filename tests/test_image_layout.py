@@ -151,23 +151,29 @@ def test_mixed_word_keeps_positions_and_individual_alignment(tmp_path):
     assert diagnostics['missing_images'] == 0
 
 
-def test_api_saves_image_layout_and_rejects_invalid_update(client):
+def test_api_saves_image_layout_and_rejects_invalid_update(client, tmp_path, monkeypatch):
     import main
+    from mathbank.asset_lifecycle import register_asset_store
     from main import LOCAL_TOKEN
     headers={'X-Local-Token':LOCAL_TOKEN}
-    # New imports validate every embedded path, so use real isolated test assets.
+    # Persistence now validates visible image references independently of the
+    # client list. Use real isolated fixtures instead of nonexistent URLs.
+    uploads = tmp_path / 'uploads'
+    uploads.mkdir()
     for name in ('a.png', 'b.png'):
-        Image.new('RGB', (12,12), 'white').save(Path(main.UPLOAD_DIR) / name)
-    source = SOURCE.replace('static/uploads/', main.UPLOAD_DIR_REL + '/')
-    key = '/' + main.UPLOAD_DIR_REL + '/a.png'
-    payload={'content':source,'question_type':'detailed_answer','difficulty':'medium',
-             'image_layouts': json.dumps({key:{'align':'right','size':'large'}})}
+        Image.new('RGB', (4, 4), 'white').save(uploads / name)
+    monkeypatch.setattr(main, 'UPLOAD_DIR', str(uploads))
+    monkeypatch.setattr(main, 'TMP_UPLOAD_DIR', str(uploads / 'tmp'))
+    monkeypatch.setattr(main, 'UPLOAD_DIR_REL', 'static/uploads')
+    register_asset_store(uploads, tmp_path / 'retained')
+    payload={'content':SOURCE,'question_type':'detailed_answer','difficulty':'medium',
+             'image_layouts': json.dumps({'a.png':{'align':'right','size':'large'}})}
     response=client.post('/api/questions',data=payload,headers=headers)
     assert response.status_code == 200, response.text
     item=response.json()['question']
     qid=item['id']
     from mathbank.image_layout import image_key
-    assert item['image_layouts'][image_key(key)]['size']=='large'
+    assert item['image_layouts'][image_key('a.png')]['size']=='large'
     assert client.get(f'/api/questions/{qid}').json()['image_layouts'] == item['image_layouts']
     bad={**payload,'image_layouts':json.dumps({'a.png':{'align':'floating','size':'large'}})}
     response=client.put(f'/api/questions/{qid}',data=bad,headers=headers)
@@ -197,7 +203,7 @@ const container={style:{},querySelectorAll(){return images;},appendChild(){}};
 '''+helpers+f'\napplyEditorFigureLayoutPreview(container, {json.dumps(SOURCE)});'+'''
 if(images[0].dataset.editorImageKey!=='a.png') throw Error('missing individual control');
 if(images[1].dataset.editorImageKey!=='') throw Error('missing trailing group control');
-if(images[1].style.maxHeight!=='240px') throw Error('trailing group size was ignored');
+if(images[1].style.maxHeight!==window.ImageLayoutTools.sizeDimensions('detached','medium').maxHeight+'px') throw Error('trailing group did not use shared size');
 '''
     result=subprocess.run([shutil.which('node'),'-e',script],capture_output=True,text=True)
     assert result.returncode==0,result.stderr

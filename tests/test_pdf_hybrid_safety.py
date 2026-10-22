@@ -20,7 +20,7 @@ from mathbank.pdf_hybrid_plan import (
 )
 from mathbank.pdf_hybrid_request import request_pdf_hybrid
 from mathbank.source_metadata import SourceMetadataContractError
-from mathbank.source_hybrid_request import SourceHybridContractError
+from mathbank.source_hybrid_request import SourceHybridContractError, SourceHybridPermanentRequestError
 from mathbank.task_manager import TaskCancelled
 
 CURRICULUM={'必修一':{'3. 函数的概念与性质':[]}}
@@ -146,7 +146,7 @@ def test_unknown_or_duplicate_reply_identity_rejects_contract_with_one_old_sourc
         else:reply['splits'][0]['questions'][1]['source_id']=reply['splits'][0]['questions'][0]['source_id']
         return Response(reply)
     old=[{'content':'Original source fallback',**FIELDS}]
-    with pytest.raises(SourceHybridContractError, match='未自动重试'):
+    with pytest.raises(SourceHybridPermanentRequestError, match='不会自动再次计费'):
         run(plan,post,fallback=lambda:fallbacks.append(True) or old)
     assert len(posts)==1 and not fallbacks
 
@@ -252,5 +252,5 @@ def test_pdf_task_completion_executed_tail_preserves_partial_flag_and_notice(par
     assert len(captured)==1
     kwargs=captured[0][1]
     assert kwargs['partial'] is partial and kwargs['data'] is data and kwargs['diagnostics'] is diagnostics
-    assert ('部分疑点题组未完成' in kwargs['log']) is partial
+    assert ('部分疑点题组仍需校对' in kwargs['log']) is partial
     assert kwargs['document_type']=='pdf' and kwargs['page_numbers']==[1]

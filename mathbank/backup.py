@@ -13,6 +13,7 @@ import sqlite3
 import stat
 import tempfile
 import threading
+import time
 import unicodedata
 import uuid
 import zipfile
@@ -21,8 +22,15 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from mathbank import __version__
-from mathbank.question_assets import embedded_question_assets
-from mathbank.asset_security import SAFE_IMAGE_EXTENSIONS, harden_private_path
+from mathbank.asset_security import (
+    SAFE_IMAGE_EXTENSIONS, fsync_writable_file, harden_private_path, replace_file_atomic,
+)
+from mathbank.storage_access import check_directory_access
+from mathbank.content_sources import (
+    CONTENT_SOURCES_JSON_NAME, CONTENT_SOURCES_NOTICE_NAME, CONTENT_SOURCES_PATH,
+    content_source_export_files, validate_content_sources,
+)
+from mathbank.question_assets import embedded_question_assets, structured_question_assets
 from mathbank.paths import (
     DATA_BACKUP_DIR,
     DATABASE_FILE,
@@ -40,11 +48,37 @@ MAX_BACKUP_UNCOMPRESSED_BYTES = 10 * 1024 * 1024 * 1024
 MAX_BACKUP_MEMBERS = 100_000
 MAX_MANIFEST_BYTES = 8 * 1024 * 1024
 MAX_MEMBER_NAME_BYTES = 4096
+MAX_CONTENT_SOURCE_BYTES = 1024 * 1024
+BACKUP_BUSY_TIMEOUT_SECONDS = 10.0
+BACKUP_BUSY_RETRY_SECONDS = 0.05
+BACKUP_PAGES_PER_STEP = 256
+# Python 3.10 exposes backup progress statuses, but not these named constants.
+_SQLITE_BUSY_CODES = frozenset({getattr(sqlite3, "SQLITE_BUSY", 5), getattr(sqlite3, "SQLITE_LOCKED", 6)})
+_CONTENT_SOURCE_MEMBERS = frozenset({CONTENT_SOURCES_JSON_NAME, CONTENT_SOURCES_NOTICE_NAME})
 _automatic_backup_lock = threading.Lock()
 _UPLOAD_URL_PATTERN = re.compile(
     r"/static/uploads/[A-Za-z0-9][A-Za-z0-9_.\-/]*"
 )
 _SAFE_UPLOAD_COMPONENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+
+
+class BackupBusyError(TimeoutError):
+    """A continuous SQLite lock prevented a complete backup snapshot."""
+
+    backup_busy = True
+
+
+def _backup_count_tables(schema_version: int) -> set[str]:
+    """Use the archive's schema, so new code can still back up old databases."""
+
+    tables = {"questions", "question_curriculums", "papers", "paper_questions"}
+    if schema_version >= 6:
+        tables.add("question_fingerprints")
+    if schema_version >= 11:
+        tables.update({"knowledge_points", "knowledge_point_curriculums", "question_knowledge_points"})
+    if schema_version >= 12:
+        tables.update({"question_sub_knowledge", "question_source_labels", "question_references", "document_import_receipts"})
+    return tables
 
 
 class RuntimeLock:
@@ -143,10 +177,28 @@ def _snapshot_database(source_path: Path, target_path: Path) -> dict[str, Any]:
     if not source_path.is_file():
         raise FileNotFoundError(f"数据库文件不存在: {source_path}")
     target_path.parent.mkdir(parents=True, exist_ok=True)
-    with closing(sqlite3.connect(source_path)) as source, closing(
-        sqlite3.connect(target_path)
+    busy_since = None
+
+    def progress(status, _remaining, _total):
+        nonlocal busy_since
+        if status not in _SQLITE_BUSY_CODES:
+            # Successful page copies reset the lock budget. Large, progressing
+            # databases do not have a total-duration limit.
+            busy_since = None
+            return
+        now = time.monotonic()
+        if busy_since is None:
+            busy_since = now
+        if now - busy_since >= BACKUP_BUSY_TIMEOUT_SECONDS:
+            raise BackupBusyError("数据库持续被其他写入操作占用，自动备份未完成；请稍后重试。")
+
+    # SQLite's connection busy handler must not delay the backup progress
+    # callback and consume an unbounded portion of its lock-wait budget.
+    with closing(sqlite3.connect(source_path, timeout=0)) as source, closing(
+        sqlite3.connect(target_path, timeout=0)
     ) as target:
-        source.backup(target)
+        source.backup(target, pages=BACKUP_PAGES_PER_STEP, progress=progress,
+                      sleep=BACKUP_BUSY_RETRY_SECONDS)
         # A source in WAL mode can copy that persistent journal setting to the
         # snapshot.  Convert the target back to a standalone database so no
         # unarchived -wal/-shm sidecar is required for recovery.
@@ -168,22 +220,15 @@ def _snapshot_database(source_path: Path, target_path: Path) -> dict[str, Any]:
                 "SELECT name FROM sqlite_master WHERE type='table'"
             ).fetchall()
         }
-        required_count_tables = [
-            "questions",
-            "question_curriculums",
-            "papers",
-            "paper_questions",
-        ]
-        if schema_version >= 6:
-            required_count_tables.append("question_fingerprints")
-        missing_required_tables = set(required_count_tables) - table_names
+        required_count_tables = _backup_count_tables(schema_version)
+        missing_required_tables = required_count_tables - table_names
         if missing_required_tables:
             raise RuntimeError(
                 "数据库结构不完整，缺少备份必需表: "
                 + ", ".join(sorted(missing_required_tables))
             )
         counts = {}
-        for table_name in required_count_tables:
+        for table_name in sorted(required_count_tables):
             if table_name in table_names:
                 counts[table_name] = int(
                     target.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()[0]
@@ -199,6 +244,7 @@ def _snapshot_database(source_path: Path, target_path: Path) -> dict[str, Any]:
         "row_counts": counts,
         "referenced_upload_count": len(referenced_uploads),
         "referenced_uploads": referenced_uploads,
+        "structured_upload_references": True,
     }
 
 
@@ -235,7 +281,8 @@ def _upload_archive_name(reference: str, *, url_prefix: str) -> str:
 
 
 def _database_upload_references(
-    connection: sqlite3.Connection, *, url_prefix: str = "/static/uploads"
+    connection: sqlite3.Connection, *, url_prefix: str = "/static/uploads",
+    include_structured: bool = True,
 ) -> set[str]:
     """Return safe raster members referenced by structured or legacy fields."""
 
@@ -247,9 +294,10 @@ def _database_upload_references(
         return set()
 
     references: set[str] = set()
-    selected_columns = [
-        name for name in ("image_paths", "content", "answer_markdown", "review") if name in columns
-    ]
+    requested_columns = ["image_paths", "content", "answer_markdown", "review"]
+    if include_structured:
+        requested_columns.extend(("content_tikz_assets", "answer_tikz_assets", "tikz_reference_image_path"))
+    selected_columns = [name for name in requested_columns if name in columns]
     if not selected_columns:
         return references
     query_columns = ", ".join(f'"{name}"' for name in selected_columns)
@@ -279,6 +327,16 @@ def _database_upload_references(
                     ) from exc
         for reference in embedded_question_assets(values_by_column.get("review") or ""):
             references.add(_upload_archive_name(reference, url_prefix=url_prefix))
+        if include_structured:
+            try:
+                for reference in structured_question_assets(
+                    values_by_column.get("content_tikz_assets"),
+                    values_by_column.get("answer_tikz_assets"),
+                    legacy_reference=values_by_column.get("tikz_reference_image_path") or "",
+                ):
+                    references.add(_upload_archive_name(reference, url_prefix=url_prefix))
+            except (ValueError, TypeError, RuntimeError) as exc:
+                raise RuntimeError(f"题目 {question_id} 包含无效 Native 插图引用") from exc
         for field_name in ("content", "answer_markdown"):
             text = values_by_column.get(field_name)
             if not isinstance(text, str):
@@ -377,16 +435,17 @@ def _write_zip_atomic(
             for path in sorted(payload_dir.rglob("*")):
                 if path.is_file():
                     archive.write(path, path.relative_to(payload_dir).as_posix())
-        # Windows' CRT rejects fsync/_commit on a read-only descriptor with
-        # EBADF. Reopen the completed archive for update so the durability
-        # barrier works on Windows as well as POSIX systems.
-        with temp_path.open("r+b") as handle:
-            os.fsync(handle.fileno())
-        os.replace(temp_path, output_path)
+        fsync_writable_file(temp_path)
+        replace_file_atomic(temp_path, output_path)
         output_path.chmod(0o600)
         _fsync_directory(output_path.parent)
     finally:
-        temp_path.unlink(missing_ok=True)
+        try:
+            temp_path.unlink(missing_ok=True)
+        except OSError:
+            # Antivirus scanners can briefly retain an owned temporary file.
+            # Deferred cleanup must not hide the original write failure.
+            pass
 
 
 def _prune_backups(output_dir: Path, retention: int | None) -> None:
@@ -419,14 +478,15 @@ def create_full_backup(
         raise RuntimeError("完整备份目录不能位于上传目录内部")
     if metadata_path.is_file() and metadata_path.name != "custom_metadata.json":
         raise RuntimeError("完整备份只允许归档 custom_metadata.json 元数据")
-    output_dir.mkdir(parents=True, exist_ok=True)
+    check_directory_access(output_dir, label="完整备份目录（data_backup/snapshots）", require_subdirectory=True)
     output_dir.chmod(0o700)
 
     now = dt.datetime.now(dt.timezone.utc)
     timestamp = now.strftime("%Y%m%dT%H%M%S%fZ")
     output_path = output_dir / f"mathbank-backup-{timestamp}.zip"
 
-    with tempfile.TemporaryDirectory(prefix=".mathbank-backup-", dir=output_dir) as temp:
+    with tempfile.TemporaryDirectory(prefix=".mathbank-backup-", dir=output_dir,
+                                     ignore_cleanup_errors=True) as temp:
         payload_dir = Path(temp) / "payload"
         payload_dir.mkdir()
         database_info = _snapshot_database(
@@ -443,6 +503,15 @@ def create_full_backup(
             metadata_target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(metadata_path, metadata_target)
 
+        # One scoped catalog snapshot accompanies the archive, not each row.
+        source_files = content_source_export_files()
+        if set(source_files) != _CONTENT_SOURCE_MEMBERS:
+            raise RuntimeError("资料来源声明文件不完整")
+        for name, data in source_files.items():
+            if not isinstance(data, bytes) or len(data) > MAX_CONTENT_SOURCE_BYTES:
+                raise RuntimeError("资料来源声明文件大小无效")
+            (payload_dir / name).write_bytes(data)
+
         manifest = {
             "format": "mathbank-full-backup",
             "format_version": BACKUP_FORMAT_VERSION,
@@ -451,6 +520,7 @@ def create_full_backup(
             "database": database_info,
             "upload_file_count": upload_count,
             "metadata_included": metadata_included,
+            "content_sources_included": True,
             "secrets_included": False,
             "files": _manifest_files(payload_dir),
         }
@@ -459,7 +529,10 @@ def create_full_backup(
     try:
         verify_full_backup(output_path)
     except Exception:
-        output_path.unlink(missing_ok=True)
+        try:
+            output_path.unlink(missing_ok=True)
+        except OSError:
+            pass
         raise
     _prune_backups(output_dir, retention)
     return output_path
@@ -629,6 +702,8 @@ def _validated_manifest(
             upload_names.append(name)
         elif name.startswith("metadata/"):
             metadata_names.append(name)
+        elif name in _CONTENT_SOURCE_MEMBERS:
+            pass
         elif name != database_name:
             raise RuntimeError(f"备份包含未知持久化资源: {name}")
         if not isinstance(expected, dict):
@@ -645,6 +720,17 @@ def _validated_manifest(
             raise RuntimeError(f"备份文件校验信息无效: {name}")
         if file_infos[name].file_size != expected_size:
             raise RuntimeError(f"备份文件大小不匹配: {name}")
+        if name in _CONTENT_SOURCE_MEMBERS and expected_size > MAX_CONTENT_SOURCE_BYTES:
+            raise RuntimeError("备份资料来源声明过大")
+
+    source_members = _CONTENT_SOURCE_MEMBERS.intersection(files)
+    if source_members and source_members != _CONTENT_SOURCE_MEMBERS:
+        raise RuntimeError("备份资料来源声明文件不完整")
+    if "content_sources_included" in manifest and (
+        type(manifest["content_sources_included"]) is not bool
+        or manifest["content_sources_included"] != bool(source_members)
+    ):
+        raise RuntimeError("备份资料来源声明与文件不一致")
 
     database_manifest = manifest.get("database")
     strict_upload_manifest = (
@@ -696,8 +782,22 @@ def verify_full_backup(archive_path: Path) -> dict[str, Any]:
             if not hmac.compare_digest(actual_hash, expected["sha256"]):
                 raise RuntimeError(f"备份文件校验失败: {name}")
 
+        if CONTENT_SOURCES_JSON_NAME in files:
+            try:
+                catalog = json.loads(_read_member_limited(
+                    archive, file_infos[CONTENT_SOURCES_JSON_NAME], MAX_CONTENT_SOURCE_BYTES
+                ).decode("utf-8"))
+                validate_content_sources(catalog)
+                notice = _read_member_limited(
+                    archive, file_infos[CONTENT_SOURCES_NOTICE_NAME], MAX_CONTENT_SOURCE_BYTES
+                ).decode("utf-8")
+                if not notice.strip():
+                    raise ValueError("来源说明为空")
+            except (UnicodeError, ValueError, RecursionError) as exc:
+                raise RuntimeError("备份资料来源声明格式无效") from exc
+
         database_name = f"database/{DATABASE_FILE.name}"
-        with tempfile.TemporaryDirectory(prefix="mathbank-verify-") as temp:
+        with tempfile.TemporaryDirectory(prefix="mathbank-verify-", ignore_cleanup_errors=True) as temp:
             database_copy = Path(temp) / DATABASE_FILE.name
             with archive.open(file_infos[database_name], "r") as source, database_copy.open(
                 "xb"
@@ -725,14 +825,7 @@ def verify_full_backup(archive_path: Path) -> dict[str, Any]:
                     ).fetchall()
                 }
                 row_counts = database_manifest.get("row_counts")
-                required_tables = {
-                    "questions",
-                    "question_curriculums",
-                    "papers",
-                    "paper_questions",
-                }
-                if schema_version >= 6:
-                    required_tables.add("question_fingerprints")
+                required_tables = _backup_count_tables(schema_version)
                 if not isinstance(row_counts, dict) or set(row_counts) != required_tables:
                     raise RuntimeError("备份数据库行数清单无效")
                 if not required_tables.issubset(table_names):
@@ -785,9 +878,27 @@ def verify_full_backup(archive_path: Path) -> dict[str, Any]:
                                     )
                                 ),
                             )
+                            if schema_version >= 12:
+                                from mathbank.db_migrations import _validate_sub_knowledge_schema
+                                _validate_sub_knowledge_schema(validation_connection)
+                            if schema_version >= 11:
+                                from mathbank.db_migrations import _validate_knowledge_point_schema
+                                _validate_knowledge_point_schema(validation_connection)
+                            if schema_version >= 12:
+                                from mathbank.db_migrations import _validate_question_reference_schema
+                                _validate_question_reference_schema(validation_connection)
+                                from mathbank.db_migrations import _validate_document_import_receipts
+                                _validate_document_import_receipts(validation_connection)
                     finally:
                         validation_engine.dispose()
-                referenced_uploads = _database_upload_references(connection)
+                if "structured_upload_references" in database_manifest and database_manifest["structured_upload_references"] is not True:
+                    raise RuntimeError("备份 Native 插图引用声明无效")
+                # Older v1/v2 writers did not capture Native-only references.
+                # Verify their documented legacy scope without inventing bytes
+                # that were never archived; new writers explicitly bind all.
+                referenced_uploads = _database_upload_references(
+                    connection, include_structured=database_manifest.get("structured_upload_references") is True
+                )
                 missing_uploads = referenced_uploads - set(file_infos)
                 if missing_uploads:
                     preview = ", ".join(sorted(missing_uploads)[:5])
@@ -914,7 +1025,7 @@ def _check_database_can_be_replaced(database_path: Path) -> None:
             connection.execute("ROLLBACK")
     except sqlite3.OperationalError as exc:
         error_code = getattr(exc, "sqlite_errorcode", None)
-        if error_code in {sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED} or "locked" in str(
+        if error_code in _SQLITE_BUSY_CODES or "locked" in str(
             exc
         ).lower():
             raise RuntimeError(
@@ -938,7 +1049,8 @@ def _create_raw_recovery_archive(
     output_dir.chmod(0o700)
     timestamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     output_path = output_dir / f"mathbank-raw-pre-restore-{timestamp}.zip"
-    with tempfile.TemporaryDirectory(prefix=".mathbank-raw-", dir=output_dir) as temp:
+    with tempfile.TemporaryDirectory(prefix=".mathbank-raw-", dir=output_dir,
+                                     ignore_cleanup_errors=True) as temp:
         payload = Path(temp) / "payload"
         payload.mkdir()
         if database_path.exists():
@@ -976,6 +1088,7 @@ def _restore_full_backup_unlocked(
     uploads_dir: Path | None = None,
     metadata_path: Path | None = None,
     safety_backup_dir: Path | None = None,
+    content_sources_dir: Path | None = None,
 ) -> Path:
     """Restore a verified backup; callers must ensure the app is stopped."""
 
@@ -986,16 +1099,27 @@ def _restore_full_backup_unlocked(
         metadata_path or (DATA_BACKUP_DIR / "custom_metadata.json")
     )
     safety_backup_dir = _absolute_path(safety_backup_dir or PRE_RESTORE_BACKUP_DIR)
+    content_sources_dir = _absolute_path(
+        content_sources_dir or (database_path.parent / "restored_content_sources")
+    )
 
     _validate_restore_target(database_path, directory=False)
     _validate_restore_target(uploads_dir, directory=True)
     _validate_restore_target(metadata_path, directory=False)
+    _validate_restore_target(content_sources_dir, directory=True)
+    # This is recovered historical documentation, never a program resource.
+    if content_sources_dir.resolve().is_relative_to(CONTENT_SOURCES_PATH.parent.resolve()):
+        raise RuntimeError("恢复资料来源声明不能写入当前程序资源目录")
+    if any(parent.is_symlink() for parent in content_sources_dir.parents):
+        raise RuntimeError("恢复资料来源声明目录不能经过符号链接")
     if database_path.is_relative_to(uploads_dir) or metadata_path.is_relative_to(
         uploads_dir
     ):
         raise RuntimeError("数据库或元数据文件不能位于待替换的上传目录内")
     if safety_backup_dir.is_relative_to(uploads_dir):
         raise RuntimeError("恢复前安全备份目录不能位于待替换的上传目录内")
+    if content_sources_dir.is_relative_to(uploads_dir):
+        raise RuntimeError("恢复资料来源声明目录不能位于待替换的上传目录内")
     if archive_path.is_relative_to(uploads_dir):
         raise RuntimeError("待恢复压缩包不能位于即将被替换的上传目录内")
 
@@ -1069,7 +1193,8 @@ def _restore_full_backup_unlocked(
                 "[Restore Warning] 已创建标准安全备份，但候选原始恢复包清理失败 "
                 f"(type={type(cleanup_error).__name__}): {raw_candidate}"
             )
-    with tempfile.TemporaryDirectory(prefix=".mathbank-restore-", dir=database_path.parent) as temp:
+    with tempfile.TemporaryDirectory(prefix=".mathbank-restore-", dir=database_path.parent,
+                                     ignore_cleanup_errors=True) as temp:
         extracted = Path(temp) / "extracted"
         restore_names = set(manifest["files"])
         database_manifest = manifest["database"]
@@ -1106,6 +1231,7 @@ def _restore_full_backup_unlocked(
         metadata_temp = metadata_path.with_name(
             f".{metadata_path.name}.restore-new-{token}"
         )
+        sources_target = sources_temp = None
         shutil.copy2(staged_database, database_temp)
         database_temp.chmod(0o600)
         uploads_temp.mkdir(mode=0o700)
@@ -1142,6 +1268,18 @@ def _restore_full_backup_unlocked(
         installed: list[Path] = []
         committed = False
         try:
+            if CONTENT_SOURCES_JSON_NAME in manifest["files"]:
+                content_sources_dir.mkdir(parents=True, exist_ok=True)
+                sources_target = content_sources_dir / safety_backup.stem
+                if sources_target.exists() or sources_target.is_symlink():
+                    raise RuntimeError("恢复资料来源声明目标已存在")
+                sources_temp = content_sources_dir / f".restore-new-{token}"
+                sources_temp.mkdir(mode=0o700)
+                for name in sorted(_CONTENT_SOURCE_MEMBERS):
+                    shutil.copy2(extracted / name, sources_temp / name)
+                    (sources_temp / name).chmod(0o600)
+                    fsync_writable_file(sources_temp / name)
+                _fsync_directory(sources_temp)
             for current, old in originals:
                 if current.exists():
                     os.replace(current, old)
@@ -1153,10 +1291,14 @@ def _restore_full_backup_unlocked(
             if manifest.get("metadata_included"):
                 os.replace(metadata_temp, metadata_path)
                 installed.append(metadata_path)
+            if sources_temp is not None:
+                os.replace(sources_temp, sources_target)
+                installed.append(sources_target)
             for parent in {
                 database_path.parent,
                 uploads_dir.parent,
                 metadata_path.parent,
+                content_sources_dir,
             }:
                 _fsync_directory(parent)
             committed = True
@@ -1187,7 +1329,9 @@ def _restore_full_backup_unlocked(
                     except OSError:
                         # A leftover hidden old path is safer than deleting live data.
                         pass
-            for staged in (database_temp, uploads_temp, metadata_temp):
+            for staged in (database_temp, uploads_temp, metadata_temp, sources_temp):
+                if staged is None:
+                    continue
                 try:
                     _remove_restore_path(staged)
                 except OSError:
@@ -1204,8 +1348,15 @@ def restore_full_backup(
     metadata_path: Path | None = None,
     safety_backup_dir: Path | None = None,
     runtime_lock_path: Path | None = None,
+    content_sources_dir: Path | None = None,
 ) -> Path:
-    """Restore while holding the same process lock as every server instance."""
+    """Restore with the shared process lock and preserve historical notices.
+
+    An archive's source statements are saved byte-for-byte under
+    ``content_sources_dir / safety_backup.stem``; the default documentation
+    directory is next to the target database. The current program catalog is
+    never replaced. The return value remains the pre-restore backup Path.
+    """
 
     with acquire_runtime_lock(runtime_lock_path):
         return _restore_full_backup_unlocked(
@@ -1214,4 +1365,5 @@ def restore_full_backup(
             uploads_dir=uploads_dir,
             metadata_path=metadata_path,
             safety_backup_dir=safety_backup_dir,
+            content_sources_dir=content_sources_dir,
         )

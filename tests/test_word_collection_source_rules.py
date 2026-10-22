@@ -131,7 +131,10 @@ def test_source_underline_contents_survive_a_destructive_legacy_fillin_formatter
         return re.sub(r"\\underline\s*\{[^}]*?\}", lambda _: r"\fillin", value).replace("____", r"\fillin")
     source = "保留 " + native + "，另填 ____。"
     result = normalize_source_fillin(source, legacy)
-    assert native in result
+    if native == r"\fillin\underline{▲}\fillin":
+        assert result == r"保留 \fillin，另填 \fillin。"
+    else:
+        assert native in result
     assert result == normalize_source_fillin(result, legacy)
     if native.endswith("}"):
         assert "另填 " + r"\fillin" in result

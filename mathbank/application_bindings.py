@@ -7,11 +7,29 @@ consults a caller-owned namespace; domain modules never import or discover main.
 from dataclasses import fields
 import functools
 import inspect
+from contextlib import ExitStack
 from types import ModuleType
 
 from mathbank.application_state import RuntimeState
 
 _MISSING = object()
+
+
+def _service_guards(function):
+    """Immutable composition metadata; no locks or runtime in domain modules."""
+    return {
+        ("mathbank.document_project_runtime", "_release_document_project_assets"): ('serialize_asset_lifecycle',),
+        ("mathbank.library_transfer_service", "export_library_transfer"): ('serialize_asset_lifecycle',),
+        ("mathbank.maintenance_service", "clean_orphaned_images"): ('serialize_asset_lifecycle',),
+        ("mathbank.question_commands", "create_question"): ('serialize_asset_lifecycle', 'serialize_curriculum_write', 'project_import_guard'),
+        ("mathbank.question_commands", "update_question"): ('serialize_asset_lifecycle', 'serialize_curriculum_write'),
+        ("mathbank.question_commands", "delete_question"): ('serialize_asset_lifecycle',),
+        ("mathbank.question_asset_service", "rollback_question_asset_promotions"): ('serialize_asset_lifecycle',),
+        ("mathbank.question_asset_service", "delete_unreferenced_question_assets"): ('serialize_asset_lifecycle',),
+        ("mathbank.question_asset_service", "promote_question_temp_assets"): ('serialize_asset_lifecycle',),
+        ("mathbank.question_asset_service", "_delete_task_temp_assets"): ('serialize_asset_lifecycle',),
+    }.get((function.__module__, function.__name__), ())
+
 
 
 class ApplicationBindings:
@@ -52,7 +70,23 @@ class ApplicationBindings:
         else:
             @functools.wraps(function)
             def bound(*args, **kwargs):
-                return function(*args, dependencies=self.dependencies(contract), **kwargs)
+                # Writers share the same application-owned curriculum lock and
+                # asset lifecycle lease as cleanup and retained-project import.
+                # Binding keeps these guards outside pure domain imports.
+                guards = _service_guards(function)
+                with ExitStack() as stack:
+                    if "serialize_asset_lifecycle" in guards:
+                        from mathbank.asset_lifecycle import ASSET_LIFECYCLE_LOCK
+                        stack.enter_context(ASSET_LIFECYCLE_LOCK)
+                    if "serialize_curriculum_write" in guards:
+                        stack.enter_context(self.state._METADATA_SAVE_LOCK)
+                    project_id = kwargs.get("import_project_id")
+                    if "project_import_guard" in guards and isinstance(project_id, str) and project_id:
+                        from fastapi import HTTPException
+                        if self.state.DOCUMENT_PROJECTS is None:
+                            raise HTTPException(409, "本地工程服务不可用，请保留校对稿。")
+                        stack.enter_context(self.state.DOCUMENT_PROJECTS.operation(project_id))
+                    return function(*args, dependencies=self.dependencies(contract), **kwargs)
         signature = inspect.signature(function)
         bound.__signature__ = signature.replace(parameters=[
             parameter for parameter in signature.parameters.values()

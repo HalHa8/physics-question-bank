@@ -51,7 +51,7 @@ def canonical(value):
 class RestoreDependencyNames(ast.NodeTransformer):
     def visit_Attribute(self, node):
         if isinstance(node.value, ast.Name) and node.value.id == "dependencies":
-            return ast.Name(id=DEPENDENCY_NAMES[node.attr], ctx=node.ctx)
+            return ast.Name(id=DEPENDENCY_NAMES.get(node.attr, node.attr), ctx=node.ctx)
         return self.generic_visit(node)
 
     def visit_Name(self, node):
@@ -147,6 +147,14 @@ def test_document_service_runs_without_application_globals(tmp_path, kind):
         return [{"content": "物体的速度为 $v=2\\,\\mathrm{m/s}$，求位移。", "answer_markdown": "原卷答案"}]
     def forbidden(*args, **kwargs):
         pytest.fail("Unexpected vision request in the native test")
+    # Inject the expanded contract explicitly without a factory, main, DB, or
+    # hidden runtime. Pure production helpers are safe to import independently.
+    from dataclasses import fields
+    from mathbank import application_imports as pure_helpers
+    helper_names = [field.name for field in fields(DocumentImportDependencies)][12:]
+    helpers = {name: getattr(pure_helpers, name) for name in helper_names
+               if name not in ('state', 'UPLOAD_DIR', 'get_current_curriculum')}
+    helpers.update(state=None, UPLOAD_DIR=str(tmp_path), get_current_curriculum=lambda: {})
     deps = DocumentImportDependencies(
         tasks=tasks, ocr_semaphore=BoundedSemaphore(4), tmp_upload_dir=tmp_path,
         upload_dir_rel="static/uploads", max_pdf_pages=80,
@@ -157,6 +165,7 @@ def test_document_service_runs_without_application_globals(tmp_path, kind):
         extract_docx=lambda *a, **k: {"success": True, "markdown": "1. 物体匀速运动。",
                                      "diagnostics": {}, "image_paths": []},
         reconcile_math=lambda *a, **k: {},
+        **helpers,
     )
     tasks.create("isolated", document_type=kind, temp_assets=[])
     try:

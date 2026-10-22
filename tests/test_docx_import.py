@@ -416,7 +416,8 @@ def test_docx_unknown_private_math_character_is_never_silently_preserved():
     <w:p><m:oMath><m:r><m:t>x&#xEC09;y</m:t></m:r></m:oMath></w:p>
     """
     result = extract_docx_markdown(_create_docx_package(body))
-    assert r"$x\text{?}y$ [公式结构待核对]" in result["markdown"]
+    assert r"$x\text{?}y$" in result["markdown"]
+    assert "[公式结构待核对]" in result["markdown"]
     assert "privateUse:U+EC09" in result["diagnostics"]["unsupported_omml_tags"]
     assert result["diagnostics"]["review_required"] == 1
 

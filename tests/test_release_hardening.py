@@ -15,6 +15,46 @@ from scripts import build_release, release_overlay
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
+INTERNAL_TOOL_MODULE_NAMES = (
+    "classification_proposals",
+    "knowledge_backfill",
+    "knowledge_backfill_apply",
+    "association_batch",
+    "question_exchange",
+    "difficulty_batch",
+)
+INTERNAL_TOOL_MODULE_PATHS = tuple(
+    f"{package}/{name}.py"
+    for package in ("mathbank", "scripts")
+    for name in INTERNAL_TOOL_MODULE_NAMES
+) + ("scripts/difficulty_classify.py", "scripts/backfill_question_references.py")
+NON_RUNTIME_RELEASE_SCRIPT_PATHS = (
+    "scripts/migrate_word_math_private_chars.py",
+    "scripts/build_release.py",
+)
+INTERNAL_TOOL_FORBIDDEN_MEMBERS = (
+    *INTERNAL_TOOL_MODULE_PATHS,
+    *NON_RUNTIME_RELEASE_SCRIPT_PATHS,
+    "scripts/resources/classification_proposal.example.json",
+    "scripts/resources/nested/protocol.json",
+    "scripts/resources/",
+    "MathBank/Knowledge_Backfill.py",
+    "Scripts/Resources/protocol.json",
+    "Scripts/Resources/",
+    "Scripts/Migrate_Word_Math_Private_Chars.py",
+    "Scripts/Build_Release.py",
+    "MathBank/Difficulty_Batch.py",
+    "Scripts/Difficulty_Batch.py",
+    "Scripts/Difficulty_Classify.py",
+    "mathbank/difficulty_batch.py/",
+    "scripts/difficulty_batch.py/",
+    "scripts/difficulty_classify.py/",
+    "scripts/backfill_question_references.py/",
+    "Scripts/Backfill_Question_References.py",
+    "tests/test_backfill_question_references.py",
+    "tests/test_question_references_exchange.py",
+)
+
 
 def test_physicsbank_portable_names_and_ci_download_contract():
     assert build_release.WINDOWS_ARCHIVE_STEM == "PhysicsBank-Windows-x64"
@@ -512,6 +552,8 @@ sys.modules["mathbank.database"] = database
 
 paths = types.ModuleType("mathbank.paths")
 paths.TEMPLATES_DIR = Path(".")
+paths.PROJECT_ROOT = Path(".")
+paths.EXPORT_PREFLIGHTS_DIR = Path(".system_generated/export_preflights")
 sys.modules["mathbank.paths"] = paths
 
 diagnostics = types.ModuleType("mathbank.latex_diagnostics")
@@ -520,6 +562,7 @@ sys.modules["mathbank.latex_diagnostics"] = diagnostics
 
 security = types.ModuleType("mathbank.asset_security")
 security.AssetSecurityError = RuntimeError
+security.SAFE_IMAGE_EXTENSIONS = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp"})
 security.resolve_upload_asset = lambda *_args, **_kwargs: None
 sys.modules["mathbank.asset_security"] = security
 
@@ -618,12 +661,215 @@ def _make_minimal_macos_tree(root):
     (root / "启动题库系统.command").chmod(0o755)
 
 
+def test_release_copy_excludes_internal_tools_and_preserves_runtime_imports(
+    tmp_path, monkeypatch
+):
+    source = tmp_path / "source"
+    staged = tmp_path / "staged"
+    for relative_path in (
+        *build_release.ROOT_FILE_ALLOWLIST,
+        "启动题库系统.command",
+        "scripts/__init__.py",
+        "scripts/backup.py",
+        "scripts/restore.py",
+        "scripts/search_questions.py",
+        "mathbank/backup.py",
+        "mathbank/db_migrations.py",
+        "mathbank/database.py",
+        "mathbank/sync_helper.py",
+        "mathbank/ocr_illustrations.py",
+        "mathbank/ocr_figure_review.py",
+        "mathbank/ocr_raster_layout.py",
+        *INTERNAL_TOOL_MODULE_PATHS,
+        *NON_RUNTIME_RELEASE_SCRIPT_PATHS,
+        "scripts/resources/classification_proposal.schema.json",
+        "scripts/resources/classification_proposal.example.json",
+        "scripts/resources/nested/protocol.json",
+        "MathBank/Knowledge_Backfill.py",
+        "Scripts/Resources/protocol.json",
+        # These names belong to other package paths and must survive.
+        "mathbank/resources/classification_proposal.example.json",
+        "mathbank/vendor/knowledge_backfill.py",
+        "mathbank/vendor/difficulty_batch.py",
+        "scripts/vendor/question_exchange.py",
+        "scripts/vendor/difficulty_classify.py",
+        "scripts/vendor/backfill_question_references.py",
+        "templates/template.tex",
+    ):
+        path = source / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"pass\n")
+    for relative_name in build_release.STATIC_ALLOWLIST:
+        path = source / "static" / relative_name
+        if relative_name in {"css", "js", "lib"}:
+            path.mkdir(parents=True, exist_ok=True)
+            (path / "runtime.txt").write_bytes(b"runtime asset\n")
+        else:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"runtime asset\n")
+
+    safe_modules = (
+        "mathbank.paths",
+        # A release branch may precede the optional product module. Test it
+        # only when this branch contains it; never borrow uncommitted sources.
+        *(("mathbank.sub_knowledge",) if (PROJECT_ROOT / "mathbank/sub_knowledge.py").is_file() else ()),
+        "mathbank.question_assets",
+        "mathbank.curriculums",
+        "mathbank.storage_access",
+        "scripts.local_launcher",
+        "scripts.windows_launcher",
+        "scripts.release_overlay",
+    )
+    # Real, standard-library-only runtime sources make the import smoke useful
+    # even in the release-guard CI job, which installs only pytest.
+    for relative_path in (
+        "mathbank/__init__.py",
+        *(name.replace(".", "/") + ".py" for name in safe_modules),
+    ):
+        path = source / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(PROJECT_ROOT / relative_path, path)
+    curriculum = {"必修一": {"1. 集合": ["1.1 集合的概念"]}}
+    for version in ("A", "B", "S", "H"):
+        path = source / "mathbank/resources/curriculums" / f"{version}.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(curriculum, ensure_ascii=False), encoding="utf-8")
+
+    for image_name in build_release.DOCS_IMAGE_ALLOWLIST:
+        path = source / 'docs/images' / image_name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes((PROJECT_ROOT / 'docs/images' / image_name).read_bytes())
+    monkeypatch.setattr(build_release, "BASE_DIR", str(source))
+    build_release.copy_app_files(staged, "启动题库系统.command")
+
+    for relative_path in (*INTERNAL_TOOL_MODULE_PATHS, *NON_RUNTIME_RELEASE_SCRIPT_PATHS):
+        assert not (staged / relative_path).exists(), relative_path
+    assert not (staged / "scripts/resources").exists()
+    # Case-insensitive source files may alias these paths on macOS/Windows.
+    assert not (staged / "MathBank/Knowledge_Backfill.py").exists()
+    assert not (staged / "Scripts/Resources").exists()
+    for relative_path in (
+        "main.py",
+        "scripts/backup.py",
+        "scripts/restore.py",
+        "scripts/search_questions.py",
+        "mathbank/backup.py",
+        "mathbank/db_migrations.py",
+        "mathbank/database.py",
+        "mathbank/sync_helper.py",
+        "mathbank/ocr_illustrations.py",
+        "mathbank/ocr_figure_review.py",
+        "mathbank/ocr_raster_layout.py",
+        "mathbank/resources/classification_proposal.example.json",
+        "mathbank/vendor/knowledge_backfill.py",
+        "mathbank/vendor/difficulty_batch.py",
+        "scripts/vendor/question_exchange.py",
+        "scripts/vendor/difficulty_classify.py",
+        "scripts/vendor/backfill_question_references.py",
+        "templates/template.tex",
+        *("mathbank/resources/curriculums/" + version + ".json" for version in ("A", "B", "S", "H")),
+        *(name.replace(".", "/") + ".py" for name in safe_modules),
+    ):
+        assert (staged / relative_path).read_bytes() == (source / relative_path).read_bytes()
+    assert build_release._release_path_violation(
+        "python/site-packages/vendor/knowledge_backfill.py"
+    ) is None
+    assert build_release._release_path_violation(
+        "python/site-packages/scripts/resources/protocol.json"
+    ) is None
+    assert build_release._release_path_violation(
+        "python/site-packages/vendor/difficulty_batch.py"
+    ) is None
+    assert build_release._release_path_violation(
+        "python/site-packages/vendor/difficulty_classify.py"
+    ) is None
+    assert build_release._release_path_violation(
+        "python/site-packages/vendor/backfill_question_references.py"
+    ) is None
+
+    smoke_code = """
+import importlib
+from pathlib import Path
+import sys
+root = Path(sys.argv[1]).resolve()
+sys.path.insert(0, str(root))
+for name in sys.argv[2:]:
+    module = importlib.import_module(name)
+    assert Path(module.__file__).resolve().is_relative_to(root), name
+from mathbank.curriculums import load_curriculum
+assert load_curriculum("A")["必修一"]["1. 集合"] == ["1.1 集合的概念"]
+"""
+    result = subprocess.run(
+        [sys.executable, "-I", "-B", "-c", smoke_code, str(staged), *safe_modules],
+        cwd=staged,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert not list(staged.rglob("__pycache__"))
+
+
+def test_git_ignores_only_local_batch_tools_and_their_dedicated_tests(tmp_path):
+    shutil.copy2(PROJECT_ROOT / ".gitignore", tmp_path / ".gitignore")
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    ignored_paths = [
+        *INTERNAL_TOOL_MODULE_PATHS,
+        "scripts/migrate_word_math_private_chars.py",
+        "tests/test_migrate_word_math_private_chars.py",
+        "tests/test_backfill_question_references.py",
+        "tests/test_question_references_exchange.py",
+        "scripts/resources/classification_proposal.schema.json",
+        "scripts/resources/classification_proposal.example.json",
+        *("tests/test_" + name + ".py" for name in (
+            "association_batch", "classification_proposals", "knowledge_backfill",
+            "knowledge_backfill_apply", "question_exchange", "difficulty_batch",
+        )),
+    ]
+    runtime_paths = [
+        "mathbank/sub_knowledge.py", "mathbank/ocr_illustrations.py",
+        "mathbank/ocr_figure_review.py", "mathbank/ocr_raster_layout.py",
+        "mathbank/resources/curriculums/A.json", "scripts/build_release.py",
+        "scripts/local_launcher.py", "scripts/backup.py", "scripts/restore.py",
+        "tests/test_release_hardening.py", "tests/test_sub_knowledge.py",
+        "tests/test_single_ocr_illustrations.py",
+        "mathbank/vendor/difficulty_batch.py", "scripts/vendor/difficulty_classify.py",
+        "scripts/vendor/backfill_question_references.py", "mathbank/question_references.py",
+        "tests/test_question_references.py", "tests/test_question_references_api.py",
+    ]
+    result = subprocess.run(
+        ["git", "check-ignore", "--no-index", "-z", "--stdin"],
+        input=("\0".join(ignored_paths + runtime_paths) + "\0").encode("utf-8"),
+        cwd=tmp_path, capture_output=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert set(result.stdout.decode("utf-8").rstrip("\0").split("\0")) == set(ignored_paths)
+
+
+@pytest.mark.parametrize("forbidden_path", INTERNAL_TOOL_FORBIDDEN_MEMBERS)
+def test_release_tree_rejects_internal_tool_files_and_directories(
+    tmp_path, forbidden_path
+):
+    _make_minimal_macos_tree(tmp_path)
+    path = tmp_path / forbidden_path
+    if forbidden_path.endswith("/"):
+        path.mkdir(parents=True, exist_ok=True)
+    else:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"must not ship\n")
+    with pytest.raises(RuntimeError, match="forbidden artifacts"):
+        build_release.assert_release_tree_clean(tmp_path, "macos")
+
+
 @pytest.mark.parametrize(
     "forbidden_path",
     [
         "static/.DS_Store",
         "static/test_uploads/capture.png",
+        "docs/pdf-layout-upgrade.md",
         "tests/test_release.py",
+        "tests/artifacts/capture.png",
+        ".pytest_cache/v/cache/nodeids",
         "mathbank/__pycache__/module.pyc",
         ".env",
         "math_question_bank.db",
@@ -736,6 +982,59 @@ def test_finished_archive_crc_manifest_and_sidecar(tmp_path):
     assert not any(name.startswith("PhysicsBank-") for name in names)
     if launcher.create_system == 3:
         assert launcher.external_attr >> 16 & 0o111
+
+
+@pytest.mark.parametrize(
+    "forbidden_path",
+    [
+        "docs/community-qa.md",
+        "tests/fixtures/school_math_symbols.json",
+        "tests/artifacts/capture.png",
+        ".pytest_cache/v/cache/nodeids",
+    ],
+)
+def test_finished_archive_rejects_documentation_and_test_artifacts(
+    tmp_path, forbidden_path
+):
+    staging = tmp_path / "staging"
+    _make_minimal_macos_tree(staging)
+    archive_path = build_release._build_archive(
+        staging,
+        str(tmp_path / "MathBank-macOS"),
+        "macos",
+        "启动题库系统.command",
+    )
+    with zipfile.ZipFile(archive_path, "a") as archive:
+        archive.writestr(forbidden_path, b"must not ship")
+
+    with pytest.raises(RuntimeError, match="forbidden artifacts"):
+        build_release.verify_zip_archive(
+            archive_path,
+            {"RELEASE-MANIFEST.json", "main.py", "启动题库系统.command"},
+        )
+
+
+@pytest.mark.parametrize("forbidden_path", INTERNAL_TOOL_FORBIDDEN_MEMBERS)
+def test_finished_archive_rejects_internal_tool_files_and_directories(
+    tmp_path, forbidden_path
+):
+    staging = tmp_path / "staging"
+    _make_minimal_macos_tree(staging)
+    archive_path = build_release._build_archive(
+        staging,
+        str(tmp_path / "MathBank-macOS"),
+        "macos",
+        "启动题库系统.command",
+    )
+    with zipfile.ZipFile(archive_path, "a") as archive:
+        archive.writestr(forbidden_path, b"" if forbidden_path.endswith("/") else b"must not ship\n")
+    # A CRC-valid, otherwise well-formed archive must fail the explicit package
+    # boundary before the manifest's extra-member check can catch it.
+    with pytest.raises(RuntimeError, match="forbidden artifacts"):
+        build_release.verify_zip_archive(
+            archive_path,
+            {"RELEASE-MANIFEST.json", "main.py", "启动题库系统.command"},
+        )
 
 
 def test_failed_final_verification_removes_archive_and_checksum(

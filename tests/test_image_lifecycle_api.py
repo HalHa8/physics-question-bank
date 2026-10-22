@@ -259,7 +259,7 @@ def test_review_image_visibility_preserves_shared_and_legacy_figures(
 
     from mathbank import sync_helper
     sync_helper.export_database_to_files(db_session)
-    exported = Path(sync_helper.MD_BACKUP_PATH).read_text()
+    exported = Path(sync_helper.MD_BACKUP_PATH).read_text(encoding='utf-8')
     assert Path(legacy_image).name in exported
     assert (Path(review_image).name in exported) == bool(shared_field)
 

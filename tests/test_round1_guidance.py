@@ -14,7 +14,8 @@ def test_safe_sharing_guidance_distinguishes_restore_from_sharing():
     assert "不要把整个程序文件夹打包" in guide
     assert "完整备份用于恢复自己的题库" in guide
     assert "系统备份会排除 API 密钥" in guide
-    assert "尚未提供" in guide
+    assert "ZIP" in guide and "题库分享" in guide
+    assert "尚未提供" not in guide
     assert "作废、重建可能泄露的密钥" in guide
     assert "onclick=" not in guide  # Documentation must not trigger model calls or downloads.
     assert "qaSafeSharingTitle" in guide

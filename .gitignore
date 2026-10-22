@@ -15,6 +15,16 @@
 *.db-shm
 *.db-wal
 *.db.*
+*.sqlite
+*.sqlite-journal
+*.sqlite-shm
+*.sqlite-wal
+*.sqlite.*
+*.sqlite3
+*.sqlite3-journal
+*.sqlite3-shm
+*.sqlite3-wal
+*.sqlite3.*
 *.failed_attempt
 *.log
 
@@ -30,9 +40,12 @@ data_backup/archive/*
 # 但通过排除 .gitkeep，使得 static/uploads 目录结构可以被提交到 GitHub 上
 static/uploads/*
 !static/uploads/.gitkeep
+/static_副本/
 
 # 5. 忽略 Python 运行缓存、测试缓存及本地临时草稿代码目录
 .system_generated/
+/restored_content_sources/
+/docs/local-audit/
 __pycache__/
 *.pyc
 *.pyo
@@ -68,7 +81,8 @@ Release_Output/
 
 # 9. 忽略组卷导出的本地 PDF 与 ZIP 归档文件（防误保存至项目目录）
 *.pdf
-!tests/fixtures/pdf_source_scopes/supported_cm_script.pdf
+# Only this declared synthetic glyph fixture may enter source Git.
+!/tests/fixtures/pdf_source_scopes/supported_cm_script.pdf
 *.zip
 *.tar.gz
 
@@ -82,6 +96,32 @@ tests/artifacts/*
 !tests/artifacts/.gitkeep
 
 # 11. 忽略 LaTeX 引擎本地编译产生的临时日志与中间产物
+# Local-only batch maintenance tooling, not application modules.
+/mathbank/association_batch.py
+/scripts/association_batch.py
+/tests/test_association_batch.py
+/mathbank/classification_proposals.py
+/scripts/classification_proposals.py
+/tests/test_classification_proposals.py
+/mathbank/knowledge_backfill.py
+/scripts/knowledge_backfill.py
+/tests/test_knowledge_backfill.py
+/mathbank/knowledge_backfill_apply.py
+/scripts/knowledge_backfill_apply.py
+/tests/test_knowledge_backfill_apply.py
+/mathbank/question_exchange.py
+/scripts/question_exchange.py
+/tests/test_question_exchange.py
+/tests/test_difficulty_batch.py
+/scripts/migrate_word_math_private_chars.py
+/tests/test_migrate_word_math_private_chars.py
+/scripts/resources/
+/mathbank/difficulty_batch.py
+/scripts/difficulty_batch.py
+/scripts/difficulty_classify.py
+/scripts/backfill_question_references.py
+/tests/test_backfill_question_references.py
+/tests/test_question_references_exchange.py
 *.aux
 *.out
 *.toc

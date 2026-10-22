@@ -1,4 +1,4 @@
-"""Bounded retries for PDF page recognition, without changing other AI flows."""
+"""Bounded PDF recognition requests; PhysicsBank never retries a paid POST."""
 
 from __future__ import annotations
 
@@ -11,15 +11,15 @@ import time
 from typing import Callable
 
 import requests
-from mathbank.ai_http import AIStreamResponseError, is_stream_read_timeout
-from mathbank.ai_providers import OCRResponseTimeoutError
 
 from mathbank.task_manager import TaskCancelled
+from mathbank.ai_http import AIStreamResponseError, collect_streamed_completion, is_stream_read_timeout
+from mathbank.ai_providers import OCRResponseTimeoutError
 from mathbank.document_requests import DOCUMENT_AI_TIMEOUT_SECONDS
 
 
 PDF_VISION_TIMEOUT_SECONDS = DOCUMENT_AI_TIMEOUT_SECONDS
-PDF_VISION_MAX_ATTEMPTS = 1  # PhysicsBank: a possibly billable request is never retried automatically.
+PDF_VISION_MAX_ATTEMPTS = 1
 PDF_VISION_RETRY_DELAY_SECONDS = 1
 PDF_VISION_MAX_RETRY_DELAY_SECONDS = 30
 _USAGE_FIELDS = ("prompt_tokens", "completion_tokens", "total_tokens")
@@ -86,7 +86,7 @@ class PDFVisionRequestError(ValueError):
         self.attempts = deepcopy(attempts)
         self.usage = collected_usage(attempts)
         details = "；".join(f"第 {item['attempt']} 次：{item.get('error', '失败')}" for item in attempts)
-        super().__init__(f"{message}（共尝试 {len(attempts)} 次，单次限时 {timeout_seconds:g} 秒）。{details}")
+        super().__init__(f"{message}（共尝试 {len(attempts)} 次，单次限时 {timeout_seconds:g} 秒）。{details} 请求可能已计费，未自动重试。")
 
 
 class PDFVisionResponseError(ValueError):
@@ -142,8 +142,10 @@ def request_pdf_vision(
     provider, payload: dict, *, post: Callable, validate: Callable,
     label: str, stage: str, page_index: int | None = None,
     timeout_seconds: float = PDF_VISION_TIMEOUT_SECONDS,
+    max_attempts: int = PDF_VISION_MAX_ATTEMPTS,
     check_cancelled: Callable[[], None] = lambda: None,
     report_attempt: Callable[[dict], None] = lambda _event: None,
+    on_response: Callable[[dict], None] | None = None,
 ) -> dict:
     """One physical POST, using the configured provider without paid retries.
 
@@ -151,29 +153,35 @@ def request_pdf_vision(
     with uncertain figure geometry is a successful response needing review;
     its validator must return that transcript instead of raising for a retry.
     """
+    if type(max_attempts) is not int or not 1 <= max_attempts <= 2:
+        raise ValueError("PDF 请求最多允许1或2次尝试。")
+    # Compatibility callers may still pass the upstream two-attempt budget.
+    # In PhysicsBank one user action never authorizes a paid automatic retry.
+    max_attempts = 1
     attempts: list[dict] = []
-    for number in range(1, PDF_VISION_MAX_ATTEMPTS + 1):
+    for number in range(1, max_attempts + 1):
         check_cancelled()
         item = {"stage": stage, "page_index": page_index, "attempt": number,
-                "max_attempts": PDF_VISION_MAX_ATTEMPTS, "timeout_seconds": timeout_seconds,
+                "max_attempts": max_attempts, "timeout_seconds": timeout_seconds,
                 "status": "running", "usage": {}, **_request_metadata(provider, payload)}
         attempts.append(item)
         report_attempt(deepcopy(item))
         started = time.monotonic()
         retryable = False
         retry_delay = PDF_VISION_RETRY_DELAY_SECONDS
+        response = None
         try:
             try:
-                visual_stream = stage in {"joint_page", "regions"}
-                response = post(provider, {**payload, "stream": True} if visual_stream else payload,
-                                timeout=(10, 300) if visual_stream else timeout_seconds,
-                                check_status=False, retry_connection=False, allow_redirects=False,
-                                **({"stream": True} if visual_stream else {}))
+                streaming = payload.get("stream") is True
+                response = post(provider, payload,
+                                timeout=(10, 300) if streaming else timeout_seconds,
+                                **({"stream": True} if streaming else {}),
+                                check_status=False, retry_connection=False, allow_redirects=False)
             except TaskCancelled:
                 raise
             except requests.exceptions.RequestException as exc:
                 if is_stream_read_timeout(exc):
-                    raise OCRResponseTimeoutError(f"{label}在 300 秒内未返回结果；请求可能已计费，未自动重试。") from exc
+                    raise OCRResponseTimeoutError(f'{label}连续 300 秒未返回数据；请求可能已计费，未自动重试。') from exc
                 retryable = not isinstance(exc, (requests.exceptions.SSLError, requests.exceptions.InvalidURL,
                                                  requests.exceptions.InvalidSchema, requests.exceptions.MissingSchema,
                                                  requests.exceptions.InvalidHeader, requests.exceptions.URLRequired,
@@ -192,23 +200,24 @@ def request_pdf_vision(
                 raise PDFVisionResponseError(f"{label}请求失败（HTTP {response.status_code}）。",
                                              retryable=response.status_code in (408, 425, 429) or 500 <= response.status_code < 600)
             try:
-                if visual_stream:
-                    from mathbank.ai_http import collect_streamed_completion
-                    body = collect_streamed_completion(response, max_content_chars=500_000,
+                body = (collect_streamed_completion(response, max_content_chars=500_000,
                         check_cancelled=check_cancelled, max_duration_seconds=timeout_seconds)
-                else:
-                    body = response.json()
+                        if payload.get("stream") is True else response.json())
             except TaskCancelled:
-                raise
-            except AIStreamResponseError:
                 raise
             except requests.exceptions.RequestException as exc:
                 if is_stream_read_timeout(exc):
-                    raise OCRResponseTimeoutError(f"{label}在 300 秒内未返回结果；请求可能已计费，未自动重试。") from exc
-                raise PDFVisionResponseError(f"{label}流式连接中断（{type(exc).__name__}）；未接受不完整结果。") from exc
-            except (TypeError, ValueError) as exc:
+                    raise OCRResponseTimeoutError(
+                        f"{label}连续 300 秒未返回数据；请求可能已计费，未自动重试。") from exc
+                raise PDFVisionResponseError(f"{label}请求中断，未自动重试。", retryable=False) from exc
+            except AIStreamResponseError as exc:
+                raise PDFVisionResponseError(f"{label}未正常结束或输出被截断，未采用不完整结果。", retryable=False) from exc
+            except Exception as exc:
                 raise PDFVisionResponseError(f"{label}服务未返回有效 JSON。") from exc
             usage = body.get("usage") if isinstance(body, dict) else None
+            if on_response is not None:
+                on_response(deepcopy(body))
+                check_cancelled()
             item["usage"] = {key: usage[key] for key in _USAGE_FIELDS
                              if isinstance(usage, dict) and isinstance(usage.get(key), int)
                              and not isinstance(usage[key], bool) and usage[key] >= 0}
@@ -248,7 +257,7 @@ def request_pdf_vision(
             if json_failure:
                 item["json_failure"] = json_failure
             item.update(status="failed", error=str(exc), elapsed_seconds=round(time.monotonic() - started, 3),
-                        retrying=retryable and number < PDF_VISION_MAX_ATTEMPTS)
+                        retrying=retryable and number < max_attempts)
             if item["retrying"]:
                 item["retry_delay_seconds"] = retry_delay
             report_attempt(deepcopy(item))
@@ -257,7 +266,15 @@ def request_pdf_vision(
             if not item["retrying"]:
                 if isinstance(exc, OCRResponseTimeoutError):
                     raise
-                raise PDFVisionRequestError(f"{label}失败；请求可能已计费，未自动重试", attempts, timeout_seconds=timeout_seconds) from exc
+                raise PDFVisionRequestError(f"{label}失败", attempts, timeout_seconds=timeout_seconds) from exc
+        finally:
+            if response is not None:
+                close = getattr(response, "close", None)
+                if callable(close):
+                    try:
+                        close()
+                    except OSError:
+                        pass
         deadline = time.monotonic() + retry_delay
         while time.monotonic() < deadline:
             check_cancelled()

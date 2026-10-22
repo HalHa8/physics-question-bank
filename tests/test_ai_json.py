@@ -167,6 +167,6 @@ def test_single_question_classification_prompt_requests_only_coarse_question_for
     assert '"chapter"' in prompt
     assert '"question_form"' in prompt
     assert "question_type" not in prompt
-    assert "包含且仅包含以下三个 key" in prompt
+    assert '"knowledge"' in prompt and '"knowledge_points"' in prompt
     assert "任何选择题一律为 `choice`" in prompt
     assert "严禁输出或猜测 `single_choice`、`multi_choice`" in prompt

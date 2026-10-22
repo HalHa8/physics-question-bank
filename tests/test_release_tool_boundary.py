@@ -71,7 +71,7 @@ def test_release_copy_excludes_source_tools_and_preserves_physics_runtime(tmp_pa
             path.write_bytes(b"runtime asset\n")
 
     safe_modules = (
-        "mathbank.paths", "mathbank.curriculums",
+        "mathbank.paths", "mathbank.curriculums", "mathbank.storage_access",
         "scripts.local_launcher", "scripts.windows_launcher", "scripts.release_overlay",
     )
     real_paths = ("mathbank/__init__.py", *(name.replace(".", "/") + ".py" for name in safe_modules))
@@ -117,8 +117,8 @@ assert "质点与参考系" in load_curriculum()["必修第一册"]["第一章 �
 assert {item["value"] for item in DEFAULT_QUESTION_TYPES} >= {"experiment", "detailed_answer"}
 '''
     result = subprocess.run(
-        [sys.executable, "-I", "-B", "-c", smoke_code, str(staged), *safe_modules],
-        cwd=staged, capture_output=True, text=True, check=False,
+        [sys.executable, "-I", "-X", "utf8", "-B", "-c", smoke_code, str(staged), *safe_modules],
+        cwd=staged, capture_output=True, text=True, encoding="utf-8", check=False,
     )
     assert result.returncode == 0, result.stderr
     assert not list(staged.rglob("__pycache__"))

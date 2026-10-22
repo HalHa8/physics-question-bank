@@ -1,12 +1,14 @@
 """Physics-specific contracts for the shared native PDF/Word upgrade."""
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from mathbank.curriculums import DEFAULT_QUESTION_TYPES, load_curriculum
 from mathbank.docx_helper import _new_diagnostics
 from mathbank.paper_parse_service import validate_import_knowledge
+from mathbank.import_classification import normalize_import_classifications
 from mathbank.source_metadata import (
     _explicit_section_type, apply_source_metadata_response,
     build_source_metadata_messages, prepare_word_source_metadata,
@@ -48,16 +50,34 @@ def test_import_leaf_validation_uses_physics_catalog_without_inventing_leaves():
     compulsory = next(iter(curriculum))
     chapter, leaves = next(iter(curriculum[compulsory].items()))
     row = {"category_compulsory": compulsory, "category_chapter": chapter}
-    validate_import_knowledge([row], curriculum, dependencies=None)
+    dependencies = SimpleNamespace(normalize_import_classifications=normalize_import_classifications)
+    validate_import_knowledge([row], curriculum, dependencies=dependencies)
     assert row["category_knowledge"] == ""
-    validate_import_knowledge([{**row, "category_knowledge": leaves[0]}], curriculum, dependencies=None)
-    with pytest.raises(ValueError, match="小节不属于"):
-        validate_import_knowledge([{**row, "category_knowledge": "虚构的数学小节"}], curriculum, dependencies=None)
+    valid = {**row, "category_knowledge": leaves[0]}
+    validate_import_knowledge([valid], curriculum, dependencies=dependencies)
+    assert valid["category_knowledge"] == leaves[0]
+    # V3 preserves source questions and asks for placement review rather than
+    # discarding the entire import on an uncertain chapter/section label.
+    invalid = {**row, "category_knowledge": "虚构的数学小节", "content": r"$I=2.0\,mA$，$\vec v=-3\,m/s$"}
+    original_body = invalid["content"]
+    validate_import_knowledge([invalid], curriculum, dependencies=dependencies)
+    assert invalid["content"] == original_body
+    assert invalid["category_knowledge"] == ""
+    assert invalid["classification_review"]["required"] is True
+    assert invalid["classification_review"]["original"]["category_knowledge"] == "虚构的数学小节"
     assert load_curriculum("P") == curriculum
 
 
-def test_markdown_upload_is_not_advertised_without_a_backend():
+def test_markdown_upload_has_a_real_source_only_backend(client, monkeypatch):
+    import main
     source = (Path(__file__).parents[1] / "static/js/import.js").read_text(encoding="utf-8")
-    assert "/api/upload/markdown-source" not in source
-    assert "仅支持 .tex、.pdf 或 .docx 试卷文件。" in source
-    assert "const sourceFormat = 'tex';" in source
+    assert "/api/upload/markdown-source" in source
+    def forbidden(*args, **kwargs):
+        pytest.fail("Uploading Markdown must not call a model")
+    monkeypatch.setattr(main, "post_chat_completion", forbidden)
+    body = "# 物理试卷\n\n1. $I=2.0\\,mA$，$\\vec v=-3\\,m/s$；电源正极接电流表正端。\n"
+    response = client.post("/api/upload/markdown-source", headers={"X-Local-Token": main.LOCAL_TOKEN},
+        files={"file": ("physics.md", body.encode("utf-8"), "text/markdown")})
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "success"
+    assert body.strip() in response.json()["source"]

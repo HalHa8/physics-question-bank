@@ -366,7 +366,7 @@ def test_truncated_layout_response_is_rejected_even_if_json_valid(tmp_path, monk
                                       check_cancelled=lambda: None)
 
 
-def test_layout_timeout_retries_once_with_exact_http_budget(tmp_path, monkeypatch):
+def test_layout_timeout_never_retries_an_ambiguous_paid_request(tmp_path, monkeypatch):
     from mathbank.ai_providers import resolve_ocr_provider
     import requests
     provider = resolve_ocr_provider("siliconflow", {"SILICONFLOW_API_KEY": "unused"})
@@ -383,12 +383,11 @@ def test_layout_timeout_retries_once_with_exact_http_budget(tmp_path, monkeypatc
     monkeypatch.setattr(pdf_figures, "post_chat_completion", post)
     report = {"visual_calls": 0, "usage": {}}
     from mathbank.ai_providers import OCRResponseTimeoutError
-    with pytest.raises(OCRResponseTimeoutError, match="未自动重试"):
+    with pytest.raises(OCRResponseTimeoutError, match='未自动重试'):
         pdf_figures.request_pdf_layout(str(path), "source", {"page_index": 0},
                                       diagnostics=report, check_cancelled=lambda: None)
-    assert len(calls) == report["visual_calls"] == 1
-    assert all(kw["timeout"] == 600 and kw["retry_connection"] is False for kw in calls)
-    assert report["attempts"][0]["status"] == "failed"
+    assert len(calls) == 1
+    assert calls[0]['timeout'] == 600 and calls[0]['retry_connection'] is False
 
 
 def test_native_layout_bad_geometry_does_not_repeat_paid_call(tmp_path, monkeypatch):

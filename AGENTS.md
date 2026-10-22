@@ -93,6 +93,9 @@
 - **截图纠错与会话保护**：`SingleOcrFigures` 在当前编辑会话持有题干/解析原图和图位；通过安全上传保存手动框选，支持补入占位、重裁当前配图与光标追加，无需另传图。图位唯一且内容快照未变时才应用，迟到识图/上传不得覆盖编辑或跨题串图。裁图同步 `uploadedImages` 和布局，草稿、正常保存/重载及 Word/PDF 原位图片继续可用；整张参考原图不当作普通插图。宽屏/375px、Retina 坐标、Esc、失败/部分成功和 Windows 长脚本须回归。专项 `test_physics_ocr_crops.py`、`test_single_ocr_illustrations.py`、`test_single_ocr_frontend.py`、`test_single_ocr_browser.py`、`test_ocr_table_wrappers.py`；两个有意变化的 OCR 算法分别记录审计指纹，其他后端及 OpenAPI 契约不变。
 
 ### 3.3 JSON 同步导出、完整备份与 AI 只读题库
+- **3.0.1分享任务与存储边界**：分享端点仍归library_transfer_service，新增4个提交/状态/下载接口；任务与锁属于RuntimeState，通过显式冻结依赖装配，不回搬到main。接收类仅用于两条ZIP上传路径，认证仍在原中间件，1文件/1字段、512MiB文件和有界开销/队列，私有暂存且异常关闭句柄。UUID回执绑定意图；断线/刷新只GET原任务，同UUID不重复追加，同包并发跟随已接受任务，服务重启不自动回放。提交结果不确定时保留图片并提示核实；显式新UUID仍是追加，不自动合并。正常关闭等待已接受任务，回执与诊断不落题文、SQL参数或密钥。
+- **Windows存储与性能**：storage_access标准库探针在初始化锁/数据库前及分享/备份输出前检查随机私有文件的创建、写入、fsync、替换、回读和清理，现有DB/WAL/SHM只无截断打开检查；已有服务就绪不探测，healthz/心跳不探测。不提权、不改ACL或迁移资料；导出不要求输入数据库/图片可写，纯文字包不要求配图写权限。fsync使用r+b，文件替换仅对Windows32/33短暂有界重试，不能延伸为付费请求重试。备份连续busy有界退出，正常大库进度不设总时限；分享/同步分批、引用IN不超过500、指纹executemany仍在同一事务，SimHash结果/版本不变。
+- **隐私与兼容验收**：Git忽略db/sqlite/sqlite3及伴随文件、static_副本、恢复来源和本地审计；仅声明的合成PDF fixture例外，不能屏蔽公开产品文档和物理资源。旧浏览器弹窗高度先vh后dvh，保证保存/关闭可见，不能缩小正文代替主体滚动。专项见test_storage_access、test_gitignore_privacy、test_library_transfer_tasks/api/upload/windows、test_physics_sharing_tasks/curriculum及test_editor_viewport_browser；旧接口操作指纹不变，只逐项审阅2个旧算法和新增函数/接口。
 - **JSON 同步导出 (`data_backup/questions_backup.json`)**：后台异步导出题目字段，便于检索与兼容旧流程；它不含数据库约束和完整上传目录，**不是灾难恢复用完整备份**。
 - **可验证完整备份 (`data_backup/snapshots/mathbank-backup-*.zip`)**：通过 SQLite 在线快照保存数据库、数据库引用的 `static/uploads/` 文件及自定义元数据，并在 `manifest.json` 记录逐文件 SHA-256、大小、表计数与结构版本；明确排除 `.env`、本地 Token 和 API 密钥。创建并复验使用 `python3 -m scripts.backup`，仅验证使用 `python3 -m scripts.restore <备份.zip>`。
 - **恢复安全边界**：实际恢复必须完全关闭服务并显式运行 `python3 -m scripts.restore <备份.zip> --apply --yes`。服务在首次访问数据库前持有跨平台运行锁，恢复 API/CLI 必须持有同一把锁；锁被占用时必须停止，不得用 PID 信号探测替代。恢复前先创建已验证安全备份；若当前数据库已损坏或缺失而无法生成标准快照，则保留原数据库、WAL/SHM、上传和元数据的原始灾难恢复包，再原子替换并在失败时回滚。默认不带 `--apply` 只检查，不能修改现有数据。
@@ -221,6 +224,7 @@
 
 ### 3.12 可编辑 Word 试卷导出
 - **解耦与原生 OMML**：`mathbank.word_export_helper` 使用 python-docx 生成试卷结构，公式批量由 Pandoc 转为 Word 原生 OMML (`m:oMath`)，导出默认返回包含试卷正文与含答案解析两份文档的 `.zip` 打包。
+- **显式正体常数与物理变量**：仅对完整控制词 `\eu` / `\upe` / `\iu` / `\upi`，在 Word 转换副本中保留其正体 e/i 语义，支持无花括号的分式与上下标；Pandoc 和 PNG 兜底共用转换，缓存键和失败诊断仍保留原公式。不推断普通 `i`（电流）、`e`（电荷）或改变单位大小写、矢量、正负号和有效数字；未知宏、定义、代码、路径、TikZ 与公式锁不猜改。`fraction_style` 将这四个已知常数视为零参数原子，保留上下标/嵌套分式紧凑规则。专项为 `tests/test_fraction_style.py` 与 `tests/test_word_examzh_constants.py`，后者须用真实 Pandoc 验证可编辑 OMML 和原文不变。
 - **图片选项导出**：`choices` 内图片必须按原选项顺序写入带 A/B/C/D 标号的 Word 单元格，不能抽到题干旁或作为题末图片重复输出。纯图片选项使用无边框的标号/图片双单元格，让标号位于图片正左侧垂直居中，不能落在图片底部。选项渲染须传入题目图片资源与独立布局设置，图片路径不计入选项文字长度；四个纯图片或短文字图片选项优先一行四列，较长文字按内容转为两列或一列，图片始终按单元格可用宽高等比例缩放。
 - **复杂表格与图片锚点**：Word 导出必须先在完整题干中提取 `tabular`，再拆分普通段落，禁止因单元格图片周围空行而泄漏原始 LaTeX。正文与表格内 Markdown 图片按原锚点写入；只有题末可分离图片簇使用 `figure_align`，前面含正文或表格图片时也必须独立生效。三列比较表总宽固定为 9000 DXA，短标签首列窄于两列正文，`tblW`、`tblGrid` 与 `tcW` 必须一致，单元格图片同时受最大宽高约束。`\multicolumn` 与 `\multirow` 必须分别生成原生 Word 横向和纵向合并，不得以源码文字或重复空单元格代替。
 - **Pandoc 按需运行组件**：Word 导出前先复用通过启动校验的用户指定、MathBank 管理或系统 Pandoc；缺失时须由用户一次确认后，由 `mathbank.runtime_components` 按 Windows x64 / macOS arm64 / macOS x86_64 下载固定版本。下载顺序为 Pandoc 官方 GitHub Release 后 SourceForge 备用镜像，两者必须通过同一份固定 SHA-256、大小、安全解压、`pandoc --version` 与真实 OMML DOCX smoke 后才能原子安装到 `.system_generated/runtime/pandoc/`；安装完成后必须自动续接原 Word 导出，不得要求用户选路径、配 PATH 或重启服务。
@@ -237,6 +241,14 @@
 - 前端启动 1 秒静默检测，有新版本时设置齿轮亮起红点；提供专属【版本更新】控制台与版本忽略功能。
 
 ### 3.14 后端功能边界与渐进式解耦
+- **独立物理知识点与数据库版本**：本项目 v11 新增独立身份、P教材推荐位置、题目主辅关系三表；当前 PhysicsBank schema v12 再增加历史细分关系、来源标记、引用与文档入库回执四表和排序索引，不等同于 MathBank v12/v14。升级必须先生成独立校验快照再事务化迁移，验证唯一约束/索引/FK/值域；完整备份计数并验证所有已知表。旧题位置、标签、正文、解析和配图不重写，空标注合法。只补缺失的80项自建phy:目录与P路径，保留教师名称、别名及local:自建点；不导入数学平台大目录。旧程序不能直接打开新版库，回退用升级前完整备份并另存新增资料。
+- **知识点读写与检索**：纯逻辑在knowledge_points，HTTP边界在knowledge_point_service，不反向导入入口、不在GET写库。题目标注与题目及资产共用事务；缺参保留、显式[]清空，非法编码/重复点/角色/状态拒绝。人工点为confirmed；AI仅复用当前分类/拆题请求，按已安装目录和逐字证据给suggested，不自动新建或采信模型自报确认。编辑器和导入题卡明确显示“待确认”，教师逐项确认、改主辅或移除。保留旧knowledge_points/point_match/point_role/point_unlabeled别名，并支持新版精确ANY/ALL/状态过滤。
+- **知识点状态与兼容层**：api.js中的KnowledgePointState是唯一状态；knowledge-points.js仅导出旧PhysicsKnowledgePoints兼容别名。绑定既有EditorState、保存快照、Dirty和草稿，迟到目录/创建/分类/保存不能覆盖新会话、教材或编辑。目录只读完整分页，教材位置仅推荐范围而非知识点身份。用textContent展示不可信名称。桌面/375px实测主辅、待确认、人工确认、组合检索、自建别名、草稿、查重决策及迟到响应。
+- **新增领域边界**：library_transfer_service负责分享包HTTP事务，document_project_runtime保留上游实验边界；仍由application_factory、冻结依赖契约、domain_registry及RuntimeState装配。文档服务扩展依赖必须明确注入，不能以None默认掩盖漏装。源件存储在取得运行锁及数据库就绪后打开；initialize=False和纯导入不得落盘、访问数据库、启动线程或模型。
+- **题库分享**：library_transfer执行版本化清单、哈希、ZIP路径/链接/大小/栅格与关系预审；API导入前完整备份，失败不写库、不覆盖旧题。导入只追加，重复包不自动合并；只绑定包内引用，不串联接收端旧题。phy:/local:身份与物理证据须往返保真。排除密钥、配置、程序及无关图片，仍需检查材料许可和私人信息；content_sources只说明实际采用的来源，不继承数学题库授权声明。
+- **文档、费用和实验开关**：PDF_CLOUD_ONLY=True与上游3.0一致，本地PDF工程、片段拆题和检查点实验保留但不开放，不以组件测试冒充功能可用。Word恢复需用户点击并确认可能产生费用。额外原文核验默认关闭；PDF最多1次、Word最多3次已选择的核验，修正/复核追加预算为0。一次付费请求后不自动兜底、重试或静默换模型；保留成功题组、原文、页码、类型化配置/超时错误与取消边界。PDF低分辨率只用于请求副本，不改变预览/裁图像素。
+- **导出与资产**：Markdown表格、列表和图片尺寸在预览与Word/PDF中保持同一语义；缺图在本地编译前提示，只在导出副本调整格式。后台JSON导出合并请求但不丢掉期间的新写入，失败不把已提交入库误报失败。过期/取消资产经引用核对后可恢复保留；资产与教材写入锁由装配层绑定。
+- **验收与契约**：相关行为回归、全量、pip check和所有JS语法外，页面/导入/导出/Windows变更补隔离浏览器、已有原生工具与空库启动。算法指纹逐项记录旧哈希、来源、理由及行为测试；保留其他旧哈希和HTTP操作，不整体重录掩盖失败。当前4个可选表单扩展须保留原必填字段及默认关闭的付费选项。
 - 三阶段拆分已完成：`main.py` 仅配置 Windows 输出编码、调用应用工厂、导出 `app` 并安装旧入口适配。`mathbank.application_factory` 负责明确的应用装配与启动初始化，`api_routes` 保存 HTTP 注册清单，`domain_registry` 保存领域与依赖契约的对应关系；保留 `uvicorn main:app`、原有路由、函数名及调用参数。
 - 第二阶段领域：`question_queries` 负责查询、统计与查重入口，`question_commands` 负责题目保存、布局与关联，`question_asset_service` 负责资源晋升、引用与清理；`paper_record_service` 负责试卷记录，`paper_export_service` 负责验证和导出编排，继续复用既有 LaTeX/Word 排版引擎。资源操作仍须服从原事务、回滚及备份边界，不得另建数据库。
 - 第三阶段领域：`ocr_service`、`solve_service`、`drawing_service`、`classification_service`、`paper_parse_service`、`paper_selection_service` 按 AI 任务拆分，继续复用原有供应商、思考策略、HTTP 与提示构建器；`settings_service`、`curriculum_service` 分别管理模型设置和教材元数据；`runtime_service`、`maintenance_service` 管理安全、生命周期和就绪后维护，`image_upload_service`、`system_routes` 承接上传与系统接口。
@@ -296,6 +308,7 @@
 - **公式与分页实物回归**：公式原生验证使用 `MATHBANK_TEST_MATH_NATIVE=1 python3 -m pytest --noconftest tests/test_math_markdown.py tests/test_math_preview_regressions.py`。实际浏览器回归使用可选的 `agent-browser` CLI 与 Chromium，执行 `MATHBANK_TEST_BROWSER=1 python3 -m pytest --noconftest tests/test_preview_browser.py`，在不复制数据库、上传文件或凭据的临时源码副本中启动服务；覆盖规范/裸公式表格、缩窗、超长页多轮重排、标题连续输入、同页/跨页拖拽及取消、三种模板和过期回调。该工具仅用于验证，不引入前端构建或运行时依赖；浏览器中须核对公式内容和题目底部边界，不能只统计 KaTeX 节点或题目 ID。
 
 ## 8. PhysicsBank 物理适配约束
+- **本次解耦分支合入主线（2026-10-22）**：用户明确要求将解耦分支更新合并到主线，结合此前实际更新后推送 GitHub 的约定，本次可在独立工作树双亲合并并验收后，安全快进本地 main 并正常推送 origin/main。不得丢弃 main 独有的截图入口、可选单题解答、原图纠错、撤销、图片缩放和编译错误诊断。每日上游任务仍以 codex/refactor-backend-modules 为基线，本次手动集成不擅自修改该定时规则。只交付源码：不迁移真实数据库、不停止现有服务、不手工打包、不创建 Tag/Release，不复制私人题库或凭据；首次使用 schema 12 的升级与备份注意事项须向用户说明。历史段落的禁止推 main 仅限制对应自动巡检，不能据此拒绝本次明确主线集成。
 - **每次项目对话先查上游**：用户已要求在以后每次与 MathBank/PhysicsBank 开发有关的对话中，先检查 `JudgePeach/math-question-bank` 的远端 `main` 是否有新提交，再开展本次工作。有新提交时先看提交范围、现有未提交改动及服务状态，安全地合入通用功能并做物理适配和验证；无更新则简要说明后继续。用户当次明确要求不更新、仓库有冲突或更新会危及本地数据时不得强行合并，须报告原因。此约定只在实际会话任务中执行，不是后台定时监听，也不授权自动推送 GitHub、打包或发布。
 - **增量同步记录**：上游适配状态保存在 `docs/upstream-sync.md`。开始下一轮前检查全部现有工作树中的该记录，优先复用本任务已有干净更新分支，不重复建立相同改动。最新观察提交、完整成功基线与逐项部分适配必须分开记录；待处理导入能力和依赖升级不能因观察到最新 SHA 就标为完成。无新增上游提交且没有可继续的待处理批次时不改代码、不重复验收；此前待处理批次获准继续后按记录推进，不重复索取已取得的授权。未提交工作重叠、额外系统软件或数据库迁移仍须先报告，不强行并入 `main`。
 - **每日上游任务的补充授权（2026-10-09）**：长期更新基线已确定为 `codex/refactor-backend-modules`。在干净独立更新分支中按领域适配，验收后安全快进或合并到解耦分支；保护主目录 `main` 的未提交工作。允许在独立验证环境安装或升级适配所需依赖，记录固定版本与 `pip check`，不得改动当前可用运行环境。实际代码更新验收通过后正常推送解耦分支至已核实的 `origin`（`HalHa8/physics-question-bank`），先获取并审阅远端状态，禁止强推、推送 `main` 或操作 Tag/Release，不打包、不打断用户服务。核实远端 SHA 并查看 CI，未完成或失败须如实报告。推送成功的实际更新附一段适合转发到 physicBank QQ 群的通知，总长度不超过 200 字符（含标点和链接），只描述已完成能力，不自动发群。无实际更新时不生成群通知。

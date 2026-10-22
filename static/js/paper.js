@@ -12,6 +12,9 @@
     const STORAGE_KEY_META = 'physicsbank_paper_meta';
     const STORAGE_KEY_COLLAPSED = 'physicsbank_paper_filter_collapsed';
     const PAPER_STREAM_PAGE_SIZE = 15;
+    const PAPER_QUESTION_CACHE_LIMIT = 120;
+    const A4_PAGE = Object.freeze({ width: 794, height: 1123, margin: 96 });
+    const paperQuestionCacheAccess = new Map();
 
     // Global Store State
     window.PaperStore = {
@@ -29,9 +32,16 @@
             compulsory: '',
             chapter: '',
             knowledge: '',
+            sub_knowledge: [],
+            sub_knowledge_mode: 'any',
             question_type: '',
             difficulty: '',
             keyword: '',
+            knowledge_point_codes: [],
+            knowledge_point_mode: 'any',
+            knowledge_point_role: 'main',
+            knowledge_point_status: 'all',
+            knowledge_point_unlabeled: false,
             tab: 'all' // 'all' or 'selected'
         },
         isFilterCollapsed: true,
@@ -152,6 +162,44 @@
         if (window.adaptChoicesGridLayout) window.adaptChoicesGridLayout(block);
         if (window.scheduleActiveA4Repagination) window.scheduleActiveA4Repagination();
     };
+    // Bound complete off-cart questions and answer objects across long paging sessions.
+    // The visible page, selected paper and in-flight edits always retain their objects.
+    window.prunePaperQuestionCache = function () {
+        const store = window.PaperStore;
+        const cartIds = new Set(store.cart.map(item => Number(item.id)));
+        const protectedIds = new Set(store.bankQuestions.map(question => Number(question.id)));
+        store.answerLoadingIds.forEach(qid => protectedIds.add(Number(qid)));
+        if (window.EditorState && window.EditorState.questionId) protectedIds.add(Number(window.EditorState.questionId));
+        Object.keys(store.questionsMap).forEach(key => {
+            const qid = Number(key);
+            if (typeof window.hasPendingFigureLayoutWrite === 'function' && window.hasPendingFigureLayoutWrite(qid)) {
+                protectedIds.add(qid);
+            }
+            if (!paperQuestionCacheAccess.has(qid)) paperQuestionCacheAccess.set(qid, true);
+        });
+        store.bankQuestions.forEach(question => {
+            const qid = Number(question.id);
+            paperQuestionCacheAccess.delete(qid);
+            paperQuestionCacheAccess.set(qid, true);
+        });
+        let count = Object.keys(store.questionsMap).filter(key => !cartIds.has(Number(key))).length;
+        for (const qid of paperQuestionCacheAccess.keys()) {
+            if (!store.questionsMap[qid]) {
+                paperQuestionCacheAccess.delete(qid);
+                continue;
+            }
+            if (count <= PAPER_QUESTION_CACHE_LIMIT) continue;
+            if (cartIds.has(qid) || protectedIds.has(qid)) continue;
+            delete store.questionsMap[qid];
+            delete store.answerCache[qid];
+            delete store.answerErrors[qid];
+            store.expandedAnswerIds.delete(qid);
+            paperQuestionCacheAccess.delete(qid);
+            count -= 1;
+        }
+    };
+
+    window.applyPaperPreviewZoom = applyPaperPreviewZoom;
 
     // Load State from LocalStorage
     function loadStateFromStorage() {
@@ -211,6 +259,7 @@
             }
         }
         updateCartBadges();
+        if (typeof window.prunePaperQuestionCache === 'function') window.prunePaperQuestionCache();
     }
 
     function saveMetaToStorage() {
@@ -240,7 +289,26 @@
         q.has_answer = Boolean(q.answer_markdown.trim());
     }
 
-    async function loadPaperQuestionAnswer(qid) {
+    let paperAnswerRevision = 0;
+    function getPaperReferenceRefreshIds() {
+        const ids = new Set(window.PaperStore.expandedAnswerIds);
+        if (window.PaperStore.activeWorkspace === 'paper') {
+            const visible = window.PaperStore.bankQuestions.concat(window.PaperStore.cart
+                .map(item => window.PaperStore.questionsMap[item.id]).filter(Boolean));
+            visible.forEach(question => {
+                if ((question.question_references || []).some(item => item.field === 'content')) ids.add(question.id);
+            });
+        }
+        return ids;
+    }
+    function refreshExpandedPaperReferences() {
+        paperAnswerRevision += 1;
+        Array.from(getPaperReferenceRefreshIds()).forEach(qid => loadPaperQuestionAnswer(qid, true));
+    }
+    window.addEventListener('focus', refreshExpandedPaperReferences);
+    window.addEventListener('mathbank-question-mutated', refreshExpandedPaperReferences);
+
+    async function loadPaperQuestionAnswer(qid, refresh = false) {
         qid = parseInt(qid, 10);
         if (!qid) return;
         if (window.PaperStore.answerLoadingIds.has(qid)) {
@@ -250,12 +318,13 @@
 
         const q = window.PaperStore.questionsMap[qid];
         if (q) seedPaperAnswerCache(q);
-        if (hasCachedPaperAnswer(qid)) {
+        if (hasCachedPaperAnswer(qid) && !refresh) {
             updatePaperQuestionAnswer(qid);
             return;
         }
 
         window.PaperStore.answerLoadingIds.add(qid);
+        const requestRevision = paperAnswerRevision;
         delete window.PaperStore.answerErrors[qid];
         updatePaperQuestionAnswer(qid);
 
@@ -263,13 +332,28 @@
             const response = await fetch(`/api/questions/${qid}`);
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
             const detail = await response.json();
+            if (requestRevision !== paperAnswerRevision
+                    || (detail.id != null && Number(detail.id) !== qid)) return;
             const answer = typeof detail.answer_markdown === 'string'
                 ? detail.answer_markdown
                 : '';
             window.PaperStore.answerCache[qid] = answer;
-            if (q) {
-                q.answer_markdown = answer;
-                q.has_answer = Boolean(answer.trim());
+            const currentQuestion = window.PaperStore.questionsMap[qid];
+            if (currentQuestion) {
+                const oldContentReferences = JSON.stringify((currentQuestion.question_references || [])
+                    .filter(item => item.field === 'content'));
+                currentQuestion.answer_markdown = answer;
+                currentQuestion.question_references = Array.isArray(detail.question_references)
+                    ? detail.question_references : [];
+                if (typeof detail.content === 'string' && detail.content !== currentQuestion.content) {
+                    // A reference refresh cannot overwrite the visible stem.
+                    currentQuestion.question_references = currentQuestion.question_references
+                        .filter(item => item.field !== 'content');
+                }
+                currentQuestion.has_answer = Boolean(answer.trim());
+                if (oldContentReferences !== JSON.stringify(currentQuestion.question_references.filter(item => item.field === 'content'))) {
+                    refreshPaperQuestionReferenceStem(currentQuestion);
+                }
             }
         } catch (error) {
             console.error('Load paper question answer error:', error);
@@ -277,6 +361,10 @@
         } finally {
             window.PaperStore.answerLoadingIds.delete(qid);
             updatePaperQuestionAnswer(qid);
+            if (typeof window.prunePaperQuestionCache === 'function') window.prunePaperQuestionCache();
+            if (requestRevision !== paperAnswerRevision && getPaperReferenceRefreshIds().has(qid)) {
+                loadPaperQuestionAnswer(qid, true);
+            }
         }
     }
 
@@ -290,7 +378,9 @@
         }
 
         window.PaperStore.expandedAnswerIds.add(qid);
-        loadPaperQuestionAnswer(qid);
+        const question = window.PaperStore.questionsMap[qid];
+        const references = question && question.question_references;
+        loadPaperQuestionAnswer(qid, !Array.isArray(references) || references.length > 0);
     };
 
     window.retryPaperQuestionAnswer = function (qid) {
@@ -487,6 +577,7 @@
     // Workspace View Switcher
     const originalSelectWorkspace = window.selectWorkspace;
     window.selectWorkspace = function (workspaceId, workspaceName) {
+        if (workspaceId === 'qa' && window.__qaEnabled === false) return;
         // The initial flash-prevention class keeps the first workspace visible
         // during page boot.  Once the user makes an explicit workspace choice,
         // remove it so its !important rules cannot mask the target workspace.
@@ -549,7 +640,9 @@
 
     // Toggle Part 2 Filter Bar Collapsing
     function refreshPaperFilterSummary() {
-        const count = ['compulsory', 'chapter', 'knowledge', 'question_type', 'difficulty'].filter(key => window.PaperStore.filters[key]).length;
+        const count = ['compulsory', 'chapter', 'knowledge', 'question_type', 'difficulty'].filter(key => window.PaperStore.filters[key]).length
+            + (window.PaperStore.filters.sub_knowledge?.length ? 1 : 0)
+            + (window.PaperStore.filters.knowledge_point_codes?.length || window.PaperStore.filters.knowledge_point_unlabeled ? 1 : 0);
         const label = document.getElementById('paperFilterToggleTxt');
         const button = document.getElementById('togglePaperFilterBtn');
         if (label) label.textContent = count ? `筛选 (${count})` : '筛选';
@@ -576,9 +669,22 @@
         document.getElementById(meta ? 'togglePaperMetaBtn' : 'togglePaperAiBtn')?.setAttribute('aria-expanded', String(open));
     };
     window.clearPaperFilters = function () {
-        Object.assign(window.PaperStore.filters, {compulsory:'', chapter:'', knowledge:'', question_type:'', difficulty:''});
+        Object.assign(window.PaperStore.filters, {compulsory:'', chapter:'', knowledge:'', sub_knowledge:[], sub_knowledge_mode:'any', question_type:'', difficulty:''});
+        KnowledgePointState.setFilter('paper', {knowledge_point_codes:[], knowledge_point_mode:'any', knowledge_point_role:'main',
+            knowledge_point_status:'all', knowledge_point_unlabeled:false});
         renderPart2FilterSection();
         window.onPaperFilterChange('keyword', window.PaperStore.filters.keyword);
+    };
+    window.onPaperCurriculumChanged = function () {
+        clearTimeout(filterDebounceTimer);
+        cancelBankQuestionsFetch();
+        const f = window.PaperStore.filters;
+        Object.assign(f, {compulsory:'', chapter:'', knowledge:'', sub_knowledge:[], sub_knowledge_mode:'any'});
+        const pagination = window.PaperStore.streamPagination.all;
+        Object.assign(pagination, {page:1, total:null, totalPages:1, loading:false, error:'', retryPage:1});
+        window.PaperStore.bankQuestions = [];
+        renderPart2FilterSection();
+        fetchBankQuestions(1).then(shouldRender => { if (shouldRender) renderPart3QuestionStream(); });
     };
 
     // Move Question Order
@@ -766,6 +872,7 @@
         loadState.missingIds = missingIds;
         const confirmedMissingIds = new Set(revalidateAll ? [] : previousConfirmedMissingIds);
         const failedIds = new Set(revalidateAll ? [] : previousFailedIds);
+        const freshConfirmedMissingIds = new Set();
         const previouslyConfirmedIds = new Set(previousConfirmedMissingIds);
         idsToLoad.forEach(qid => {
             confirmedMissingIds.delete(qid);
@@ -799,6 +906,7 @@
                             confirmedMissingIds.delete(qid);
                         } else {
                             confirmedMissingIds.add(qid);
+                            freshConfirmedMissingIds.add(qid);
                         }
                     });
                 } catch (error) {
@@ -842,6 +950,10 @@
         loadState.failedIds = failedCurrentIds;
         loadState.error = buildCartQuestionLoadError(confirmedCurrentIds, failedCurrentIds);
         clampStoredPaperStreamPages();
+        if (options && typeof options.onConfirmedMissing === 'function') {
+            options.onConfirmedMissing(Array.from(freshConfirmedMissingIds)
+                .filter(qid => currentCartIds.has(qid)));
+        }
         return unresolvedIds.length === 0
             && confirmedCurrentIds.length === 0
             && failedCurrentIds.length === 0;
@@ -896,6 +1008,7 @@
         params.set('page', String(targetPage));
         params.set('page_size', String(PAPER_STREAM_PAGE_SIZE));
         params.set('sort', 'desc');
+        KnowledgePointState.appendParams(params, KnowledgePointState.filter('paper'));
 
         const requestSeq = ++bankQuestionsRequestSeq;
         if (bankQuestionsAbortController) bankQuestionsAbortController.abort();
@@ -926,6 +1039,7 @@
                 payload.items.forEach(q => {
                     window.PaperStore.questionsMap[q.id] = q;
                 });
+                if (typeof window.prunePaperQuestionCache === 'function') window.prunePaperQuestionCache();
                 return true;
             }
             throw new Error('Invalid paginated question response');
@@ -1034,6 +1148,7 @@
                     <label>题型<select id="paperFilterType" class="glass-select" onchange="onPaperFilterChange('question_type', this.value)">${qTypeOptions}</select></label>
                     <label>难度<select id="paperFilterDifficulty" class="glass-select" onchange="onPaperFilterChange('difficulty', this.value)">${diffOptions}</select></label>
                     <button type="button" class="glass-btn" onclick="clearPaperFilters()">清除筛选</button>
+                    <div id="paperKnowledgePointPicker" class="mb-knowledge-point-field"></div>
                 </div>
                 <section id="paperMetaDetails" class="paper-configuration-panel paper-meta-details" aria-labelledby="togglePaperMetaBtn" ${window.PaperStore.isMetaExpanded ? '' : 'hidden'}>
                     <div class="workspace-filter-grid">
@@ -1047,6 +1162,8 @@
                 </section>
             </div>`;
         refreshPaperFilterSummary();
+        mountKnowledgePointPicker('paper', document.getElementById('paperKnowledgePointPicker'));
+        if (typeof window.renderSubKnowledgeOptions === 'function') window.renderSubKnowledgeOptions('paper', f.sub_knowledge || []);
     }
 
     let filterDebounceTimer = null;
@@ -1067,12 +1184,19 @@
         if (key === 'compulsory') {
             window.PaperStore.filters.chapter = '';
             window.PaperStore.filters.knowledge = '';
+            window.PaperStore.filters.sub_knowledge = [];
             renderPart2FilterSection();
         } else if (key === 'chapter') {
             window.PaperStore.filters.knowledge = '';
+            window.PaperStore.filters.sub_knowledge = [];
             renderPart2FilterSection();
+        } else if (key === 'knowledge') {
+            window.PaperStore.filters.sub_knowledge = [];
+            if (typeof window.renderSubKnowledgeOptions === 'function') window.renderSubKnowledgeOptions('paper', []);
         }
+        refreshPaperFilterSummary();
 
+        renderKnowledgePointPicker('paper');
         if (key === 'keyword') {
             allPagination.loading = true;
             renderPart3QuestionStream();
@@ -1171,12 +1295,14 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     prompt: promptText,
+                    expected_version_code: window.activeCurriculumVersion || null,
                     limit: 5,
                     compulsory: f.compulsory,
                     chapter: f.chapter,
                     knowledge: f.knowledge,
                     question_type: f.question_type,
-                    difficulty: f.difficulty
+                    difficulty: f.difficulty,
+                    ...KnowledgePointState.filter('paper')
                 })
             });
             const data = await res.json();
@@ -1287,20 +1413,49 @@
     };
 
     window.retryPaperCartQuestions = async function () {
-        const loadingPromise = ensureCartQuestionsLoaded({ revalidateAll: true });
-        renderPart3QuestionStream();
-        window.renderPaperCanvas();
-        await loadingPromise;
-        renderPart3QuestionStream();
-        window.renderPaperCanvas();
+        const actionKey = 'reload-cart';
+        if (!beginPaperAction(actionKey, '重新加载卷面')) return;
+        const expectedSignature = getPaperCartSignature();
+        const expectedCart = window.PaperStore.cart;
+        const expectedLoadState = window.PaperStore.cartQuestionLoad;
+        let freshConfirmedMissingIds = [];
+        try {
+            const loadingPromise = ensureCartQuestionsLoaded({
+                revalidateAll: true,
+                onConfirmedMissing(ids) { freshConfirmedMissingIds = ids; }
+            });
+            renderPart3QuestionStream();
+            window.renderPaperCanvas();
+            await loadingPromise;
+            if (!isPaperCartSnapshotCurrent(expectedSignature, '重新加载')) return;
+            if (window.PaperStore.cart !== expectedCart
+                    || window.PaperStore.cartQuestionLoad !== expectedLoadState) {
+                if (window.showToast) window.showToast('卷面状态已变化，请重新操作。', 'warning');
+                return;
+            }
+            removeConfirmedMissingPaperCartQuestions(freshConfirmedMissingIds, true);
+        } finally {
+            finishPaperAction(actionKey);
+            renderPart3QuestionStream();
+            window.renderPaperCanvas();
+        }
     };
 
     window.removeMissingPaperCartQuestions = function () {
+        return removeConfirmedMissingPaperCartQuestions();
+    };
+
+    function removeConfirmedMissingPaperCartQuestions(requestedIds = null, skipConfirmation = false) {
         const loadState = window.PaperStore.cartQuestionLoad;
+        if (loadState.loading || cartQuestionsLoadPromise) return;
+        const allowedIds = requestedIds === null ? null : new Set(
+            Array.from(requestedIds).map(qid => parseInt(qid, 10))
+        );
         const removableIds = new Set(
             (loadState.confirmedMissingIds || [])
                 .map(qid => parseInt(qid, 10))
-                .filter(qid => qid && window.PaperStore.cart.some(
+                .filter(qid => qid && (allowedIds === null || allowedIds.has(qid))
+                    && window.PaperStore.cart.some(
                     item => parseInt(item.id, 10) === qid
                 ))
         );
@@ -1309,7 +1464,8 @@
             window.renderPaperCanvas();
             return;
         }
-        if (!confirm(`确定从卷面移除这 ${removableIds.size} 道已失效题目吗？其他已选题目会保留。`)) return;
+        if (!skipConfirmation
+                && !confirm(`确定从卷面移除这 ${removableIds.size} 道已失效题目吗？其他已选题目会保留。`)) return;
 
         const previousLength = window.PaperStore.cart.length;
         window.PaperStore.cart = window.PaperStore.cart.filter(item => {
@@ -1338,7 +1494,7 @@
         if (removedCount > 0 && window.showToast) {
             window.showToast(`已移除 ${removedCount} 道失效题目，其他已选题目已保留。`, 'success');
         }
-    };
+    }
 
     window.changePaperStreamPage = async function (tabName, requestedPage) {
         if (!['all', 'selected'].includes(tabName)) return;
@@ -1408,7 +1564,12 @@
                 `;
             } else if ((answerText || '').trim()) {
                 answerBodyHtml = typeof window.parseMarkdownWithMath === 'function'
-                    ? window.parseMarkdownWithMath(answerText)
+                    ? window.parseMarkdownWithMath(answerText, {}, {
+                        field: 'answer_markdown', source: answerText, sourceQuestionId: q.id, originalSource: answerText,
+                        references: Array.isArray(q.question_references) ? q.question_references : [],
+                        isCurrent: () => window.PaperStore.answerCache[q.id] === answerText
+                            && window.PaperStore.expandedAnswerIds.has(q.id)
+                    })
                     : window.MathBankSafe.sanitizeRichHtml(answerText);
             } else {
                 answerBodyHtml = '<p class="py-3 text-xs text-slate-400 italic">本题暂无答案与解析。</p>';
@@ -1433,6 +1594,78 @@
             });
         } catch (e) { }
         initializeAutoFigureSizing(answerEl);
+    }
+
+    function refreshPaperQuestionReferenceStem(question) {
+        if (window.PaperStore.cart.some(item => Number(item.id) === Number(question.id))) {
+            schedulePaperReferenceCanvasRefresh();
+        }
+        const stem = document.getElementById(`paper-q-render-${question.id}`);
+        if (!stem) return;
+        const scrollLeft = stem.scrollLeft;
+        const formulaScrolls = Array.from(stem.querySelectorAll('.katex-display')).map(node => node.scrollLeft);
+        stem.innerHTML = formatQuestionContentHtml(question.content, question.id,
+            getQuestionFigAlign(question), false, false, getQuestionFigSize(question), question.image_layouts || {});
+        try {
+            renderMathInElement(stem, {
+                delimiters: [
+                    {left: '$$', right: '$$', display: true}, {left: '$', right: '$', display: false},
+                    {left: '\\(', right: '\\)', display: false}, {left: '\\[', right: '\\]', display: true}
+                ], throwOnError: false
+            });
+            if (typeof window.adaptChoicesGridLayout === 'function') window.adaptChoicesGridLayout(stem);
+        } catch (_) { }
+        initializeAutoFigureSizing(stem);
+        stem.scrollLeft = scrollLeft;
+        Array.from(stem.querySelectorAll('.katex-display')).forEach((node, index) => {
+            node.scrollLeft = formulaScrolls[index] || 0;
+        });
+    }
+
+    let referenceCanvasFrame = null;
+    let referenceCanvasPending = false;
+    const referenceCanvasComposing = new Set();
+    function hasActiveReferenceCanvasEditor(canvas) {
+        if (!canvas) return false;
+        for (const element of referenceCanvasComposing) {
+            if (!element.isConnected) referenceCanvasComposing.delete(element);
+            else if (canvas.contains(element)) return true;
+        }
+        const active = document.activeElement;
+        return Boolean(active && canvas.contains(active) && (
+            active.matches('input,textarea,select') || active.isContentEditable
+            || active.closest('[contenteditable="true"],[contenteditable=""]')
+        ));
+    }
+    function schedulePaperReferenceCanvasRefresh() {
+        referenceCanvasPending = true;
+        if (referenceCanvasFrame !== null) return;
+        referenceCanvasFrame = requestAnimationFrame(() => {
+            referenceCanvasFrame = null;
+            const canvas = document.getElementById('paperCanvasSection');
+            // Reference updates arrive independently of title/field input.
+            // Replacing the canvas during focus or IME composition would lose
+            // the editable node, caret and unfinished composition text.
+            if (hasActiveReferenceCanvasEditor(canvas)) return;
+            referenceCanvasPending = false;
+            const scrollTop = canvas ? canvas.scrollTop : 0;
+            window.renderPaperCanvas();
+            if (canvas) canvas.scrollTop = scrollTop;
+        });
+    }
+    if (typeof document.addEventListener === 'function') {
+        document.addEventListener('compositionstart', event => {
+            const canvas = document.getElementById('paperCanvasSection');
+            if (canvas && canvas.contains(event.target)) referenceCanvasComposing.add(event.target);
+        }, true);
+        document.addEventListener('compositionend', event => {
+            referenceCanvasComposing.delete(event.target);
+            if (referenceCanvasPending) schedulePaperReferenceCanvasRefresh();
+        }, true);
+        document.addEventListener('blur', event => {
+            const canvas = document.getElementById('paperCanvasSection');
+            if (referenceCanvasPending && canvas && canvas.contains(event.target)) schedulePaperReferenceCanvasRefresh();
+        }, true);
     }
 
     function updatePaperQuestionAnswer(qid) {
@@ -1472,10 +1705,18 @@
         }
     }
 
+    let paperStreamLayoutRevision = 0;
+    let paperStreamLayoutFrame = null;
+
     // Render Part 3: Full-Width Question Stream
     function renderPart3QuestionStream() {
         const container = document.getElementById('paperQuestionStream');
         if (!container) return;
+        const layoutRevision = ++paperStreamLayoutRevision;
+        if (paperStreamLayoutFrame && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(paperStreamLayoutFrame);
+        paperStreamLayoutFrame = null;
+        const savedScrollTop = container.scrollTop;
+        const activeWorkspace = window.PaperStore.activeWorkspace;
 
         const cart = window.PaperStore.cart;
         const bankQuestions = window.PaperStore.bankQuestions;
@@ -1573,7 +1814,7 @@
                 <div class="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50/70 px-4 py-3 text-xs text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200" role="alert">
                     <span><i class="fa-solid fa-triangle-exclamation mr-1.5"></i>${escapeHtml(cartLoadState.error)}</span>
                     <span class="flex flex-wrap items-center gap-2">
-                        <button type="button" onclick="window.retryPaperCartQuestions()" class="rounded-lg border border-amber-300 bg-white px-3 py-1.5 font-semibold hover:bg-amber-100 dark:border-amber-800 dark:bg-slate-800 dark:hover:bg-slate-700">重新加载</button>
+                        <button type="button" onclick="window.retryPaperCartQuestions()" ${cartLoadState.loading ? 'disabled' : ''} aria-busy="${cartLoadState.loading ? 'true' : 'false'}" class="rounded-lg border border-amber-300 bg-white px-3 py-1.5 font-semibold hover:bg-amber-100 disabled:cursor-wait disabled:opacity-60 dark:border-amber-800 dark:bg-slate-800 dark:hover:bg-slate-700">重新加载</button>
                         ${(cartLoadState.confirmedMissingIds || []).length > 0 ? `
                             <button type="button" onclick="window.removeMissingPaperCartQuestions()" class="rounded-lg border border-rose-300 bg-white px-3 py-1.5 font-semibold text-rose-600 hover:bg-rose-50 dark:border-rose-800 dark:bg-slate-800 dark:text-rose-300 dark:hover:bg-slate-700">只移除确认失效题</button>
                         ` : ''}
@@ -1620,6 +1861,7 @@
             const qTypeLabel = getQuestionTypeCn(q.question_type);
             const diffTag = getDifficultyBadge(q.difficulty);
             const usageCount = q.usage_count || 0;
+            const questionSource = typeof q.source === 'string' ? q.source.trim() : '';
             seedPaperAnswerCache(q);
             const { answerExpanded, answerLoading, hasAnswer, answerBodyHtml } = getPaperQuestionAnswerState(q);
 
@@ -1691,6 +1933,7 @@
                         <span class="paper-resource-category" title="${escapeHtml([q.category_compulsory, q.category_chapter].filter(Boolean).join(' · '))}">${escapeHtml([q.category_compulsory, q.category_chapter].filter(Boolean).join(' · '))}</span>
                         ${usageCount ? `<span class="paper-resource-usage">引用 ${escapeHtml(usageCount)} 次</span>` : ''}
                     </div>
+                    ${questionSource ? `<p class="paper-resource-source" title="${escapeHtml(questionSource)}">来源：${escapeHtml(questionSource)}</p>` : ''}
 
                     <!-- Full Question Render Content -->
                     <div class="question-full-render-box text-sm leading-relaxed text-slate-800 dark:text-slate-100 overflow-x-auto select-text" id="paper-q-render-${q.id}">
@@ -1717,9 +1960,16 @@
         html += renderPaperStreamPagination(currentTab, currentPage, total, totalPages);
         container.innerHTML = html;
 
-        // Render math formulas for Part 3 question cards
-        displayList.forEach(q => {
+        // Render a few full cards per frame when entering a page at its top.
+        // Rebuilds that preserve a scrolled viewport stay synchronous so a later
+        // callback cannot overwrite scrolling performed after an add/remove.
+        const layoutQuestion = q => {
             const el = document.getElementById(`paper-q-render-${q.id}`);
+            if (el) {
+                const pointMeta = document.createElement('div');
+                renderKnowledgePointBadges(pointMeta, q.knowledge_points || [], currentTab === 'all' ? KnowledgePointState.filter('paper') : null, true);
+                if (pointMeta.childNodes.length) el.before(pointMeta);
+            }
             if (el && typeof renderMathInElement === 'function') {
                 try {
                     renderMathInElement(el, {
@@ -1738,8 +1988,39 @@
             }
 
             if (window.PaperStore.expandedAnswerIds.has(q.id)) renderPaperAnswerMath(q.id);
-        });
-        initializeAutoFigureSizing(container);
+        };
+        if (savedScrollTop > 0 || displayList.length <= 6 || typeof requestAnimationFrame !== 'function') {
+            displayList.forEach(layoutQuestion);
+            initializeAutoFigureSizing(container);
+            container.scrollTop = savedScrollTop;
+        } else {
+            container.setAttribute('aria-busy', 'true');
+            let nextIndex = 0;
+            const renderNextCards = () => {
+                paperStreamLayoutFrame = null;
+                if (layoutRevision !== paperStreamLayoutRevision || container.isConnected === false
+                        || document.getElementById('paperQuestionStream') !== container) return;
+                if (window.PaperStore.activeWorkspace !== activeWorkspace) {
+                    container.setAttribute('aria-busy', 'false');
+                    return;
+                }
+                const end = Math.min(nextIndex + 6, displayList.length);
+                while (nextIndex < end) {
+                    const question = displayList[nextIndex++];
+                    layoutQuestion(question);
+                    const card = document.getElementById(`paper-q-render-${question.id}`);
+                    if (card) initializeAutoFigureSizing(card);
+                }
+                if (nextIndex < displayList.length) paperStreamLayoutFrame = requestAnimationFrame(renderNextCards);
+                else {
+                    const state = window.PaperStore;
+                    const stillLoading = state.filters?.tab === 'selected'
+                        ? state.cartQuestionLoad?.loading : state.streamPagination?.all?.loading;
+                    container.setAttribute('aria-busy', stillLoading ? 'true' : 'false');
+                }
+            };
+            renderNextCards();
+        }
     }
 
     // Render Part 4: Right A4 Canvas & Action Bar
@@ -1821,7 +2102,7 @@
                 <span><i class="fa-solid fa-triangle-exclamation mr-1.5"></i>${cartLoadState.loading
                     ? '正在向服务端核验完整卷面，预览、保存与导出已暂停。'
                     : `${escapeHtml(cartLoadState.error || `有 ${unavailableCartQuestionIds.length} 道已选题目尚未完成核验。`)} 卷面预览、保存与导出已暂停。`}</span>
-                <button type="button" onclick="window.retryPaperCartQuestions()" class="rounded-lg border border-amber-300 bg-white px-3 py-1.5 font-semibold hover:bg-amber-100 dark:border-amber-800 dark:bg-slate-800 dark:hover:bg-slate-700">重新加载</button>
+                <button type="button" onclick="window.retryPaperCartQuestions()" ${cartLoadState.loading ? 'disabled' : ''} aria-busy="${cartLoadState.loading ? 'true' : 'false'}" class="rounded-lg border border-amber-300 bg-white px-3 py-1.5 font-semibold hover:bg-amber-100 disabled:cursor-wait disabled:opacity-60 dark:border-amber-800 dark:bg-slate-800 dark:hover:bg-slate-700">重新加载</button>
             </div>
         ` : '';
 
@@ -1864,7 +2145,9 @@
                                         <option value="0.0" ${(parseFloat(meta.solution_space_default !== undefined ? meta.solution_space_default : '7.0') === 0.0) ? 'selected' : ''}>0 cm (不留白)</option>
                                         <option value="7.0" ${(parseFloat(meta.solution_space_default !== undefined ? meta.solution_space_default : '7.0') === 7.0) ? 'selected' : ''}>7 cm (标准留白)</option>
                                     `}
+                                    ${![0, meta.paper_type === 'exam_19' ? 3 : 7].includes(normalizePaperSolutionSpace(meta.solution_space_default, meta.paper_type === 'exam_19' ? 0 : 7)) ? `<option selected value="${normalizePaperSolutionSpace(meta.solution_space_default).toFixed(1)}">${normalizePaperSolutionSpace(meta.solution_space_default).toFixed(1)} cm (自定义)</option>` : ''}
                                 </select>
+                                <input type="number" min="0" max="30" step="0.5" aria-label="全卷解答题留白厘米，0到30" title="可手动输入0到30厘米" value="${normalizePaperSolutionSpace(meta.solution_space_default, meta.paper_type === 'exam_19' ? 0 : 7).toFixed(1)}" onchange="window.updateGlobalSolutionSpace(this.value)" class="paper-global-solution-input w-16 px-1 py-1 rounded border border-brand-200 text-center"><span>cm</span>
                             </div>
                         </div>
                     </div>
@@ -1899,6 +2182,8 @@
 
         // Render math in A4 sheet
         const sheet = document.getElementById('a4PaperPreviewSheet');
+        renderPaperExportPreflightHistory();
+        applyPaperPreviewZoom(sheet);
         if (sheet && typeof renderMathInElement === 'function') {
             try {
                 renderMathInElement(sheet, {
@@ -1930,6 +2215,7 @@
                     }
                     return;
                 }
+                if (typeof window.applyPaperPreviewZoom === 'function') window.applyPaperPreviewZoom(sheet);
                 // The drag placeholder changes block heights. Keep pages still
                 // until drop/cancel removes it and renders the final cart.
                 if (draggedItemData || paperImageScaleGesture) return;
@@ -1971,7 +2257,8 @@
         // 恢复更新前的滚动位置，保证调排版/留白/格式时在原视口位置零跳跃渲染
         const restoreScroll = () => {
             const newSheet = document.getElementById('a4PaperPreviewSheet');
-            if (newSheet && savedSheetScrollTop > 0) {
+            if (!sheet || newSheet !== sheet || sheet.isConnected === false) return;
+            if (savedSheetScrollTop > 0) {
                 newSheet.scrollTop = savedSheetScrollTop;
             }
             const curContainer = document.getElementById('paperCanvasSection');
@@ -2004,7 +2291,7 @@
                 ` : `
                     <div onclick="updatePaperMeta('show_secret', true)" 
                          title="点击恢复绝密标记"
-                         class="mb-3 border border-dashed border-slate-300 hover:border-brand-500 bg-slate-50/50 hover:bg-brand-50/50 rounded-lg py-0.5 px-2 text-xs text-slate-400 hover:text-brand-600 cursor-pointer transition-all duration-200 group select-none flex items-center space-x-1.5 w-fit">
+                         class="paper-header-restore-control paper-secret-restore mb-3 border border-dashed border-slate-300 hover:border-brand-500 bg-slate-50/50 hover:bg-brand-50/50 rounded-lg py-0.5 px-2 text-xs text-slate-400 hover:text-brand-600 cursor-pointer transition-all duration-200 group select-none flex items-center space-x-1.5 w-fit">
                         <i class="fa-solid fa-circle-plus text-slate-400 group-hover:text-brand-500 text-xs group-hover:scale-110 transition-transform"></i>
                         <span class="font-sans font-medium text-[10px]">已移除绝密标记 (点击在此恢复)</span>
                     </div>
@@ -2054,7 +2341,7 @@
                 ` : `
                     <div onclick="updatePaperMeta('show_notice', true)" 
                          title="点击恢复注意事项"
-                         class="mb-4 my-2 border border-dashed border-slate-300 hover:border-brand-500 bg-slate-50/50 hover:bg-brand-50/50 rounded-xl p-2 text-center text-xs text-slate-400 hover:text-brand-600 cursor-pointer transition-all duration-200 group select-none flex items-center justify-center space-x-1.5">
+                         class="paper-header-restore-control paper-notice-restore mb-4 my-2 border border-dashed border-slate-300 hover:border-brand-500 bg-slate-50/50 hover:bg-brand-50/50 rounded-xl p-2 text-center text-xs text-slate-400 hover:text-brand-600 cursor-pointer transition-all duration-200 group select-none flex items-center justify-center space-x-1.5">
                         <i class="fa-solid fa-circle-plus text-slate-400 group-hover:text-brand-500 text-sm group-hover:scale-110 transition-transform"></i>
                         <span class="font-sans font-medium text-[10px]">已移除注意事项 (点击在此恢复)</span>
                     </div>
@@ -2067,17 +2354,24 @@
         const pages = [];
         let currentPage = [];
         let currentHeight = 0;
+        const minimumHeight = block => block.spaceHeight > 0
+            ? block.height - block.spaceHeight + (block.minimumFirstSpaceHeight || 0) : block.height;
+        const finishPage = () => {
+            pages.push(currentPage);
+            currentPage = [];
+            currentHeight = 0;
+        };
 
         blocks.forEach((block, index) => {
-            const pageLimit = pages.length === 0 ? firstPageLimit : laterPageLimit;
+            let pageLimit = pages.length === 0 ? firstPageLimit : laterPageLimit;
             const nextBlock = blocks[index + 1];
             const keepWithNextHeight = (
                 block.type === 'section_title'
                 && nextBlock
                 && nextBlock.type === 'question'
                 && nextBlock.qType === block.qType
-            ) ? block.height + nextBlock.height : block.height;
-            const wouldOverflow = currentHeight + block.height > pageLimit;
+            ) ? block.height + minimumHeight(nextBlock) : minimumHeight(block);
+            const wouldOverflow = currentHeight + minimumHeight(block) > pageLimit;
             const wouldOrphanHeading = currentHeight + keepWithNextHeight > pageLimit;
             const headingPairFitsLaterPage = (
                 block.type === 'section_title'
@@ -2088,6 +2382,7 @@
             );
             if (headingPairFitsLaterPage) {
                 pages.push([]);
+                pageLimit = laterPageLimit;
             }
             const keepOversizeWithHeading = (
                 block.type === 'question'
@@ -2098,11 +2393,29 @@
             );
 
             if (currentPage.length > 0 && !keepOversizeWithHeading && (wouldOverflow || wouldOrphanHeading)) {
-                pages.push(currentPage);
-                currentPage = [];
-                currentHeight = 0;
+                finishPage();
+                pageLimit = laterPageLimit;
             }
 
+            if (block.spaceHeight > 0) {
+                const bodyHeight = block.height - block.spaceHeight;
+                const firstSpace = Math.min(block.spaceHeight, Math.max(
+                    block.minimumFirstSpaceHeight || 0, pageLimit - currentHeight - bodyHeight));
+                const first = {...block, allocatedSpaceHeight: firstSpace, height: bodyHeight + firstSpace};
+                currentPage.push(first);
+                currentHeight += first.height;
+                let remaining = block.spaceHeight - firstSpace;
+                while (remaining > 0.1) {
+                    finishPage();
+                    const height = Math.min(remaining, laterPageLimit);
+                    if (height <= 0) break;
+                    currentPage.push({type: 'solution_space_continuation', qType: block.qType,
+                        questionId: block.questionId, height});
+                    currentHeight = height;
+                    remaining -= height;
+                }
+                return;
+            }
             currentPage.push(block);
             currentHeight += block.height;
         });
@@ -2116,7 +2429,27 @@
         const style = window.getComputedStyle(element);
         const marginTop = parseFloat(style.marginTop) || 0;
         const marginBottom = parseFloat(style.marginBottom) || 0;
-        return Math.ceil(element.getBoundingClientRect().height + marginTop + marginBottom);
+        return Math.ceil(element.getBoundingClientRect().height / getPaperLayoutScale(element) + marginTop + marginBottom - 0.000001);
+    }
+
+    function getPaperLayoutScale(element) {
+        const page = element && typeof element.closest === 'function' ? element.closest('.a4-paper-sheet') : null;
+        if (!page || !page.offsetWidth) return 1;
+        const scale = page.getBoundingClientRect().width / page.offsetWidth;
+        return Number.isFinite(scale) && scale > 0 ? scale : 1;
+    }
+
+    function applyPaperPreviewZoom(sheet) {
+        if (!sheet || !sheet.clientWidth || !sheet.style) return;
+        const style = window.getComputedStyle(sheet);
+        const available = sheet.clientWidth - (parseFloat(style.paddingLeft) || 0) - (parseFloat(style.paddingRight) || 0);
+        if (available <= 0) return;
+        // CSS zoom scales the page's visual box and scroll extent together while
+        // keeping all line wrapping in fixed 794px layout coordinates.
+        const zoom = Math.min(1, available / A4_PAGE.width);
+        if (Math.abs(Number(sheet.dataset.paperPreviewZoom || 0) - zoom) < 0.0001) return;
+        sheet.dataset.paperPreviewZoom = String(zoom);
+        sheet.style.setProperty('--paper-preview-zoom', String(zoom));
     }
 
     function createMeasuredA4Page(meta, totalCount, totalScore, pageIndex, totalPages, pageLimit, blocks) {
@@ -2155,6 +2488,7 @@
         const pageStyle = window.getComputedStyle(firstPage);
         const footerStyle = window.getComputedStyle(firstFooter);
         const pageRect = firstPage.getBoundingClientRect();
+        const scale = getPaperLayoutScale(firstPage);
         // min-height stays at the standard A4 height even when an oversize page
         // expands. Never derive capacity from that expanded page's bottom.
         const standardHeight = parseFloat(pageStyle.minHeight) || 1123;
@@ -2162,19 +2496,22 @@
         const borderBottom = parseFloat(pageStyle.borderBottomWidth) || 0;
         const paddingTop = parseFloat(pageStyle.paddingTop) || 0;
         const footerTop = standardHeight - borderBottom - (parseFloat(footerStyle.bottom) || 0)
-            - firstFooter.getBoundingClientRect().height;
+            - firstFooter.getBoundingClientRect().height / scale;
         const notice = firstPage.querySelector('.paper-oversize-notice');
-        const contentTop = firstContent.getBoundingClientRect().top - pageRect.top
+        const contentTop = (firstContent.getBoundingClientRect().top - pageRect.top) / scale
             - (notice ? getPaperBlockOuterHeight(notice) : 0);
         const footerGap = 12;
+        const paddingBottom = parseFloat(pageStyle.paddingBottom) || 0;
+        const contentBottom = Math.min(footerTop - footerGap, standardHeight - borderBottom - paddingBottom);
         return {
-            firstPageLimit: Math.max(0, Math.floor(footerTop - contentTop - footerGap)),
-            laterPageLimit: Math.max(0, Math.floor(footerTop - borderTop - paddingTop - footerGap))
+            firstPageLimit: Math.max(0, Math.floor(contentBottom - contentTop)),
+            laterPageLimit: Math.max(0, Math.floor(contentBottom - borderTop - paddingTop))
         };
     }
 
     function rebalanceA4PaperPages(sheet, meta, totalCount, totalScore) {
         if (!sheet || !sheet.querySelectorAll) return;
+        sheet.querySelectorAll('.paper-solution-continuation').forEach(node => node.remove());
         const blockNodes = Array.from(sheet.querySelectorAll('.paper-page-block'));
         const firstPage = sheet.querySelector('.a4-paper-sheet');
         const firstContent = firstPage ? firstPage.querySelector('.paper-page-content') : null;
@@ -2182,12 +2519,21 @@
         if (!blockNodes.length || !firstPage || !firstContent || !firstFooter) return;
 
         const { firstPageLimit, laterPageLimit } = getA4PageHeightLimits(firstPage, firstContent, firstFooter);
-        const measuredBlocks = blockNodes.map(node => ({
-            node,
-            type: node.dataset.paperBlockType || 'question',
-            qType: node.dataset.paperBlockQtype || '',
-            height: getPaperBlockOuterHeight(node)
-        }));
+        const measuredBlocks = blockNodes.map(node => {
+            const zone = node.querySelector('[data-solution-space-total-px]');
+            const spaceHeight = zone ? Number(zone.dataset.solutionSpaceTotalPx) || 0 : 0;
+            if (zone && spaceHeight > 0) {
+                zone.style.height = `${spaceHeight}px`;
+                zone.style.minHeight = '0px';
+            }
+            const figure = zone && zone.querySelector('[data-solution-space-figure]');
+            const minimumFirstSpaceHeight = figure
+                ? Math.ceil((figure.getBoundingClientRect().bottom - zone.getBoundingClientRect().top) / getPaperLayoutScale(zone) + 2) : 0;
+            return {node, zone, type: node.dataset.paperBlockType || 'question',
+                qType: node.dataset.paperBlockQtype || '', height: getPaperBlockOuterHeight(node),
+                questionId: zone ? zone.dataset.solutionSpaceZoneQid : '',
+                spaceHeight, minimumFirstSpaceHeight};
+        });
         const pages = paginatePaperBlocksByHeight(measuredBlocks, firstPageLimit, laterPageLimit);
         if (!pages.length) return;
 
@@ -2221,6 +2567,15 @@
             const pageLimit = pageIndex === 0 ? firstPageLimit : laterPageLimit;
             let nextNode = content.firstElementChild;
             blocks.forEach(block => {
+                if (block.type === 'solution_space_continuation') {
+                    block.node = document.createElement('div');
+                    block.node.className = 'paper-page-block paper-solution-continuation';
+                    block.node.style.height = `${block.height}px`;
+                    block.node.dataset.solutionSpaceContinuationQid = String(block.questionId);
+                    block.node.innerHTML = '<span class="paper-solution-continuation-label">作答留白（续）</span>';
+                } else if (block.zone && block.allocatedSpaceHeight !== undefined) {
+                    block.zone.style.height = `${block.allocatedSpaceHeight}px`;
+                }
                 block.node.classList.toggle('paper-page-block--oversize', block.height > pageLimit);
                 if (block.node !== nextNode) content.insertBefore(block.node, nextNode);
                 nextNode = block.node.nextElementSibling;
@@ -2343,8 +2698,7 @@
                 if (writtenType) {
                     const defaultFallback = meta.paper_type === 'exam_19' ? '0.0' : '7.0';
                     const defaultSpace = parseFloat(meta.solution_space_default !== undefined ? meta.solution_space_default : defaultFallback);
-                    solSpaceCm = parseFloat(item.solution_space !== undefined ? item.solution_space : defaultSpace);
-                    if (isNaN(solSpaceCm)) solSpaceCm = 0.0;
+                    solSpaceCm = normalizePaperSolutionSpace(item.solution_space !== undefined ? item.solution_space : defaultSpace);
 
                     if (solSpaceCm > 0 && ['bottom_left', 'center', 'bottom_right'].includes(renderedFigAlign)) {
                         isSolSpaceEmbedded = true;
@@ -2403,7 +2757,7 @@
 
                 let solutionBlankHtml = '';
                 if (writtenType) {
-                    const spacePx = Math.round(solSpaceCm * 35);
+                    const spacePx = Math.round(solSpaceCm * 96 / 2.54);
                     const isZero = solSpaceCm <= 0;
 
                     let embeddedImgContainer = '';
@@ -2412,7 +2766,7 @@
                             ? 'left-1/2 -translate-x-1/2'
                             : (renderedFigAlign === 'bottom_left' ? 'left-3' : 'right-3');
                         embeddedImgContainer = `
-                            <div class="absolute ${posClass} top-2 z-10" data-paper-embedded-figure>
+                            <div class="absolute ${posClass} top-2 z-10" data-solution-space-figure data-paper-embedded-figure>
                                 ${embeddedImgHtml}
                             </div>
                         `;
@@ -2426,7 +2780,7 @@
                         : (isZero ? 'min-height: 20px;' : `height: ${spacePx}px;`);
 
                     solutionBlankHtml = `
-                        <div class="solution-space-zone group/blank relative mt-2 mb-1 ${isZero ? 'py-1 border-b border-dashed border-slate-200 hover:border-sky-300' : 'rounded-lg border border-dashed border-sky-300/80 bg-sky-50/20'} transition-all" data-solution-space-zone-qid="${q ? q.id : 0}" data-paper-space-px="${spacePx}" style="${minHeightStyle}">
+                        <div class="solution-space-zone group/blank relative mt-2 mb-1 ${isZero ? 'py-1 border-b border-dashed border-slate-200 hover:border-sky-300' : 'rounded-lg border border-dashed border-sky-300/80 bg-sky-50/20'} transition-all" data-solution-space-zone-qid="${q ? q.id : 0}" data-paper-space-px="${spacePx}" data-solution-space-total-px="${isZero ? 0 : Math.max(spacePx, isSolSpaceEmbedded && embeddedImgHtml ? embeddedFigureHeight : 0)}" data-solution-space-cm="${solSpaceCm}" style="${minHeightStyle}">
                             ${embeddedImgContainer}
                             <!-- Anchor controls to the zone's top edge. They stay out
                                  of document flow, so preview pagination remains stable. -->
@@ -2438,7 +2792,7 @@
                                 <button type="button" data-solution-space-delta="-0.5" onclick="event.stopPropagation(); window.updateQuestionSolutionSpace(${q ? q.id : 0}, -0.5)" class="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 hover:bg-brand-100 hover:text-brand-700 font-bold transition-all" title="减少 0.5cm 留白">
                                     - 0.5
                                 </button>
-                                <span class="inline-flex w-14 justify-center px-1 font-bold text-brand-600" data-solution-space-value="${q ? q.id : 0}">${solSpaceCm.toFixed(1)} cm</span>
+                                <span class="inline-flex w-14 justify-center px-1 font-bold text-brand-600" data-solution-space-value="${q ? q.id : 0}"><input type="number" min="0" max="30" step="0.5" value="${solSpaceCm.toFixed(1)}" data-solution-space-input="${q ? q.id : 0}" aria-label="本题留白厘米，0到30" class="paper-solution-space-input" onclick="event.stopPropagation()" onkeydown="event.stopPropagation(); if(event.key==='Enter') this.blur()" onchange="window.setQuestionSolutionSpace(${q ? q.id : 0}, this.value)"></span><span>cm</span>
                                 <button type="button" data-solution-space-delta="0.5" onclick="event.stopPropagation(); window.updateQuestionSolutionSpace(${q ? q.id : 0}, 0.5)" class="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 hover:bg-brand-100 hover:text-brand-700 font-bold transition-all" title="增加 0.5cm 留白">
                                     + 0.5
                                 </button>
@@ -2486,6 +2840,7 @@
                         <div class="flex items-baseline">
                             <span class="font-bold mr-1 text-slate-900 shrink-0">${globalQIndex}.</span>
                             <div class="inline flex-1">
+                                ${writtenType ? `<span class="paper-written-points block">（${Number(item.score) || 0}分）</span>` : ''}
                                 ${stemLine}
                                 ${solutionBlankHtml}
                             </div>
@@ -2771,6 +3126,12 @@
     };
 
     // Solution Space Handlers
+    function normalizePaperSolutionSpace(value, fallback = 0) {
+        const numeric = Number(value);
+        const safeFallback = Number.isFinite(Number(fallback)) ? Number(fallback) : 0;
+        return Math.round(Math.max(0, Math.min(30, Number.isFinite(numeric) ? numeric : safeFallback)) * 10) / 10;
+    }
+
     function restoreSolutionSpaceControlViewport(qid, anchorTop, activeDelta) {
         if (!Number.isFinite(anchorTop)) return;
 
@@ -2792,6 +3153,10 @@
                 }
             }
             if (activeDelta !== null && activeDelta !== undefined) {
+                if (activeDelta === 'input') {
+                    const input = nextControl.querySelector('[data-solution-space-input]');
+                    if (input) input.focus({preventScroll: true});
+                }
                 const nextButton = Array.from(
                     nextControl.querySelectorAll('[data-solution-space-delta]')
                 ).find(button => button.getAttribute('data-solution-space-delta') === String(activeDelta));
@@ -2824,11 +3189,12 @@
         const activeDelta = currentControl && currentControl.contains(document.activeElement)
             ? document.activeElement.getAttribute('data-solution-space-delta')
             : null;
-        const defaultSpace = parseFloat(window.PaperStore.meta.solution_space_default || '7.0');
+        const defaultSpace = normalizePaperSolutionSpace(window.PaperStore.meta.solution_space_default,
+            window.PaperStore.meta.paper_type === 'exam_19' ? 0 : 7);
         let currentSpace = parseFloat(item.solution_space !== undefined ? item.solution_space : defaultSpace);
         if (isNaN(currentSpace)) currentSpace = 7.0;
         
-        let newSpace = Math.max(0.0, Math.min(15.0, Math.round((currentSpace + delta) * 10) / 10));
+        let newSpace = normalizePaperSolutionSpace(currentSpace + delta);
         item.solution_space = newSpace.toFixed(1);
         saveCartToStorage();
         window.renderPaperCanvas();
@@ -2838,8 +3204,22 @@
         if (window.showToast) window.showToast(`题目 #${seqNum} 留白高度设为 ${newSpace.toFixed(1)} cm`, 'info');
     };
 
+    window.setQuestionSolutionSpace = function (qid, value) {
+        const item = window.PaperStore.cart.find(it => it.id === Number(qid));
+        if (!item) return;
+        const control = document.querySelector(`[data-solution-space-controls-qid="${Number(qid)}"]`);
+        const anchorTop = control ? control.getBoundingClientRect().top : Number.NaN;
+        const fallback = window.PaperStore.meta.paper_type === 'exam_19' ? 0 : 7;
+        const previous = item.solution_space !== undefined ? item.solution_space
+            : normalizePaperSolutionSpace(window.PaperStore.meta.solution_space_default, fallback);
+        item.solution_space = normalizePaperSolutionSpace(value, Number(previous)).toFixed(1);
+        saveCartToStorage();
+        window.renderPaperCanvas();
+        restoreSolutionSpaceControlViewport(Number(qid), anchorTop, 'input');
+    };
+
     window.updateGlobalSolutionSpace = function (val) {
-        const spaceVal = parseFloat(val).toFixed(1);
+        const spaceVal = normalizePaperSolutionSpace(val).toFixed(1);
         window.PaperStore.meta.solution_space_default = spaceVal;
         window.PaperStore.cart.forEach(item => {
             item.solution_space = spaceVal;
@@ -2859,7 +3239,8 @@
         if (missingIds.length > 0) {
             throw new Error(`Cannot build paper payload with ${missingIds.length} unloaded question(s)`);
         }
-        const defaultSpace = (window.PaperStore.meta.solution_space_default || '7.0').toString();
+        const defaultSpace = normalizePaperSolutionSpace(window.PaperStore.meta.solution_space_default,
+            window.PaperStore.meta.paper_type === 'exam_19' ? 0 : 7).toFixed(1);
         return cart.map((item, idx) => {
             const q = window.PaperStore.questionsMap[item.id];
             return {
@@ -2873,6 +3254,76 @@
                 solution_space: item.solution_space !== undefined ? item.solution_space.toString() : defaultSpace
             };
         });
+    }
+
+    const PAPER_PREFLIGHT_HISTORY_KEY = 'mathbank_paper_export_preflights';
+
+    function readPaperPreflightHistory() {
+        try {
+            const items = JSON.parse(localStorage.getItem(PAPER_PREFLIGHT_HISTORY_KEY) || '[]');
+            return Array.isArray(items) ? items.filter(item => item && /^[a-f0-9]{32}$/.test(item.id)).slice(0, 5) : [];
+        } catch (error) { return []; }
+    }
+
+    function rememberPaperExportPreflight(response, payload = null) {
+        const report = payload && payload.preflight;
+        const headerId = response && response.headers && response.headers.get('X-Export-Preflight-ID');
+        const id = report && report.id || headerId;
+        if (typeof id !== 'string' || !/^[a-f0-9]{32}$/.test(id)) return '';
+        const record = { id, status: report && report.status || 'passed', recorded_at: new Date().toISOString() };
+        const history = [record, ...readPaperPreflightHistory().filter(item => item.id !== id)].slice(0, 5);
+        try { localStorage.setItem(PAPER_PREFLIGHT_HISTORY_KEY, JSON.stringify(history)); } catch (error) {}
+        renderPaperExportPreflightHistory();
+        return id;
+    }
+
+    function renderPaperExportPreflightHistory() {
+        const actions = document.querySelector('#a4PaperPreviewSheet .paper-preview-actions');
+        if (!actions) return;
+        const old = document.getElementById('paperExportPreflightStatus');
+        if (old) old.remove();
+        const history = readPaperPreflightHistory();
+        if (!history.length) return;
+        const panel = document.createElement('div');
+        panel.id = 'paperExportPreflightStatus';
+        panel.className = 'mt-2 rounded-xl border border-slate-200 bg-white p-3 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300';
+        const title = document.createElement('div');
+        title.textContent = '最近导出预检（保留最近 5 次）';
+        title.className = 'mb-1 font-semibold';
+        panel.appendChild(title);
+        history.forEach(item => {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'block py-1 text-left underline';
+            button.textContent = `查看预检 ${item.id} · ${item.status}`;
+            button.addEventListener('click', async () => {
+                button.disabled = true;
+                let detail = panel.querySelector('pre');
+                if (!detail) {
+                    detail = document.createElement('pre');
+                    detail.className = 'mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-all';
+                    detail.setAttribute('aria-live', 'polite');
+                    panel.appendChild(detail);
+                }
+                detail.textContent = '正在读取预检报告…';
+                try {
+                    const response = await fetch(`/api/paper/export/preflight/${item.id}`);
+                    const data = await response.json();
+                    if (!response.ok) throw new Error(data.message || '预检报告读取失败');
+                    detail.textContent = JSON.stringify(data.preflight, null, 2);
+                } catch (error) {
+                    detail.textContent = error.message || '预检报告读取失败';
+                } finally { button.disabled = false; }
+            });
+            panel.appendChild(button);
+        });
+        actions.appendChild(panel);
+    }
+
+    function paperExportErrorMessage(response, payload, fallback) {
+        const id = rememberPaperExportPreflight(response, payload);
+        const message = payload && payload.message || fallback;
+        return id ? `${message}（预检：${id}，可在卷面上方回读）` : message;
     }
 
     // Export PDF, Word, TeX, and Save Handlers
@@ -2924,6 +3375,7 @@
             });
 
             if (res.ok && res.headers.get('content-type')?.includes('application/pdf')) {
+                rememberPaperExportPreflight(res);
                 const blob = await res.blob();
                 const url = URL.createObjectURL(blob);
                 if (tab && !tab.closed) {
@@ -2935,7 +3387,7 @@
                 let errData = {};
                 try {
                     errData = await res.json();
-                    if (errData.message) errLog = errData.message;
+                    errLog = paperExportErrorMessage(res, errData, errLog);
                 } catch (e) {}
                 if (tab && !tab.closed) {
                     setPdfTabErrorState(tab, `${targetName} PDF 编译失败`, errData.diagnostic, errLog, errData.tex_source);
@@ -3344,12 +3796,13 @@
                 let message = 'Word 导出失败';
                 try {
                     const data = await res.json();
-                    message = data.message || message;
+                    message = paperExportErrorMessage(res, data, message);
                 } catch (e) {}
                 if (window.showToast) window.showToast(message, 'error');
                 return;
             }
 
+            rememberPaperExportPreflight(res);
             const blob = await res.blob();
             const rawTitle = (payload.title || '试卷').trim();
             const safeTitle = rawTitle.replace(/[/\\?%*:|"<>]/g, '_') || '试卷';
@@ -3464,6 +3917,7 @@
             });
 
             if (res.ok) {
+                rememberPaperExportPreflight(res);
                 const blob = await res.blob();
                 const rawTitle = (window.PaperStore.meta.title || '试卷').trim();
                 const safeTitle = rawTitle.replace(/[/\\?%*:|"<>]/g, '_') || '试卷';
@@ -3497,7 +3951,7 @@
                 if (window.showToast) window.showToast(`LaTeX 打包《${filename}》导出成功！`, 'success');
             } else {
                 const errData = await res.json();
-                if (window.showToast) window.showToast(errData.message || '导出失败', 'error');
+                if (window.showToast) window.showToast(paperExportErrorMessage(res, errData, '导出失败'), 'error');
             }
         } catch (e) {
             if (window.showToast) window.showToast('LaTeX 打包请求异常', 'error');
@@ -4291,6 +4745,7 @@
             if (writeState.pending === 0 && writeState.revision === requestSequence) {
                 delete figureLayoutWrites[qid];
             }
+            if (typeof window.prunePaperQuestionCache === 'function') window.prunePaperQuestionCache();
         });
     };
 
@@ -4477,6 +4932,9 @@
         }
 
         const size = normalizeFigureSize(figSize);
+        const sharedDimensions = window.ImageLayoutTools && typeof window.ImageLayoutTools.sizeDimensions === 'function'
+            ? window.ImageLayoutTools.sizeDimensions('detached', size) : null;
+        if (sharedDimensions) return sharedDimensions;
         if (size === 'medium') return { maxWidth: 320, maxHeight: 240 };
         if (size === 'large') return { maxWidth: 420, maxHeight: 300 };
         if (size === 'auto' && count > 1) return { maxWidth: 150, maxHeight: 140 };
@@ -4527,9 +4985,11 @@
             };
         }
 
-        // The A4 body is about 714px wide. Estimate wrapped rows conservatively
-        // so larger figures do not get grouped onto a page that will clip them.
-        const columns = Math.max(1, Math.floor(700 / (dimensions.maxWidth + 8)));
+        // Reserve against the fixed A4 body, including both page borders.
+        // This conservative upper bound is only the provisional figure/space
+        // budget; final pagination still measures the loaded DOM at that width.
+        const bodyWidth = A4_PAGE.width - 2 * A4_PAGE.margin - 2;
+        const columns = Math.max(1, Math.floor(bodyWidth / (dimensions.maxWidth + 8)));
         const rows = Math.ceil(count / columns);
         return {
             count,
@@ -4570,6 +5030,34 @@
         });
     }
 
+    function paperContentReferenceContext(source, qid) {
+        if (!window.PaperStore || !window.PaperStore.questionsMap) return null;
+        const question = window.PaperStore.questionsMap[qid];
+        const original = String(question && question.content || '');
+        // Image extraction, choice cleanup and split options can change offsets.
+        // Only a proved prefix keeps every original character at its position.
+        if (!source || !original.startsWith(source) || !window.QuestionReferenceTools) return null;
+        const checked = window.QuestionReferenceTools.prepare(original, {
+            field: 'content', source: original,
+            references: Array.isArray(question.question_references) ? question.question_references : []
+        });
+        const chars = Array.from(source);
+        const references = checked.entries.filter(entry => entry.reference.end <= chars.length)
+            .flatMap(entry => entry.members.map(member => ({
+                ...member.reference,
+                suffix: chars.slice(member.reference.end,
+                    member.reference.end + Array.from(member.reference.suffix || '').length).join('')
+            })));
+        const signature = JSON.stringify((question.question_references || []).filter(item => item.field === 'content'));
+        return {
+            field: 'content', source, originalSource: original, sourceQuestionId: qid, references,
+            isCurrent: () => String(window.PaperStore.questionsMap[qid]?.content || '') === original
+                && !window.PaperStore.answerLoadingIds.has(qid)
+                && JSON.stringify((window.PaperStore.questionsMap[qid]?.question_references || [])
+                    .filter(item => item.field === 'content')) === signature
+        };
+    }
+
     function formatQuestionContentHtml(raw, qid = null, figAlign = 'right', embedInSolSpace = false, showControls = true, figSize = 'auto', imageLayouts = {}) {
         if (!raw) return embedInSolSpace ? { stemHtml: '', imgHtml: null } : '';
         let html = String(raw).trim();
@@ -4588,11 +5076,11 @@
 
         const imageParts = window.ImageLayoutTools ? window.ImageLayoutTools.split(html) : null;
         const anchoredHtml = imageParts && imageParts.tail && imageParts.body
-            ? window.parseMarkdownWithMath(imageParts.body, imageLayouts) : '';
+            ? window.parseMarkdownWithMath(imageParts.body, imageLayouts, paperContentReferenceContext(imageParts.body, qid)) : '';
         if (imageParts && imageParts.tail) html = imageParts.tail;
         if (shouldPreserveInlinePaperImages(html)) {
             const inlineHtml = typeof window.parseMarkdownWithMath === 'function'
-                ? window.parseMarkdownWithMath(html, imageLayouts)
+                ? window.parseMarkdownWithMath(html, imageLayouts, paperContentReferenceContext(html, qid))
                 : window.MathBankSafe.sanitizeRichHtml(html);
             if (embedInSolSpace) {
                 return {
@@ -4615,7 +5103,7 @@
         
         // 2. Process LaTeX formulas, \underline, choices environment & LaTeX standard paragraphs via preprocessFormulaForKaTeX
         if (typeof window.parseMarkdownWithMath === 'function') {
-            html = window.parseMarkdownWithMath(html);
+            html = window.parseMarkdownWithMath(html, imageLayouts, paperContentReferenceContext(html, qid));
         } else {
             html = window.MathBankSafe.sanitizeRichHtml(html);
         }

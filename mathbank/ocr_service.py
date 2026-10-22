@@ -15,6 +15,10 @@ from mathbank.prompts import build_single_ocr_vision_prompt, SINGLE_OCR_STRUCTUR
 class OcrServiceDependencies:
     state: RuntimeState
     COMMON_OCR_PROMPT: Any
+    PDF_ORIGINAL_COMMON_OCR_PROMPT: Any
+    PDF_VISUAL_FIDELITY_RULE: Any
+    request_pdf_vision: Callable
+    completion_content: Callable
     ILLUSTRATION_BOX_PROMPT: Any
     Image: Any
     InvalidImageError: Any
@@ -40,7 +44,7 @@ class OcrServiceDependencies:
     uuid: Any
 
 
-def ocr_via_provider(image_path: str, provider: MultimodalProviderConfig, include_illustration_box: bool=False, *, pdf_page: bool=False, check_cancelled=lambda: None, report_attempt=lambda _event: None, page_index=None, dependencies: OcrServiceDependencies) -> str:
+def ocr_via_provider(image_path: str, provider: MultimodalProviderConfig, include_illustration_box: bool=False, *, pdf_page: bool=False, check_cancelled=lambda: None, report_attempt=lambda _event: None, page_index=None, on_response=None, dependencies: OcrServiceDependencies) -> str:
     """Use one resolved multimodal provider for formula and text OCR."""
     import base64
 
@@ -49,6 +53,24 @@ def ocr_via_provider(image_path: str, provider: MultimodalProviderConfig, includ
             f"{provider.provider_label} 模型 {provider.model_name} 不支持图像输入，"
             "请在默认公式识图模型中选择支持图片的模型。"
         )
+
+    if pdf_page:
+        check_cancelled()
+        with open(image_path, 'rb') as image_file:
+            encoded = base64.b64encode(image_file.read()).decode('ascii')
+        payload = {
+            'model': provider.model_name, 'stream': True, 'max_tokens': 16384,
+            'messages': [{'role': 'user', 'content': [
+                {'type': 'text', 'text': dependencies.PDF_ORIGINAL_COMMON_OCR_PROMPT + dependencies.PDF_VISUAL_FIDELITY_RULE},
+                {'type': 'image_url', 'image_url': {'url': 'data:image/png;base64,' + encoded}},
+            ]}],
+        }
+        payload = dependencies.apply_model_thinking_policy(payload, provider=provider, task='ocr')
+        result = dependencies.request_pdf_vision(provider, payload, post=dependencies.post_chat_completion,
+            validate=lambda body: {'markdown': dependencies.completion_content(body, 'PDF 页面识别', max_chars=200000)},
+            label='PDF 页面识别', stage='page_ocr', page_index=page_index, max_attempts=1,
+            check_cancelled=check_cancelled, report_attempt=report_attempt, on_response=on_response)
+        return result['markdown']
 
     print(
         f"[OCR Flow] 正在向 {provider.provider_label} 提交多模态识别任务: "
@@ -96,20 +118,10 @@ def ocr_via_provider(image_path: str, provider: MultimodalProviderConfig, includ
         })
 
     timeout = 240
-    if pdf_page:
-        from mathbank.pdf_vision_request import request_pdf_vision, completion_content
-        result = request_pdf_vision(
-            provider, payload, post=dependencies.post_chat_completion,
-            validate=lambda body: {"markdown": completion_content(body, "PDF 页面识别", max_chars=500_000)},
-            label="PDF 页面识别", stage="page_text", page_index=page_index,
-            check_cancelled=check_cancelled, report_attempt=report_attempt,
-        )
-        return result["markdown"]
     # Chat-completion POSTs are not idempotent: a read timeout can happen after
     # the provider has accepted (and billed) the request.  Do not automatically
-    # send the same image two or three times.  The shared transport still
-    # retries a connection-establishment failure where no response was read.
-    transport_options = {"retry_connection": False} if include_illustration_box else {}
+    # send the same image two or three times, including transport fallback.
+    transport_options = {"retry_connection": False}
     response = dependencies.post_chat_completion(
         provider,
         payload,
@@ -286,12 +298,13 @@ def ocr_formula(file: UploadFile=File(...), engine: str=Form(None), skip_tikz: b
 
 
 def ocr_pdf_page_image(image_path: str, *, check_cancelled=lambda: None,
-                       report_attempt=lambda _event: None, page_index: int = None, dependencies: OcrServiceDependencies) -> str:
-    """PDF pages share the configured provider's bounded retry budget."""
+                       report_attempt=lambda _event: None, page_index=None, on_response=None,
+                       dependencies: OcrServiceDependencies) -> str:
+    """Use the selected provider once; no paid retry or silent fallback."""
     check_cancelled()
-    prefer_engine = dependencies.os.getenv("OCR_PREFER_ENGINE", "siliconflow")
-    provider = dependencies.resolve_ocr_provider(prefer_engine)
+    provider = dependencies.resolve_ocr_provider(dependencies.os.getenv('OCR_PREFER_ENGINE', 'siliconflow'))
     if not provider.api_key or not provider.chat_completions_url:
-        raise dependencies.OCRConfigurationError("PDF 页面识别所用的识图服务未配置，请在系统设置中配置所选平台。")
-    return dependencies.ocr_via_provider(image_path, provider, pdf_page=True, check_cancelled=check_cancelled,
-                            report_attempt=report_attempt, page_index=page_index)
+        raise dependencies.OCRConfigurationError('PDF 页面识别服务未配置，请在 API 设置中填写所选平台。')
+    return dependencies.ocr_via_provider(image_path, provider, pdf_page=True,
+        check_cancelled=check_cancelled, report_attempt=report_attempt, page_index=page_index,
+        on_response=on_response)

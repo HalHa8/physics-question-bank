@@ -36,10 +36,11 @@ def test_ocr_prompt_compactly_preserves_tables_and_multi_figure_anchors():
     assert "明确的粗体正体保留 `\\mathbf`" in prompt
     assert r"完整 `\begin{choices}...\end{choices}`" in prompt
     assert "去掉原 A/B/C/D 标号" in prompt
-    assert "看不清公式/符号标[公式待核对]" in prompt
+    assert "仅原图确实看不清公式/符号时标[公式待核对]" in prompt
     assert "勿描述、猜测或重绘" in prompt
     assert "独立 equation/align/gather/multline、tabular 原样" in prompt
-    assert len(prompt) <= 1250
+    from mathbank.prompts import FILLIN_STYLE_RULE
+    assert len(prompt) <= 1250 + len(FILLIN_STYLE_RULE)
 
 
 @pytest.mark.parametrize("base", ["https://api.openai.com/v1", "https://vision.example/v1"])

@@ -1,24 +1,33 @@
 """Runtime service; all application dependencies are explicit."""
 
+from typing import List, Optional
+from pathlib import Path
+from fastapi import BackgroundTasks, Depends, File, Form, Header, HTTPException, Query, Request, Response, UploadFile
+from sqlalchemy.orm import Session
+from mathbank.database import get_db
 from dataclasses import dataclass
 from typing import Any, Callable
-
 from mathbank.application_state import RuntimeState
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request, Header
+from fastapi import FastAPI
 
 
 @dataclass(frozen=True)
 class RuntimeServiceDependencies:
-    state: RuntimeState
     HTTPException: Any
     JSONResponse: Any
     SYSTEM_GENERATED_DIR: Any
+    _document_project_service: Any
+    _maintain_document_projects: Any
+    _library_transfer_tasks: Any
+    copy: Any
+    get_current_curriculum: Any
     harden_private_path: Any
     os: Any
     secrets: Any
     signal: Any
-    start_startup_cleanup: Callable
+    start_startup_cleanup: Any
+    state: RuntimeState
     threading: Any
     time: Any
     write_private_text_atomic: Any
@@ -51,20 +60,28 @@ def load_or_create_local_token(*, dependencies: RuntimeServiceDependencies) -> s
 @asynccontextmanager
 async def app_lifespan(_app: FastAPI, *, dependencies: RuntimeServiceDependencies):
     """在模块完整导入后再启动低优先级维护任务。"""
-
     if dependencies.state.IS_TESTING:
         yield
         return
-
+    if (dependencies.SYSTEM_GENERATED_DIR / 'library_transfer_tasks').is_dir():
+        dependencies._library_transfer_tasks()
     dependencies.state.DOCUMENT_TASKS.start_maintenance(interval_seconds=60.0)
-    dependencies.threading.Thread(
-        target=dependencies.start_startup_cleanup,
-        name="mathbank-post-startup-maintenance",
-        daemon=True,
-    ).start()
+    project_service = dependencies._document_project_service()
+    if project_service:
+        project_service.migrate_tasks(dependencies.copy.deepcopy(dependencies.get_current_curriculum()))
+        dependencies.state._DOCUMENT_PROJECT_STOP.clear()
+        dependencies.threading.Thread(target=dependencies._maintain_document_projects, name='mathbank-project-cleanup', daemon=True).start()
+    dependencies.threading.Thread(target=dependencies.start_startup_cleanup, name='mathbank-post-startup-maintenance', daemon=True).start()
     try:
         yield
     finally:
+        dependencies.state._DOCUMENT_PROJECT_STOP.set()
+        if dependencies.state._LIBRARY_TRANSFER_TASKS is not None:
+            import asyncio
+            await asyncio.to_thread(dependencies.state._LIBRARY_TRANSFER_TASKS.close)
+        if dependencies.state.DATABASE_EXPORT_QUEUE.started:
+            import asyncio
+            await asyncio.to_thread(dependencies.state.DATABASE_EXPORT_QUEUE.close)
         dependencies.state.DOCUMENT_TASKS.shutdown(wait=False)
 
 

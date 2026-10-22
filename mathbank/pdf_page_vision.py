@@ -16,13 +16,8 @@ from pathlib import Path
 import re
 from typing import Callable
 
-import requests
-
 from mathbank import prompts
-from mathbank.ai_http import (
-    AIStreamResponseError, collect_streamed_completion, is_stream_read_timeout,
-    post_chat_completion,
-)
+from mathbank.ai_http import post_chat_completion
 from mathbank.ai_json import parse_ai_json
 from mathbank.ai_providers import OCRConfigurationError, apply_model_thinking_policy, apply_structured_output_policy, resolve_ocr_provider
 from mathbank.pdf_figures import MAX_FIGURES_PER_PAGE, MAX_SOURCE_CHARS, describe_figure_slots
@@ -31,10 +26,6 @@ from mathbank.pdf_vision_request import completion_content, request_pdf_vision
 
 
 MAX_RESPONSE_CHARS = 200_000
-MAX_OUTPUT_TOKENS = 16_384
-# Stream full-page output so a long but active generation does not wait for a
-# single large response body. The read timeout bounds idle time between chunks.
-PDF_VISION_TIMEOUT = (10, 300)
 DEFAULT_PAGE_VISION_DPI = 150
 COMPACT_PAGE_VISION_DPI = 110
 MAX_WARNINGS = 16
@@ -71,6 +62,28 @@ def choose_pdf_page_vision_dpi(inspector_page: dict | None) -> int:
     ):
         return COMPACT_PAGE_VISION_DPI
     return DEFAULT_PAGE_VISION_DPI
+
+MAX_OUTPUT_TOKENS = 16_384
+MAX_WARNINGS = 16
+MAX_REASON_CHARS = 500
+MAX_PAGE_INPUT_PNG_BYTES = 24 * 1024 * 1024
+PDF_DETAIL_NAVIGATION_RULE = (
+    "【图像关系】刚才的第一张图是整页导航图，是唯一题序、版面、插图位置及所有返回bbox的坐标基准。"
+    "其left/right为整页水平X，top/bottom为整页垂直Y，范围均为0–1000。"
+    "后面的图是同一原PDF页的高清详情，原页范围在各图前标明，可能相互重叠。"
+    "详情只用于精读文字和符号，结合导航图输出一份完整整页转录；重叠内容只写一次，不得重复题目或插图。"
+    "仍按第一张整页图返回原协议及全页bbox，绝不能把详情图的局部坐标当作全页坐标。"
+)
+_PAGE_FIELDS = {"markdown", "figures", "ignored_candidates", "page_complete", "warnings"}
+_FIGURE_FIELDS = {"slot", "bbox", "candidate_ids", "review_required", "review_reason"}
+_IGNORED_FIELDS = {"id", "reason"}
+_IGNORED_REASONS = {"formula", "table_border", "decoration", "page_background"}
+_SLOT_LABEL = re.compile(r"^\[插图待补\s*[:：]\s*([^\]\n]+)\]$")
+_IMAGE_OR_ASSET_PATH = re.compile(
+    r"!\[[^\]]*\]\s*(?:\(|\[)|<\s*img\b|\\includegraphics\b"
+    r"|/static/(?:uploads|test_uploads)/|file://|data:image/",
+    re.IGNORECASE,
+)
 
 
 def _no_cancel() -> None:
@@ -273,19 +286,15 @@ def request_pdf_page(
     detail_views: list[dict] | None = None,
     include_transcription_evidence: bool = False,
 ) -> dict:
-    """Recognize a page with one bounded retry of the configured provider."""
+    """Recognize one page in one request; no automatic paid retry."""
     check_cancelled()
     clean_info = _prompt_page_info(page_info)
     witness = None
     provider = resolve_ocr_provider(os.getenv("OCR_PREFER_ENGINE", "siliconflow"))
     if not provider.api_key or not provider.chat_completions_url:
-        label = getattr(provider, "credential_label", "所选识图平台的 API Key")
-        raise OCRConfigurationError(
-            f"所选识图服务 {label} 未配置可用的密钥或接口地址。"
-            "请在系统设置的 API 配置中填写并保存后重试。"
-        )
+        raise OCRConfigurationError("PDF 页面联合识别所用的识图服务未配置，请打开 API 设置。")
     if not provider.supports_image_input:
-        raise OCRConfigurationError("当前所选识图模型不支持 PDF 图片输入，请在系统设置中改选支持图片的模型。")
+        raise OCRConfigurationError("当前识图模型不支持 PDF 页面的图片输入，请在 API 设置中选择支持图片的模型。")
     try:
         source_png = Path(image_path).read_bytes()
         encoded = base64.b64encode(source_png).decode("ascii")

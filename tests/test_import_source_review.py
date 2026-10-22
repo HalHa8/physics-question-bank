@@ -16,16 +16,21 @@ ROOT = Path(__file__).resolve().parents[1]
 def review_script():
     source = (ROOT / "static/js/import.js").read_text(encoding="utf-8")
     api_source = (ROOT / "static/js/api.js").read_text(encoding="utf-8")
+    editor_source = (ROOT / "static/js/editor.js").read_text(encoding="utf-8")
 
     def section(start, end):
         begin = source.index(start)
         return source[begin:source.index(end, begin)]
 
     shipped = "\n".join([
+        api_source[api_source.index("const KnowledgePointState ="):api_source.index("// Global variables")],
+        editor_source[editor_source.index("function knowledgePointNode"):editor_source.index("function currentKnowledgePointLocation")],
         api_source[api_source.index("function safeImageUrl(value)"):api_source.index("function sanitizeRichHtml(value)")],
+        section("let retainedDocumentResult = null", "const parsedQuestionSaveInFlight"),
         section("const parsedSourceVisionVerifications", "function blockImportResetWhileSaving"),
-        section("function renderParsedQuestionsList", "function setupCardCategoryLinkage"),
+        section("function renderParsedKnowledgePoints", "function setupCardCategoryLinkage"),
         section("function validateParsedQuestionBeforeImport", "function confirmClearAllParsed"),
+        section("function clearAllParsedSources()", "function getCheckedUnsavedIndices"),
         section("function getCheckedUnsavedIndices", "// SIDEBAR QUESTION SOURCE"),
         section("async function generateSingleAnswer", "window.generateSingleAnswer ="),
     ])
@@ -39,10 +44,20 @@ class Element extends EventTarget {
     this.className = ''; this._html = ''; this.textContent = ''; this.open = false;
     this.classList = {add(){}, remove(){}, toggle(){}};
   }
+  dispatchEvent(event) {
+    const accepted = super.dispatchEvent(event);
+    if (event.bubbles && this.parentElement) {
+      this.parentElement.dispatchEvent(new Event(event.type, {bubbles: true}));
+    }
+    return accepted;
+  }
   set id(value) { this._id = value; elements.set(value, this); }
   get id() { return this._id || ''; }
   get firstChild() { return this.children[0] || null; }
   appendChild(child) { child.parentElement = this; this.children.push(child); return child; }
+  append(...children) { children.forEach(child => this.appendChild(child)); }
+  replaceChildren(...children) { this.children = []; this.append(...children); }
+  setAttribute(name, value) { this[name] = value; }
   insertBefore(child, ref) {
     child.parentElement = this;
     const pos = this.children.indexOf(ref);
@@ -86,7 +101,9 @@ for (const id of ['parsedCountBadge', 'selectedCountBadge', 'selectAllCheckbox',
 const document = {
   createElement: tag => new Element(tag),
   getElementById: id => elements.get(id) || null,
-  querySelectorAll: selector => root.querySelectorAll(selector)
+  querySelectorAll: selector => selector.startsWith('#parsedCardsContainer ')
+    ? elements.get('parsedCardsContainer').querySelectorAll(selector.slice('#parsedCardsContainer '.length))
+    : root.querySelectorAll(selector)
 };
 const asString = value => value == null ? '' : String(value);
 const window = { location: {href:'http://localhost:8000/', origin:'http://localhost:8000'}, MathBankSafe: {
@@ -181,6 +198,30 @@ const scenarios = {
     assert.equal(q.source_review.required,true);
     assert.equal(requests.length,0);
   },
+  async confirmed_formula_records_stay_collapsed_and_do_not_repeat_old_warnings() {
+    const q=verifiedQuestion();
+    q.source_review.reasons=['公式未恢复，需要核对公式'];
+    const card=show([q]);
+    const report={source_review_count:0,math_locks_created:1,math_locks_missing:1,
+      warnings:['历史核对发现公式未恢复'],pdf_review_items:[{question_index:0,reasons:q.source_review.reasons}],
+      pdf_source_verification:{status:'completed',calls:1,checked:1,confirmed:1,pending:0}};
+    renderSourceIntegrityReport(report);appendSourceIntegrityLog(report);
+    const panel=card.querySelector('.card-source-review-panel');
+    assert.equal(panel.open,false);
+    assert.equal(panel.querySelector('.card-source-review-status').textContent,'查看原页自动核验记录');
+    assert.ok(panel.querySelector('.card-source-review-explanation').textContent.includes('已对照原文确认'));
+    assert.equal(parsedQuestionNeedsSourceReview(0),false);
+    assert.equal(document.getElementById('parsedSourceIntegrityReport').open,false);
+    assert.equal(document.getElementById('parsedSourceIntegrityReport').querySelector('.pdf-review-question-list'),null);
+    assert.ok(logs.every(line=>!line.includes('需要核对')&&!line.includes('未恢复')&&!line.includes('1 道题')));
+    assert.equal(toasts.length,0);
+    assert.equal(requests.length,0);
+    const content=card.querySelector('.card-content-textarea').value;
+    edit(card,'.card-content-textarea',content+'修改');
+    assert.ok(panel.querySelector('.card-source-review-explanation').textContent.includes('旧核验结论仅供参考'));
+    assert.equal(parsedQuestionNeedsSourceReview(0),true);
+    assert.equal(panel.open,false,'editing does not open the historical record automatically');
+  },
   async precheck_stale_snapshot_still_aborts() {
     const card=show([pendingQuestion()]);
     let resolveCheck;
@@ -213,6 +254,47 @@ const scenarios = {
     assert.equal(card.querySelector('.card-answer-textarea').value,'新模型答案');
     assert.equal(q.source_review.required,true,'answer generation does not certify original-source evidence');
     assert.equal(parsedQuestionNeedsSourceReview(0),true);
+  },
+  async generated_answers_reopen_saved_cards_and_persist_session() {
+    let writes=0;
+    window.MathBankDocumentImportSession={saveSoon(){writes++;}};
+    for(const mode of ['single','batch']) {
+      const q=verifiedQuestion();const card=show([q]);
+      q.savedSnapshot=captureParsedQuestionSaveSnapshot(0,q,card);q.saved=true;
+      const checkbox=card.querySelector('.card-select-checkbox');
+      checkbox.disabled=true;checkbox.checked=false;writes=0;
+      const work=mode==='single'?generateSingleAnswer(0):processAsyncAnswerGeneration(parsedQuestionsData);
+      requests.at(-1).resolve(success('尚未再次入库的新答案'));await work;
+      assert.equal(q.saved,false,mode+' answer is a new unsaved revision');
+      assert.equal(checkbox.disabled,false,mode+' result must allow another import');
+      assert.equal(checkbox.checked,true);
+      assert.ok(writes>0,mode+' programmatic answer must persist without input');
+    }
+  },
+  async generated_answers_on_new_cards_persist_without_saved_baseline() {
+    let writes=0;
+    window.MathBankDocumentImportSession={saveSoon(){writes++;}};
+    for(const mode of ['single','batch']) {
+      const q=verifiedQuestion();const card=show([q]);writes=0;
+      assert.equal(q.savedSnapshot,undefined);
+      const work=mode==='single'?generateSingleAnswer(0):processAsyncAnswerGeneration(parsedQuestionsData);
+      requests.at(-1).resolve(success('新题暂存的模型答案'));await work;
+      assert.equal(card.querySelector('.card-answer-textarea').value,'新题暂存的模型答案');
+      assert.ok(writes>0,mode+' result on a never-saved card must reach the session store');
+    }
+  },
+  async source_clear_reopens_saved_card_and_persists_session() {
+    let writes=0;
+    window.MathBankDocumentImportSession={saveSoon(){writes++;}};
+    const q={...verifiedQuestion(),source:'已入库的来源'};const card=show([q]);
+    q.savedSnapshot=captureParsedQuestionSaveSnapshot(0,q,card);q.saved=true;
+    const checkbox=card.querySelector('.card-select-checkbox');
+    checkbox.disabled=true;checkbox.checked=false;writes=0;
+    clearAllParsedSources();
+    assert.equal(card.querySelector('.card-source').value,'');
+    assert.equal(q.saved,false,'changing source is a new unsaved revision');
+    assert.equal(checkbox.disabled,false);assert.equal(checkbox.checked,true);
+    assert.ok(writes>0,'source clearing must persist without input');
   },
   async requested_queue_keeps_concurrency_and_snapshot_protection() {
     const questions=Array.from({length:4},pendingQuestion);show(questions);
@@ -273,7 +355,10 @@ scenarios[process.argv[1]]().catch(error => { console.error(error); process.exit
 
 @pytest.mark.parametrize("scenario", [
     "pending_is_optional_and_save_still_prechecks", "edits_keep_optional_evidence_and_regular_validation",
+    "confirmed_formula_records_stay_collapsed_and_do_not_repeat_old_warnings",
     "precheck_stale_snapshot_still_aborts", "requested_answers_include_pending_and_preserve_edit_race",
+    "generated_answers_reopen_saved_cards_and_persist_session", "generated_answers_on_new_cards_persist_without_saved_baseline",
+    "source_clear_reopens_saved_card_and_persists_session",
     "requested_queue_keeps_concurrency_and_snapshot_protection", "unmatched_report_and_new_import",
     "local_source_images_only",
 ])

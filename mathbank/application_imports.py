@@ -1,4 +1,4 @@
-"""Compatibility dependency defaults; no application initialization or business logic."""
+"""Pure composition defaults; never initialize application state here."""
 
 import os
 import atexit
@@ -63,46 +63,54 @@ from mathbank.pdf_layout import inspect_pdf_page
 from mathbank.paths import DATABASE_PATH, DATA_BACKUP_DIR, ENV_FILE, PROJECT_ROOT, STATIC_CSS_DIR, STATIC_DIR, STATIC_JS_DIR, SYSTEM_GENERATED_DIR, TEST_UPLOADS_DIR, UPLOADS_DIR
 from mathbank.asset_security import AssetSecurityError, InvalidImageError, MAX_OCR_IMAGE_BYTES, MAX_PDF_BYTES, MAX_SINGLE_IMAGE_BYTES, UploadTooLargeError, harden_private_path, normalize_answer_tikz_assets, normalize_content_tikz_assets, normalize_optional_upload_asset_reference, normalize_raster_image, normalize_upload_asset_reference, normalize_upload_asset_references, read_stream_limited, resolve_upload_asset, write_private_text_atomic
 from mathbank.application_errors import PaperExportValidationError
-
+from functools import wraps
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks, Request, Response, Header, Query
-
-from mathbank.paper_parse import (
-    PAPER_SPLIT_TIMEOUT_SECONDS, PAPER_SPLIT_CACHE_MAX_CHARACTERS,
-    parse_paper_completion, finalize_source_answers, request_pdf_paper_completion,
+from starlette.background import BackgroundTask
+from sqlalchemy.orm import Session, selectinload
+from sqlalchemy import and_
+from mathbank.database import FIGURE_ALIGN_VALUES, FIGURE_SIZE_VALUES, Question, DocumentImportReceipt, QuestionCurriculum, QuestionKnowledgePoint, KnowledgePointCurriculum, QuestionSubKnowledge, QuestionFingerprint as StoredQuestionFingerprint, Paper, PaperQuestion, engine, get_db, init_db, normalize_figure_size
+from mathbank.sub_knowledge import detect_curriculum_version, normalize_sub_knowledge
+from mathbank.question_reads import find_association_candidates, question_summary_load_options
+from mathbank.knowledge_points import apply_knowledge_point_filters, create_local_point, list_catalog, normalize_question_points, replace_question_points
+from mathbank.ai_knowledge_points import annotate_ai_knowledge_points, load_ai_knowledge_catalog
+from mathbank.question_references import export_reference_text, reference_payloads, refresh_reference_targets_for_labels, sync_question_references, sync_question_source_labels
+from mathbank.import_review import make_source_review_advisory, prepare_word_extraction_reviews, finalize_word_extraction_reviews
+from mathbank.export_preflight import ExportPreflightError, preflight_paper_export, read_export_preflight
+from mathbank.background_export import DatabaseExportQueue
+from mathbank.backup import acquire_runtime_lock, create_full_backup, create_full_backup_if_due
+from mathbank.library_transfer import MAX_ARCHIVE_BYTES as MAX_LIBRARY_ARCHIVE_BYTES, export_library_zip, import_library_zip, inspect_library_zip, preview_library_questions, select_library_question_ids
+from mathbank.library_transfer import MAX_QUESTIONS as MAX_LIBRARY_QUESTIONS, prepare_library_import
+from mathbank.library_transfer_tasks import (
+    LibraryTransferTasks, TransferTaskConflict, TransferTaskError, TransferTaskQueueFull,
+    log_transfer_error, normalize_transfer_task_id, transfer_error,
 )
-
-from mathbank.asset_lifecycle import (
-    AssetLifecycleError,
-    RetainedUploadStaticFiles,
-    quarantine_asset,
-    register_asset_store,
-    serialize_asset_lifecycle,
-)
-
-from mathbank.question_assets import (
-    embedded_question_assets,
-    markdown_literal_ranges,
-    rewrite_image_layout_paths,
-    rewrite_question_asset_paths,
-    rewrite_structured_asset_paths,
-    structured_question_assets,
-)
-
-from mathbank.asset_security import (
-    AssetSecurityError,
-    InvalidImageError,
-    MAX_OCR_IMAGE_BYTES,
-    MAX_PDF_BYTES,
-    MAX_SINGLE_IMAGE_BYTES,
-    UploadTooLargeError,
-    harden_private_path,
-    normalize_answer_tikz_assets,
-    normalize_content_tikz_assets,
-    normalize_optional_upload_asset_reference,
-    normalize_raster_image,
-    normalize_upload_asset_reference,
-    normalize_upload_asset_references,
-    read_stream_limited,
-    resolve_upload_asset,
-    write_private_text_atomic,
-)
+from mathbank.storage_access import check_startup_storage, check_directory_access, check_database_write_access
+from mathbank.asset_lifecycle import ASSET_LIFECYCLE_LOCK
+from mathbank.task_manager import iter_completed_futures, TaskCancelled, TaskManager, TaskQueueFull
+from mathbank.source_metadata import prepare_word_source_metadata, source_metadata_diagnostics, normalize_source_fillin
+from mathbank.source_metadata_request import request_word_source_metadata, SourceMetadataPermanentHTTPError
+from mathbank.document_task_store import DocumentTaskStore, DurableDocumentTasks
+from mathbank.formula_notices import separate_formula_notices
+from mathbank.paper_parse import PAPER_SPLIT_TIMEOUT_SECONDS, PAPER_SPLIT_CACHE_MAX_CHARACTERS, parse_paper_completion, finalize_source_answers, request_pdf_paper_completion
+from mathbank.math_markdown import normalize_question_math_markdown, normalize_table_math_wrappers
+from mathbank.markdown_helper import MAX_MARKDOWN_BYTES, decode_and_prepare_markdown, prepare_markdown_source, markdown_image_references, map_markdown_question_images, prepare_markdown_question_for_storage
+from mathbank.import_classification import normalize_import_classifications, summarize_import_classifications
+from mathbank.document_projects import DocumentProjectStore, DocumentProjectError, ProjectConflict
+from mathbank.document_project_service import DocumentProjectService, project_question_ids, project_task_guard, project_dispatch_guard
+from mathbank.document_project_pipeline import parse_project_pdf
+from mathbank.document_project_import import project_import_guard, prepare_project_import, record_project_import
+from mathbank.ai_providers import MultimodalProviderConfig, apply_model_thinking_policy, apply_structured_output_policy, resolve_draw_provider, resolve_ocr_fallbacks, resolve_ocr_provider, resolve_text_provider
+from mathbank.curriculums import build_default_metadata, build_curriculum_routing_index, get_curriculum_preset, load_curriculum, route_curriculum_location
+from mathbank.prompts import COMMON_OCR_PROMPT, PDF_ORIGINAL_COMMON_OCR_PROMPT, PDF_VISUAL_FIDELITY_RULE, ILLUSTRATION_BOX_PROMPT, SINGLE_OCR_STRUCTURED_INSTRUCTIONS, build_single_ocr_vision_prompt, build_ai_solve_prompts, build_classification_system_prompt, build_import_parse_system_prompt, build_latex_error_explanation_prompts, build_paper_selection_prompts, build_pdf_parse_system_prompt, build_tikz_correction_prompt, build_tikz_draw_prompt
+from mathbank.ocr_illustrations import MAX_OCR_RESPONSE_CHARS, materialize_ocr_illustrations, parse_single_ocr_response
+from mathbank.ocr_figure_review import review_single_ocr_figures, review_tikz_previews
+from mathbank.pdf_inspector_helper import is_pdf_inspector_available, get_pdf_inspector_version, inspect_and_extract_pdf, merge_pdf_page_texts
+from mathbank.pdf_figures import PDF_STRATEGIES, apply_pdf_layout_reviews, refresh_pdf_review_items, enrich_pdf_with_figures, isolate_shared_pdf_figures
+from mathbank.document_requests import DOCUMENT_AI_TIMEOUT_SECONDS
+from mathbank.pdf_vision_request import completion_content, request_pdf_vision, collected_usage
+from mathbank.paths import DATABASE_PATH, DATA_BACKUP_DIR, DOCUMENT_TASKS_DIR, DOCUMENT_PROJECTS_DIR, ENV_FILE, PROJECT_ROOT, STATIC_CSS_DIR, STATIC_DIR, STATIC_JS_DIR, SYSTEM_GENERATED_DIR, TEST_UPLOADS_DIR, UPLOADS_DIR
+from mathbank.asset_lifecycle import AssetLifecycleError, RetainedUploadStaticFiles, quarantine_asset, register_asset_store, serialize_asset_lifecycle
+from mathbank.paths import RETAINED_UPLOADS_DIR
+from mathbank.question_assets import embedded_question_assets, markdown_literal_ranges, rewrite_image_layout_paths, rewrite_question_asset_paths, rewrite_structured_asset_paths, structured_question_assets
+from mathbank.pdf_ocr_capacity import PdfOcrCapacity, configured_pdf_ocr_concurrency
+from mathbank.document_project_api import register_document_project_routes

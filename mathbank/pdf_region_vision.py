@@ -15,19 +15,15 @@ import re
 from typing import Callable
 
 from PIL import Image
-import requests
 
 from mathbank import prompts
-from mathbank.ai_http import (
-    AIStreamResponseError, collect_streamed_completion, is_stream_read_timeout,
-    post_chat_completion,
-)
+from mathbank.ai_http import post_chat_completion
 from mathbank.ai_json import parse_ai_json
 from mathbank.ai_providers import OCRConfigurationError, apply_model_thinking_policy, apply_structured_output_policy, resolve_ocr_provider
 from mathbank.pdf_figures import MAX_FIGURES_PER_PAGE, MAX_SOURCE_CHARS, describe_figure_slots
 from mathbank.pdf_layout import normalize_model_bbox
 from mathbank.pdf_page_vision import (
-    MAX_OUTPUT_TOKENS, MAX_RESPONSE_CHARS, PDF_VISION_TIMEOUT, _PAGE_FIELDS, _SLOT_LABEL, _finite_number,
+    MAX_OUTPUT_TOKENS, MAX_RESPONSE_CHARS, _PAGE_FIELDS, _SLOT_LABEL, _finite_number,
     _no_cancel, _prompt_page_info, _require_fields, _validated_page,
 )
 from mathbank.pdf_vision_request import completion_content, request_pdf_vision
@@ -268,19 +264,15 @@ def request_pdf_regions(
     report_attempt: Callable[[dict], None] = lambda _event: None,
     include_transcription_evidence: bool = False,
 ) -> dict:
-    """Recognize all planned crops together, with at most one retry."""
+    """Recognize all planned crops in one request; no automatic paid retry."""
     check_cancelled()
     regions, pieces = _validated_plan(page_info, plan)
     witness = None
     provider = resolve_ocr_provider(os.getenv("OCR_PREFER_ENGINE", "siliconflow"))
     if not provider.api_key or not provider.chat_completions_url:
-        label = getattr(provider, "credential_label", "所选识图平台的 API Key")
-        raise OCRConfigurationError(
-            f"所选识图服务 {label} 未配置可用的密钥或接口地址。"
-            "请在系统设置的 API 配置中填写并保存后重试。"
-        )
+        raise OCRConfigurationError("PDF 局部识别所用的识图服务未配置，请打开 API 设置。")
     if not provider.supports_image_input:
-        raise OCRConfigurationError("当前所选识图模型不支持 PDF 图片输入，请在系统设置中改选支持图片的模型。")
+        raise OCRConfigurationError("当前识图模型不支持 PDF 局部图片输入。")
     content = [{"type": "text", "text": prompts.build_pdf_region_vision_prompt(regions, include_figures=include_figures)}]
     content.extend(_crop_messages(image_path, regions, check_cancelled))
     payload = {"model": provider.model_name, "messages": [{"role": "user", "content": content}],

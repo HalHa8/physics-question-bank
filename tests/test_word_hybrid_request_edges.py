@@ -3,7 +3,7 @@
 import pytest
 
 from mathbank.source_metadata import SourceMetadataContractError
-from mathbank.source_hybrid_request import SourceHybridContractError
+from mathbank.source_hybrid_request import SourceHybridContractError, SourceHybridPermanentRequestError
 from mathbank.word_hybrid_plan import WordHybridPlanError
 from mathbank.word_hybrid_request import request_word_hybrid
 from mathbank.task_manager import TaskCancelled
@@ -33,7 +33,7 @@ def test_source_change_during_final_local_adoption_is_a_hard_stop(tmp_path):
     assert len(posts) == 1
 
 
-def test_source_change_during_original_full_fallback_cannot_return_stale_result(tmp_path):
+def test_invalid_paid_response_never_starts_original_full_fallback_or_returns_stale_result(tmp_path):
     plan = native_plan(tmp_path)
     posts = []; fallbacks = []
 
@@ -48,7 +48,7 @@ def test_source_change_during_original_full_fallback_cannot_return_stale_result(
         plan['source'] += '\nSource changed while full fallback was in flight.'
         return [{'content':'Stale result', 'answer_markdown':'', **FIELDS}]
 
-    with pytest.raises((WordHybridPlanError, SourceMetadataContractError, SourceHybridContractError)):
+    with pytest.raises(SourceHybridPermanentRequestError, match='不会自动再次计费'):
         request_word_hybrid(plan, CURRICULUM, provider=PROVIDER, post=post, diagnostics={},
             normalize_fillin=lambda value:value, full_source_fallback=fallback,
             task_id='independent-hybrid', generation=3)

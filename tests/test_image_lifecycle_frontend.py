@@ -9,9 +9,9 @@ import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
-API = (ROOT / 'static/js/api.js').read_text()
-EDITOR = (ROOT / 'static/js/editor.js').read_text()
-IMPORT = (ROOT / 'static/js/import.js').read_text()
+API = (ROOT / 'static/js/api.js').read_text(encoding='utf-8')
+EDITOR = (ROOT / 'static/js/editor.js').read_text(encoding='utf-8')
+IMPORT = (ROOT / 'static/js/import.js').read_text(encoding='utf-8')
 
 
 def section(source, start, end):
@@ -36,6 +36,11 @@ function loadQuestions() {}
 function loadCategories() {}
 function refreshRelatedDropdown() {}
 function updateQuestionSaveButtonState() {}
+// The save slice calls reference lifecycle helpers declared earlier in import.js.
+let referenceRefreshSequence = 0;
+window.QuestionReferenceState = {reset() {}, hydrate() {}, invalidate() {}};
+window.refreshCurrentQuestionReferences = () => false;
+function updateEditorReferencePreviews() {}
 function clearContentOcrPreview() {}
 function clearOcrPreview() {}
 function renderParsedCardPreview() {}
@@ -68,6 +73,7 @@ SOURCES = (
     + '\nwindow.MathBankSafe={safeImageUrl};\n'
     + section(API, 'const EditorState =', '// Global variables')
     + section(API, 'let uploadedImages =', 'let contentOcrAbortController')
+    + section(EDITOR, 'let subKnowledgeCatalog =', '// Formatting operates')
     + section(IMPORT, '// ocr.js is loaded', 'function findContentTikzImagePath')
     + section(EDITOR, 'function backupEditorState', '// Custom Premium Confirmation Modal')
     + section(EDITOR, 'function getLocalStorageDrafts', 'function selectDraft')
@@ -80,10 +86,12 @@ SOURCES = (
 def run_js(checks, sources=SOURCES):
     node = shutil.which('node')
     assert node, 'Node is required for isolated frontend regression checks'
-    result = subprocess.run([node, '-e', "eval(require('node:fs').readFileSync(0,'utf8'))"],
-                            input=COMMON + sources + '\n(async()=>{\n' + checks
-                             + '\n})().catch(error=>{console.error(error);process.exitCode=1;});',
-                            capture_output=True, text=True, cwd=ROOT)
+    script = COMMON + sources + '\n(async()=>{\n' + checks \
+        + '\n})().catch(error=>{console.error(error);process.exitCode=1;});'
+    # Shipped source slices can exceed Linux's 128 KiB per-argument limit.
+    # stdin keeps the actual script and every ownership/race assertion intact.
+    result = subprocess.run([node, '-'], input=script,
+                            capture_output=True, text=True, encoding='utf-8', cwd=ROOT)
     assert result.returncode == 0, result.stderr + result.stdout
 
 
@@ -147,6 +155,28 @@ def test_cut_undo_paste_shared_answer_and_private_tikz_draft_assets():
     """)
 
 
+def test_save_retains_other_version_subdivisions_in_a_linked_draft():
+    run_js(r"""
+      window.activeCurriculumVersion='A';window.editorCurriculumVersion='A';
+      EditorState.useQuestion({id:7});elements.editContent.value='跨版本题目';
+      backupEditorState(7);
+      const pending={compulsory:'选择性必修三',chapter:'第七章 概率',knowledge:'7.1 条件概率'};
+      editorSubKnowledgeByVersion.B=[pending];
+      assert.equal(isEditorModified(),true);
+      const work=saveQuestion(true),request=requests.at(-1);
+      assert.equal(request.options.body.get('expected_version_code'),'A');
+      assert.equal(request.options.body.get('sub_knowledge'),null,'metadata-only saves omit relation edits so existing rows survive');
+      request.resolve({ok:true,status:200,json:async()=>({status:'success',question:{id:7,
+        content:'跨版本题目',image_paths:[],sub_knowledge:[]}})});
+      assert.equal(await work,true);
+      const drafts=getLocalStorageDrafts();
+      assert.equal(drafts.length,1);
+      assert.equal(drafts[0].saved_question_id,7);
+      assert.deepEqual(drafts[0].sub_knowledge_by_version.B,[pending]);
+      assert.deepEqual(drafts[0].pending_sub_knowledge_versions,['B']);
+      assert(toasts.some(message=>message.includes('草稿保留了 B')));
+      assert.equal(isEditorModified(),true,'saving A cannot clear outstanding B edits');
+    """)
 
 
 @pytest.mark.parametrize('edit_during_save', [False, True])

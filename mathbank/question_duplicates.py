@@ -23,11 +23,22 @@ import re
 import unicodedata
 from typing import Iterable, Literal, Mapping, Sequence
 
+from mathbank.source_comments import strip_source_attribution_comment
+
 
 FINGERPRINT_VERSION = 3
 SIMHASH_BITS = 128
 SIMHASH_BAND_COUNT = 8
 SIMHASH_BAND_BITS = 16
+# Each 16-bit lane counts one SHA-256 digest bit independently.  This table
+# contains no question data, and expanding bytes avoids 128 Python updates for
+# every feature.  The fast path below only uses it while carries are impossible.
+_SIMHASH_COUNTER_BITS = 16
+_SIMHASH_COUNTER_MAX = (1 << _SIMHASH_COUNTER_BITS) - 1
+_SIMHASH_BYTE_COUNTERS = tuple(
+    b"".join(bytes((0, (byte >> bit) & 1)) for bit in range(7, -1, -1))
+    for byte in range(256)
+)
 TEXT_FRAGMENT_NGRAM_SIZE = 4
 TEXT_MINHASH_BIN_COUNT = 32
 TEXT_MINHASH_VALUES_PER_BAND = 4
@@ -799,6 +810,7 @@ def normalize_math_text(value: str) -> str:
 
 
 def _build_canonical_content(value: str) -> tuple[str, str, tuple[str, ...], int]:
+    value = strip_source_attribution_comment(value)
     with_images, markdown_figure_count = _replace_images(value)
     raw_stem, raw_choices = extract_choices(with_images)
     stem = normalize_math_text(raw_stem)
@@ -941,6 +953,27 @@ def compute_simhash_128(features: Mapping[str, int] | Iterable[str]) -> int:
     if not weighted_features:
         return 0
 
+    total_weight = sum(weight for _, weight in weighted_features)
+    if total_weight <= _SIMHASH_COUNTER_MAX:
+        counters = 0
+        for feature, weight in weighted_features:
+            digest = hashlib.sha256(feature.encode("utf-8")).digest()[:16]
+            expanded = int.from_bytes(
+                b"".join(_SIMHASH_BYTE_COUNTERS[byte] for byte in digest), "big"
+            )
+            counters += expanded * weight
+        # Original signed vote: ones - zeros > 0, equivalently
+        # ones > floor(total / 2).  Ties therefore still produce zero.
+        threshold = total_weight // 2
+        result = 0
+        for bit in range(SIMHASH_BITS):
+            if (counters & _SIMHASH_COUNTER_MAX) > threshold:
+                result |= 1 << bit
+            counters >>= _SIMHASH_COUNTER_BITS
+        return result
+
+    # Unusually large inputs/weights use the unbounded original arithmetic.
+    # Fixed-width lanes must never silently carry into neighbouring digest bits.
     vector = [0] * SIMHASH_BITS
     for feature, weight in weighted_features:
         digest = int.from_bytes(

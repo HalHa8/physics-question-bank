@@ -10,22 +10,22 @@ from test_preview_browser import browser, pytestmark  # noqa: F401
 
 
 CONTENT = (
-    r"分式规范回归：主体 $\frac{x+1}{x-1}$；"
+    r"分式规范回归：主体 $\eu^x-\frac{x+1}{x-1}$；"
     r"指数 $x^{\dfrac{1}{2}}$；下标 $a_{\dfrac{m}{n}}$；"
     r"嵌套 $\frac{1+\dfrac{x}{y}}{\dfrac{a}{b}}$。"
 )
 NORMALIZED_CONTENT = (
-    r"分式规范回归：主体 $\dfrac{x+1}{x-1}$；"
+    r"分式规范回归：主体 $\eu^x-\dfrac{x+1}{x-1}$；"
     r"指数 $x^{\frac{1}{2}}$；下标 $a_{\frac{m}{n}}$；"
     r"嵌套 $\dfrac{1+\frac{x}{y}}{\frac{a}{b}}$。"
 )
 ANSWER = (
-    r"解析：主体 $\frac{2x}{x+3}$；"
+    r"解析：主体 $\upe-\frac{2x}{x+3}$；"
     r"指数 $2^{\dfrac{p}{q}}$；下标 $b_{\dfrac{1}{3}}$；"
     r"嵌套 $\frac{\dfrac{u}{v}+1}{2}$。"
 )
 NORMALIZED_ANSWER = (
-    r"解析：主体 $\dfrac{2x}{x+3}$；"
+    r"解析：主体 $\upe-\dfrac{2x}{x+3}$；"
     r"指数 $2^{\frac{p}{q}}$；下标 $b_{\frac{1}{3}}$；"
     r"嵌套 $\dfrac{\frac{u}{v}+1}{2}$。"
 )
@@ -95,13 +95,13 @@ def test_fraction_buttons_preserve_compact_contexts_and_unsaved_state(browser, t
     ))
     browser.command("wait", "--fn", (
         "document.querySelector('#contentPreview annotation').textContent === "
-        + json.dumps(r"\dfrac{x+1}{x-1}")
+        + json.dumps(r"\eu^x-\dfrac{x+1}{x-1}")
     ))
     browser.settle()
     after = _preview_metrics(browser, "contentPreview")
     assert not after["errors"]
     assert [formula["tex"] for formula in after["formulas"]] == [
-        r"\dfrac{x+1}{x-1}", r"x^{\frac{1}{2}}", r"a_{\frac{m}{n}}",
+        r"\eu^x-\dfrac{x+1}{x-1}", r"x^{\frac{1}{2}}", r"a_{\frac{m}{n}}",
         r"\dfrac{1+\frac{x}{y}}{\frac{a}{b}}",
     ]
     assert after["formulas"][0]["height"] > before["formulas"][0]["height"] + 3
@@ -123,13 +123,13 @@ def test_fraction_buttons_preserve_compact_contexts_and_unsaved_state(browser, t
     ))
     browser.command("wait", "--fn", (
         "document.querySelector('#answerPreview annotation').textContent === "
-        + json.dumps(r"\dfrac{2x}{x+3}")
+        + json.dumps(r"\upe-\dfrac{2x}{x+3}")
     ))
     browser.settle()
     answer = _preview_metrics(browser, "answerPreview")
     assert not answer["errors"]
     assert [formula["tex"] for formula in answer["formulas"]] == [
-        r"\dfrac{2x}{x+3}", r"2^{\frac{p}{q}}", r"b_{\frac{1}{3}}",
+        r"\upe-\dfrac{2x}{x+3}", r"2^{\frac{p}{q}}", r"b_{\frac{1}{3}}",
         r"\dfrac{\frac{u}{v}+1}{2}",
     ]
     assert browser.evaluate("isEditorModified()")
@@ -145,3 +145,53 @@ def test_fraction_buttons_preserve_compact_contexts_and_unsaved_state(browser, t
     assert browser.evaluate("isEditorModified()")
     assert persisted_question() == original
     print(f"Fraction visual QA: {content_screenshot}\nFraction visual QA: {answer_screenshot}")
+
+
+def test_physics_constant_fraction_button_preserves_authored_variables_and_database(browser):
+    # The module fixture is shared; the preceding test deliberately leaves an
+    # unsaved editor open. Reload only the disposable test app, not user data.
+    browser.command("open", browser.evaluate("location.href"))
+    browser.command("wait", "--fn", "typeof window.renderPaperCanvas === 'function'")
+    content = r"电流 $i(t)=-2.00\,\mathrm{mA}\,\eu^{-\frac{t}{\tau}}+\frac{U}{R}$；电荷 $e=1.60\times10^{-19}\,\mathrm{C}$。"
+    expected = content.replace(r"\frac{U}{R}", r"\dfrac{U}{R}")
+    question_id = browser.evaluate("""
+    (async () => {
+        selectWorkspace('bank', '题库研讨工作台');
+        const form = new FormData();
+        form.set('content', %s);
+        form.set('question_type', 'calculation');
+        form.set('difficulty', 'normal');
+        const response = await fetch('/api/questions', {method: 'POST', body: form});
+        const data = await response.json();
+        if (!response.ok || !data.question) throw new Error(JSON.stringify(data));
+        loadQuestions();
+        return data.question.id;
+    })()
+    """ % json.dumps(content))
+    browser.command("wait", "--fn", f"!!document.querySelector('#questionsList [data-id=\"{question_id}\"]')")
+    browser.command("click", f'#questionsList [data-id="{question_id}"]')
+    browser.command("wait", "--fn", f"EditorState.questionId === {question_id} && !questionDetailLoading && !isEditorModified()")
+    browser.command("click", "#editQuestionFromPreviewBtn")
+    browser.command("click", '[data-editor-panel-target="content"]')
+    browser.command("wait", "--fn", "document.querySelectorAll('#contentPreview .katex').length === 2")
+    browser.command("scrollintoview", "#normalizeContentFractionsBtn")
+    browser.settle()
+    browser.command("click", "#normalizeContentFractionsBtn")
+    browser.command("wait", "--fn", (
+        "!document.getElementById('normalizeContentFractionsBtn').disabled && "
+        "document.getElementById('editContent').value === " + json.dumps(expected)
+    ))
+    browser.command("wait", "--fn", (
+        "document.querySelector('#contentPreview annotation').textContent === "
+        + json.dumps(r"i(t)=-2.00\,\mathrm{mA}\,\eu^{-\frac{t}{\tau}}+\dfrac{U}{R}")
+    ))
+    browser.settle()
+    metrics = _preview_metrics(browser, "contentPreview")
+    assert not metrics["errors"]
+    assert [formula["tex"] for formula in metrics["formulas"]] == [
+        r"i(t)=-2.00\,\mathrm{mA}\,\eu^{-\frac{t}{\tau}}+\dfrac{U}{R}",
+        r"e=1.60\times10^{-19}\,\mathrm{C}",
+    ]
+    assert browser.evaluate("isEditorModified()")
+    persisted = browser.evaluate(f"fetch('/api/questions/{question_id}').then(response => response.json())")
+    assert persisted["content"] == content

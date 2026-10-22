@@ -14,7 +14,7 @@ from mathbank.ai_providers import resolve_text_provider
 from mathbank.content_locks import _formulas
 from mathbank.docx_helper import extract_docx_markdown
 from mathbank.source_metadata import SourceMetadataContractError
-from mathbank.source_hybrid_request import SourceHybridContractError
+from mathbank.source_hybrid_request import SourceHybridContractError, SourceHybridPermanentRequestError
 from mathbank.question_assets import embedded_question_assets
 from mathbank.task_manager import TaskCancelled
 from mathbank.word_hybrid_plan import WordHybridPlanError, build_word_hybrid_plan
@@ -148,7 +148,7 @@ def test_global_contract_failure_has_one_whole_fallback_and_no_scoped_repeats(tm
         else: parsed['page_complete'] = True
         return Response(parsed)
     def fallback(): fallbacks.append(True); return original
-    with pytest.raises(SourceHybridContractError, match='未自动重试'):
+    with pytest.raises(SourceHybridPermanentRequestError, match='不会自动再次计费'):
         call(plan, post, fallback=lambda: fallbacks.append(True) or [])
     attempts = calls if 'calls' in locals() else posts
     assert len(attempts) == 1 and not fallbacks
@@ -168,7 +168,15 @@ def test_only_failed_group_is_sent_once_more_without_repeating_accepted_ids(tmp_
             else: parsed['splits'].pop(0)
         return Response(parsed)
     result, diagnostics = call(plan, post)
-    assert len(calls) == 1 and diagnostics['word_hybrid']['calls'] == 1 and result.partial
+    assert len(calls) == 1 and diagnostics['word_hybrid']['calls'] == 1
+    if mutation == 'bad_category':
+        # V3 keeps reliable source content and asks the teacher to fix its
+        # classification instead of dropping an otherwise complete question.
+        assert not result.partial and len(result.questions) == 5
+        review = result.questions[0]['classification_review']
+        assert review['required'] and review['original']['category_chapter'] == 'Unknown chapter'
+        return
+    assert result.partial
     assert len(result.questions) == 4
     assert len(diagnostics['word_hybrid']['failed_group_ids']) == 1
 
@@ -232,7 +240,7 @@ def test_risky_source_identity_and_answer_binding_cannot_be_certified_by_self_re
         else: rows[0]['answer_markdown'], rows[1]['answer_markdown'] = rows[1]['answer_markdown'], rows[0]['answer_markdown']
         return Response(parsed)
     if mutation in {'unknown', 'duplicate'}:
-        with pytest.raises(SourceHybridContractError, match='未自动重试'):
+        with pytest.raises(SourceHybridPermanentRequestError, match='不会自动再次计费'):
             call(plan, post, fallback=lambda: fallbacks.append(True) or [])
     else:
         result, diagnostics = call(plan, post, fallback=lambda: fallbacks.append(True) or [])
@@ -286,7 +294,7 @@ def test_provider_error_uses_one_whole_fallback_without_client_retry_or_third_po
     def post(_provider, payload, **options):
         posts.append(options); return Response({}, status_code=500)
     original = [{'content': 'Old original source result', **FIELDS}]
-    with pytest.raises(SourceHybridContractError, match='未自动重试'):
+    with pytest.raises(SourceHybridPermanentRequestError, match='不会自动再次计费'):
         call(plan, post, fallback=lambda: fallbacks.append(True) or [])
     attempts = calls if 'calls' in locals() else posts
     assert len(attempts) == 1 and not fallbacks
@@ -328,7 +336,7 @@ def test_no_adoptable_groups_uses_one_original_fallback_instead_of_repeating_ful
     def post(_provider, payload, **options):
         posts.append(deepcopy(payload)); return Response({'metadata': {'items': []}, 'splits': []})
     original = [{'content': 'Original fallback result', **FIELDS}]
-    with pytest.raises(SourceHybridContractError, match='未自动重试'):
+    with pytest.raises(SourceHybridPermanentRequestError, match='不会自动再次计费'):
         call(plan, post, fallback=lambda: fallbacks.append(True) or [])
     attempts = calls if 'calls' in locals() else posts
     assert len(attempts) == 1 and not fallbacks
