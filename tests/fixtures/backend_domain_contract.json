@@ -1,6 +1,11 @@
 {
   "baseline_commit": "94de5dd1fd5e9fd4ea6256312be2e1ebf311899f",
   "intentional_algorithm_updates": {
+    "library_navigation": {
+      "reason": "Read-only SQL aggregation and optional classification filter; historical sub-knowledge evidence is not an active curriculum position.",
+      "previous_list_questions_body_sha256": "eb0c5e26860111e61d748895a1f36f7ff9f4c5e8eedf7c9e46ea6b40c4a00ceb",
+      "behavior_regressions": "tests/test_library_browse.py; tests/test_library_browser.py"
+    },
     "ocr_via_provider": {
       "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
       "reason": "Single selected provider, bounded stream timeout and cancellation; original physical image crops preserved; no paid retry or provider fallback.",
@@ -749,6 +754,7 @@
     }
   },
   "functions": {
+    "get_library_overview": "library_browse",
     "schedule_database_export": "maintenance_service",
     "schedule_question_fingerprint_retry": "maintenance_service",
     "print_startup_diagnostics": "maintenance_service",
@@ -900,6 +906,7 @@
     "upload_image_task": "image_import_service"
   },
   "body_sha256": {
+    "get_library_overview": "e947ebfd6b049535cea870f42e3220f18a283f69739de72f92b8cc0603ed3203",
     "schedule_database_export": "c9946611c688c2a3f10ebcb98e11875959006cef23fab98ee0eb58456b4fd0c8",
     "schedule_question_fingerprint_retry": "757ed575359f4e38da0b655c173e0d7be7c59558b69b3cafdc13692039ba31c4",
     "print_startup_diagnostics": "0feb145ebf5e182f982a1b4863ec7030aa384c1309ff52d0fb39311a13011436",
@@ -944,7 +951,7 @@
     "get_settings": "96f06b42cce7f21c8e8c6f7bc116c2c120932e78bffbd39b65aaadf9bb1b0193",
     "save_settings": "94761fbefd7e841585aeb3522821067d3a894c8810e61c881de2c5ac719e9326",
     "get_seq_mapping": "eba47c6034ef55a8326fc88f1dad7d8a412cc04678645e46851cec381907e1c5",
-    "list_questions": "eb0c5e26860111e61d748895a1f36f7ff9f4c5e8eedf7c9e46ea6b40c4a00ceb",
+    "list_questions": "af0d7f5ef0ddc1341285926a41a8181b1e2053f0b00cb96392d00d281b907ae8",
     "_duplicate_payload_list": "4a90815efea521dec8394a084557875d28f019bf7262ac5470c3be6b4ca7d63c",
     "_duplicate_input_from_payload": "57a65674dee27f182dac674d560eb19bef9b78ca1f7357c726cb308a061267db",
     "_prompt_visible_image_paths": "fe409476df3071a7b2018d3e6a82b0f255dadac8fbd23d4a573fe358fbdbb7b9",

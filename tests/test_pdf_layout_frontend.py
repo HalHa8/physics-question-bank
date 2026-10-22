@@ -1212,6 +1212,9 @@ def test_main_correction_actions_replace_missing_and_old_figures_with_undo(brows
         assert result == {'inserted': True, 'restoredMissing': True, 'replaced': True, 'restoredOld': True}
     finally:
         browser.evaluate('window.fetch=window.__mainCropFetch; closePdfCropModal(); true')
+        # Closing is animated. Do not leak its still-visible overlay into the
+        # next test's real pointer click on the source report.
+        browser.command('wait', '--fn', 'document.getElementById("pdfCropModal").classList.contains("hidden")')
 
 
 @pytest.mark.skipif(os.environ.get("MATHBANK_TEST_BROWSER") != "1", reason="opt-in actual browser regression")

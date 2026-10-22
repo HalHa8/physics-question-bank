@@ -21,7 +21,7 @@ def build_index_response(*, static_dir: Path, js_dir: Path, css_dir: Path,
             html_content = f.read()
 
         # Inject dynamic cache-busting version parameter based on file mtime
-        js_files = ["api.js", "knowledge-points.js", "editor.js", "ocr.js", "import.js", "image-import.js", "document-import-session.js", "paper.js", "dashboard.js", "qa-data.js", "qa.js"]
+        js_files = ["api.js", "knowledge-points.js", "editor.js", "ocr.js", "import.js", "image-import.js", "document-import-session.js", "paper.js", "dashboard.js", "library-browser.js", "qa-data.js", "qa.js"]
         for js in js_files:
             js_path = str(js_dir / js)
             mtime = int(os.path.getmtime(js_path)) if os.path.exists(js_path) else 0

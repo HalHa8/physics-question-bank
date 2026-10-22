@@ -16,6 +16,14 @@ def test_old_operations_and_components_outside_knowledge_scope_are_unchanged():
     application = create_application(initialize=False)
     try:
         schema = application.app.openapi()
+        # Only these two additions are in the library-navigation upgrade.
+        # Preserve the complete previous schema, not just selected operations.
+        import copy
+        previous = copy.deepcopy(schema)
+        del previous['paths']['/api/library/overview']
+        parameters = previous['paths']['/api/questions']['get']['parameters']
+        parameters[:] = [item for item in parameters if item['name'] != 'classification_status']
+        assert _hash(previous) == contract['library_navigation_audit']['previous_openapi_sha256']
         for path, methods in contract['unchanged_operations'].items():
             for method, digest in methods.items():
                 assert _hash(schema['paths'][path][method]) == digest, (path, method)

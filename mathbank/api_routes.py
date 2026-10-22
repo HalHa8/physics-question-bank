@@ -1,6 +1,7 @@
 """HTTP registration, explicitly composed without a monolithic entry."""
 
-ROUTES = [{'name': 'start_library_import_task',
+ROUTES = [{'name': 'get_library_overview', 'method': 'get', 'path': '/api/library/overview', 'options': {}},
+ {'name': 'start_library_import_task',
   'method': 'post',
   'path': '/api/library-transfer/tasks/import',
   'options': {}},

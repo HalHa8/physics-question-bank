@@ -189,6 +189,11 @@
       "name": "download_library_transfer_task"
     },
     {
+      "path": "/api/library/overview",
+      "method": "GET",
+      "name": "get_library_overview"
+    },
+    {
       "path": "/api/ocr",
       "method": "POST",
       "name": "ocr_formula"

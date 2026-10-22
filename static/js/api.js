@@ -1952,9 +1952,10 @@
             }
 
             // 3. Sidebar Filter Question Type select
-            const filterQType = document.getElementById('filterQType');
+            const filterQType = document.getElementById('filterType');
             if (filterQType) {
                 const currentVal = filterQType.value || '';
+                const currentLabel = filterQType.selectedOptions[0]?.textContent || currentVal;
                 filterQType.innerHTML = '<option value="">全部题型</option>';
                 systemMetadata.question_types.forEach(item => {
                     const opt = document.createElement('option');
@@ -1962,13 +1963,14 @@
                     opt.textContent = item.label;
                     filterQType.appendChild(opt);
                 });
-                filterQType.value = currentVal;
+                setEditorMetadataValue(filterQType, currentVal, currentLabel);
             }
 
             // 4. Sidebar Filter Difficulty select
             const filterDiff = document.getElementById('filterDifficulty');
             if (filterDiff) {
                 const currentVal = filterDiff.value || '';
+                const currentLabel = filterDiff.selectedOptions[0]?.textContent || currentVal;
                 filterDiff.innerHTML = '<option value="">全部难度</option>';
                 systemMetadata.difficulties.forEach(item => {
                     const opt = document.createElement('option');
@@ -1976,8 +1978,9 @@
                     opt.textContent = item.label;
                     filterDiff.appendChild(opt);
                 });
-                filterDiff.value = currentVal;
+                setEditorMetadataValue(filterDiff, currentVal, currentLabel);
             }
+            window.LibraryBrowser?.scheduleRefresh();
         }
 
         // Keep only a small task receipt in storage. Questions and ZIP bytes stay

@@ -1,7 +1,12 @@
 {
   "baseline_commit": "94de5dd1fd5e9fd4ea6256312be2e1ebf311899f",
-  "openapi_sha256": "1588584a12542771175d35d242968240019dd00e08039ca91e4056c8b9c17997",
-  "paths": 76,
+  "openapi_sha256": "d58d23e5bf8cd4cdb34d1e43fc76d25fcad13248cc23f05cccbdb3b605e8defd",
+  "paths": 77,
+  "library_navigation_audit": {
+    "previous_openapi_sha256": "1588584a12542771175d35d242968240019dd00e08039ca91e4056c8b9c17997",
+    "reason": "Add read-only /api/library/overview and optional classification_status on GET /api/questions. Removing exactly these additions reproduces the complete previous schema hash.",
+    "behavior_regressions": "tests/test_library_browse.py; tests/test_library_browser.py"
+  },
   "intentional_update": {
     "source_commit": "3ab3ad25a24d03f354e85732101df64d5818e054",
     "previous_openapi_sha256": "c9e4e4cf35083f817d7bd15d3e69f55f7aae87475274c5ebb5851d33308f9974",

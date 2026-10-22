@@ -1386,7 +1386,7 @@ window.visualViewport?.addEventListener('scroll', repositionKnowledgePointPicker
             const button = document.querySelector('.bank-filter-toggle');
             const clear = document.getElementById('clearBankFiltersBtn');
             if (!button || !clear) return;
-            const selected = ['filterCompulsory', 'filterChapter', 'filterKnowledge', 'filterType', 'filterDifficulty', 'filterSource']
+            const selected = ['filterCompulsory', 'filterChapter', 'filterKnowledge', 'filterType', 'filterDifficulty', 'filterSource', 'filterClassification']
                 .map(id => document.getElementById(id)).filter(element => element && element.value);
             const subdivisions = getFilterSubKnowledge();
             const pointFilter = KnowledgePointState.filter('bank');
@@ -1405,7 +1405,7 @@ window.visualViewport?.addEventListener('scroll', repositionKnowledgePointPicker
                 knowledge_point_role:'main', knowledge_point_status:'all', knowledge_point_unlabeled:false});
             renderKnowledgePointPicker('bank');
 
-            ['filterCompulsory', 'filterChapter', 'filterKnowledge', 'filterType', 'filterDifficulty', 'filterSource'].forEach(id => {
+            ['filterCompulsory', 'filterChapter', 'filterKnowledge', 'filterType', 'filterDifficulty', 'filterSource', 'filterClassification'].forEach(id => {
                 const element = document.getElementById(id);
                 if (element) element.value = '';
             });
@@ -2483,6 +2483,8 @@ window.visualViewport?.addEventListener('scroll', repositionKnowledgePointPicker
             KnowledgePointState.appendParams(params, KnowledgePointState.filter('bank'));
             if (source) params.append('source', source);
             params.append('page', String(requestedPage));
+            const classification = document.getElementById('filterClassification')?.value;
+            if (classification) params.append('classification_status', classification);
             params.append('page_size', String(PAGE_LIMIT));
             params.append('sort', sortOrder === 'asc' ? 'asc' : 'desc');
             
@@ -2505,6 +2507,7 @@ window.visualViewport?.addEventListener('scroll', repositionKnowledgePointPicker
                     }
 
                     const questions = payload.items;
+                    window.LibraryBrowser?.scheduleRefresh();
                     const parsedTotal = Number(payload.total);
                     const totalItems = Number.isFinite(parsedTotal) && parsedTotal >= 0 ? parsedTotal : 0;
                     const parsedTotalPages = Number(payload.total_pages);

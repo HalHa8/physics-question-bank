@@ -296,6 +296,13 @@
                     </article>
                 </section>
 
+                <section id="libraryStatistics" class="library-statistics" aria-labelledby="libraryStatsTitle">
+                    <div class="library-panel-heading"><h2 id="libraryStatsTitle">题库分布</h2><button type="button" class="glass-btn" onclick="LibraryBrowser.refresh()">刷新统计</button></div>
+                    <p id="libraryStatsStatus" role="status" aria-live="polite">正在读取统计…</p>
+                    <p id="libraryCoverage"></p>
+                    <p class="library-help">统计全库；同题多个标签分别计数。教材小节按完整路径统计，独立知识点只计已确认标注。</p>
+                    <div id="libraryDistributions" class="library-distributions"></div>
+                </section>
                 <div class="dashboard-main-grid">
                     <section class="dashboard-task-panel" aria-labelledby="dashboardTasksTitle">
                         <div class="dashboard-panel-heading">
@@ -375,6 +382,7 @@
                     <input type="text" id="searchInput" aria-label="搜索题库" placeholder="搜索题干、解析、来源或标签（#题号）…"
                            class="glass-input w-full pl-8 pr-4 py-1.5 text-xs rounded-xl">
                 </div>
+                <button type="button" id="libraryTreeToggle" class="glass-btn" aria-haspopup="dialog" aria-controls="libraryTreeDialog" onclick="LibraryBrowser.open()">章节目录</button>
                 <button type="button" class="bank-filter-toggle" aria-expanded="false" aria-controls="bankFilterFields" onclick="toggleBankFilters(this)">筛选条件</button>
                 <button type="button" id="clearBankFiltersBtn" class="glass-btn bank-clear-filters" hidden onclick="clearBankFilters()">清除筛选</button>
                 <div class="bank-management-actions"><button type="button" onclick="openNewQuestionEditor()" class="glass-btn-primary bank-create-btn flex items-center justify-center space-x-1.5 rounded-xl font-medium text-xs">
@@ -416,6 +424,9 @@
                     <option value="experiment">实验题</option>
                     <option value="detailed_answer">计算题</option>
                     <option value="short_answer">简答题</option>
+                </select>
+                <select id="filterClassification" aria-label="归类状态" class="glass-select" onchange="currentBankPage=1; if(activeSidebarTab==='bank') loadQuestions(); else switchSidebarTab('bank')">
+                    <option value="">全部归类状态</option><option value="unclassified">待归类</option><option value="book_unassigned">已选教材 · 章节待归类</option>
                 </select>
                 <select id="filterDifficulty" aria-label="难度" class="glass-select text-xs px-2.5 py-2.5 rounded-xl">
                     <option value="">所有级别</option>
@@ -2439,6 +2450,7 @@
     <script src="/static/js/document-import-session.js"></script>
     <script src="/static/js/paper.js"></script>
     <script src="/static/js/dashboard.js"></script>
+    <script src="/static/js/library-browser.js"></script>
     <script src="/static/js/qa-data.js"></script>
     <script src="/static/js/qa.js"></script>
 

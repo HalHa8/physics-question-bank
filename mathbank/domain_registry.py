@@ -1,6 +1,7 @@
 """Explicit domain registration; no import of the compatibility entry point."""
 
 from mathbank import knowledge_point_service
+from mathbank import library_browse
 from mathbank import maintenance_service
 from mathbank import runtime_service
 from mathbank import system_routes
@@ -24,6 +25,7 @@ from mathbank import library_transfer_service
 from mathbank import document_project_runtime
 
 DOMAINS = (
+    (library_browse, library_browse.LibraryBrowseDependencies, ('get_library_overview',)),
     (knowledge_point_service, knowledge_point_service.KnowledgePointServiceDependencies, (
         'get_knowledge_points',
         'add_knowledge_point',

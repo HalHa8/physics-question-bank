@@ -4,6 +4,17 @@
 
 # PhysicsBank: Local High-School Physics Question Bank
 
+The bank's **Chapter directory** opens a collapsible textbook/chapter/section
+drawer without shrinking the preview. Counts cover the entire bank; selecting
+a path combines it with the current search and filters. **Unclassified** means
+a missing or obsolete textbook, chapter, question type or difficulty; optional
+sections, tags and physics-point annotations are not required. Custom question
+types are loaded from settings and the current historical selection is retained.
+The homepage adds type, difficulty, tag and source distributions, section coverage
+and pending physics annotations, while keeping the original four overview cards.
+These read-only local features make no AI calls; a failed refresh explicitly
+keeps the last successful statistics instead of showing false zeros.
+
 The Import Center now has a **Screenshot / Image** entry: upload, drop or paste
 images. Single-question mode opens the existing OCR editor for review and saving.
 Its optional automatic-answer checkbox runs the configured solver after OCR;

@@ -143,6 +143,7 @@
     }
 
     async function loadDashboardData() {
+        window.LibraryBrowser?.scheduleRefresh();
         const taskContainer = document.getElementById('dashboardTaskList');
         const activityContainer = document.getElementById('dashboardActivityList');
         if (!taskContainer || !activityContainer) return;

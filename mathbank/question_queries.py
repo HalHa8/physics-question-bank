@@ -11,6 +11,7 @@ from mathbank.application_state import RuntimeState
 from mathbank.database import Question
 from mathbank.question_duplicates import QuestionDuplicateInput
 from mathbank.knowledge_points import apply_knowledge_point_filters
+from mathbank.library_browse import classification_expression
 
 
 @dataclass(frozen=True)
@@ -68,13 +69,17 @@ def get_seq_mapping(db: Session, question_ids=None, *, dependencies: QuestionQue
     return {question_id: int(seq_num) for question_id, seq_num in rows}
 
 
-def list_questions(q: str=None, search: str=None, compulsory: str=None, category_compulsory: str=None, chapter: str=None, category_chapter: str=None, knowledge: str=None, category_knowledge: str=None, include_sub_knowledge: bool=False, sub_knowledge: Optional[List[str]]=Query(None), sub_knowledge_mode: str='any', knowledge_point_codes: Optional[List[str]]=Query(None), knowledge_point_mode: str='any', knowledge_point_role: str='main', knowledge_point_status: str='all', knowledge_point_unlabeled: bool=False, qtype: str=None, question_type: str=None, difficulty: str=None, source: str=None, page: Optional[int]=None, page_size: int=20, sort: str='desc', knowledge_points: Optional[str]=None, point_match: str='any', point_role: str='all', point_unlabeled: bool=False, db: Session=Depends(get_db), *, dependencies: QuestionQueriesDependencies):
+def list_questions(q: str=None, search: str=None, compulsory: str=None, category_compulsory: str=None, chapter: str=None, category_chapter: str=None, knowledge: str=None, category_knowledge: str=None, include_sub_knowledge: bool=False, sub_knowledge: Optional[List[str]]=Query(None), sub_knowledge_mode: str='any', knowledge_point_codes: Optional[List[str]]=Query(None), knowledge_point_mode: str='any', knowledge_point_role: str='main', knowledge_point_status: str='all', knowledge_point_unlabeled: bool=False, qtype: str=None, question_type: str=None, difficulty: str=None, source: str=None, page: Optional[int]=None, page_size: int=20, sort: str='desc', knowledge_points: Optional[str]=None, point_match: str='any', point_role: str='all', point_unlabeled: bool=False, classification_status: str='', db: Session=Depends(get_db), *, dependencies: QuestionQueriesDependencies):
     search_q = q or search
     comp_val = compulsory or category_compulsory
     chap_val = chapter or category_chapter
     know_val = knowledge or category_knowledge
     type_val = qtype or question_type
     query = db.query(dependencies.Question)
+    classification = classification_expression(
+        {**dependencies.state.METADATA_CACHE, 'curriculum': dependencies.get_current_curriculum()}, classification_status)
+    if classification is not None:
+        query = query.filter(classification)
     # Keep the optional phase-one PhysicsBank filter names for existing clients.
     try:
         query = dependencies.apply_knowledge_point_filters(query, knowledge_points or [],
