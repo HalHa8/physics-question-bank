@@ -169,6 +169,26 @@
       "name": "select_library_transfer_ids"
     },
     {
+      "path": "/api/library-transfer/tasks/export",
+      "method": "POST",
+      "name": "start_library_export_task"
+    },
+    {
+      "path": "/api/library-transfer/tasks/import",
+      "method": "POST",
+      "name": "start_library_import_task"
+    },
+    {
+      "path": "/api/library-transfer/tasks/{task_id}",
+      "method": "GET",
+      "name": "get_library_transfer_task"
+    },
+    {
+      "path": "/api/library-transfer/tasks/{task_id}/download",
+      "method": "GET",
+      "name": "download_library_transfer_task"
+    },
+    {
       "path": "/api/ocr",
       "method": "POST",
       "name": "ocr_formula"
@@ -448,7 +468,11 @@
         "name": "add_knowledge_point"
       }
     ],
-    "behavior_regressions": "tests/test_physics_knowledge_points.py"
+    "behavior_regressions": "tests/test_physics_knowledge_points.py",
+    "3ab3ad25a24d03f354e85732101df64d5818e054": {
+      "reason": "Four isolated ZIP task routes; no existing route removed or renamed.",
+      "behavior_regressions": "tests/test_library_transfer_tasks.py; tests/test_library_transfer_tasks_api.py; tests/test_library_transfer_storage_api.py; tests/test_library_transfer_upload.py; tests/test_physics_sharing_tasks.py; tests/test_physics_sharing_curriculum.py"
+    }
   },
   "intentional_algorithm_updates": {
     "normalize_fillin_macro": {

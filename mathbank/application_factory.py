@@ -43,6 +43,7 @@ def create_application(*, initialize=True, state=None):
     state._SHUTDOWN_SCHEDULED = threading.Event()
     state._SHUTDOWN_SCHEDULE_LOCK = threading.Lock()
     state._METADATA_SAVE_LOCK = threading.RLock()
+    state._LIBRARY_TRANSFER_TASKS_LOCK = threading.Lock()
     state._DOCUMENT_PROJECT_STOP = threading.Event()
     state.PDF_OCR_CAPACITY = defaults.PdfOcrCapacity(defaults.configured_pdf_ocr_concurrency())
     state.PDF_OCR_SEMAPHORE = state.PDF_OCR_CAPACITY.auxiliary
@@ -88,6 +89,8 @@ def create_application(*, initialize=True, state=None):
 def initialize_runtime(bindings):
     state = bindings.state
     try:
+        if not state.IS_TESTING:
+            defaults.check_startup_storage(defaults.PROJECT_ROOT)
         defaults.load_dotenv(defaults.ENV_FILE)
         defaults.harden_private_path(defaults.ENV_FILE)
         # Read concurrency only after loading this installation's environment.

@@ -83,9 +83,19 @@ def browser(tmp_path_factory):
             ROOT / directory, root / directory,
             ignore=shutil.ignore_patterns("__pycache__", "uploads", "test_uploads", "*.pyc"),
         )
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        port = sock.getsockname()[1]
+    # Some Windows ephemeral ranges include Chromium-blocked ports (e.g.4045).
+    # Choose an unused IANA dynamic/private port rather than relaxing browser
+    # safety flags; this never changes the installed application's port.
+    for _ in range(100):
+        with socket.socket() as sock:
+            port = 49152 + uuid.uuid4().int % 16384
+            try:
+                sock.bind(("127.0.0.1", port))
+            except OSError:
+                continue
+            break
+    else:
+        pytest.fail("No unused browser-safe test port in the dynamic range")
     url = f"http://127.0.0.1:{port}"
     env = dict(os.environ, MATHBANK_LAUNCH_ID=uuid.uuid4().hex)
     env.pop("PYTHONPATH", None)
@@ -899,6 +909,8 @@ def test_paper_answers_preserve_reading_position_focus_and_late_page_changes(bro
     browser.evaluate(r"""
     (async () => {
         selectWorkspace('paper', '组卷排版工作台');
+        // Drain the workspace's real fetch/revalidation before seeding fake IDs.
+        await renderPaperWorkspace();
         await MathBankBrowserChecks.settle();
         MathBankBrowserChecks.seed(24, 2, true);
         const store = PaperStore;

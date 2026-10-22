@@ -1,12 +1,12 @@
 {
   "baseline_commit": "94de5dd1fd5e9fd4ea6256312be2e1ebf311899f",
-  "openapi_sha256": "c9e4e4cf35083f817d7bd15d3e69f55f7aae87475274c5ebb5851d33308f9974",
-  "paths": 71,
+  "openapi_sha256": "3fc10baffbea4f5806627d4a295790dd1b68629d33acad4ea73487ccfc644f66",
+  "paths": 75,
   "intentional_update": {
-    "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
-    "previous_openapi_sha256": "b275e386fdd33a56c764a710ab90a3b3902a8ab5ce29feed64e720d55ef95443",
-    "reason": "21 additional paths (including disabled project contracts), optional classification/source/request identity and project-import form fields; original route methods/names and fee opt-in defaults retained.",
-    "behavior_regressions": "tests/test_knowledge_api_contract.py; tests/test_library_transfer_api.py; tests/test_question_references_api.py; tests/test_physics_knowledge_points.py; tests/test_pdf_regional_flow.py"
+    "source_commit": "3ab3ad25a24d03f354e85732101df64d5818e054",
+    "previous_openapi_sha256": "c9e4e4cf35083f817d7bd15d3e69f55f7aae87475274c5ebb5851d33308f9974",
+    "reason": "Four additive sharing task submit/status/download paths; all prior operations and components retain exact fingerprints; multipart receiving gate does not change the legacy form contract.",
+    "behavior_regressions": "tests/test_library_transfer_tasks.py; tests/test_library_transfer_tasks_api.py; tests/test_library_transfer_storage_api.py; tests/test_library_transfer_upload.py; tests/test_physics_sharing_tasks.py; tests/test_physics_sharing_curriculum.py"
   },
   "unchanged_operations": {
     "/api/heartbeat": {
@@ -160,6 +160,18 @@
     },
     "/api/paper/export/word": {
       "post": "a75ab968ed02ac6d786fff900654d22cbed16346cc984141ce4e6876fab8d3fe"
+    },
+    "/api/library-transfer/tasks/export": {
+      "post": "0d22c3ed2a7d3c9081f64deea5cc74d70da4b202744c99b7f29723210519cc68"
+    },
+    "/api/library-transfer/tasks/import": {
+      "post": "ee833310119c95a3f711a9b69dd68be6c9f7bad049341484f83bdfda31ec93a2"
+    },
+    "/api/library-transfer/tasks/{task_id}": {
+      "get": "d69db31c2ac5d305b754981987c4f10d9c1635119ec872dceab67d0b03639086"
+    },
+    "/api/library-transfer/tasks/{task_id}/download": {
+      "get": "c6ee23834caab9ceb5d1a2a40c568790b5736b4095ed4f774bd6b650fefae995"
     }
   },
   "unchanged_components": {
@@ -178,13 +190,24 @@
     "Body_upload_image_api_upload_post": "774f495defda2c0e15e98deadc8518f56dc36b129822d72e9bb126466d0679ae",
     "Body_upload_tex_source_api_upload_tex_source_post": "cd965a25f8171e197028e35411dfcb006bd82acb6343ba332031c4fb0906997b",
     "HTTPValidationError": "7373c21f1389312367e27e440140ba11d587693c56d8aa27249b36d3f58c10c6",
-    "ValidationError": "ca285d0c0e64c42844efd2e860edb239e77cc49d87f065c5ccb7d2f55331b862"
+    "ValidationError": "ca285d0c0e64c42844efd2e860edb239e77cc49d87f065c5ccb7d2f55331b862",
+    "Body_create_question_api_questions_post": "f43d15677086ee4d860a36be749f4531ad1bb4cb7506faaf3fbf9d85d80f5fea",
+    "Body_import_library_transfer_api_library_transfer_import_post": "e821e9f8e585aeb0b73c6812b98afcbf35912e70f292ee5c5c1610f7cf90d8f6",
+    "Body_start_library_import_task_api_library_transfer_tasks_import_post": "7fd8e979a7d9db77cbc8f3fd9e809e7540226018ae17b66408cbbf2371057416",
+    "Body_update_question_api_questions__question_id__put": "cf72bf620b3ebaac8b1bdf788ce2ccfe8aac6e0e128f3f17744ec37db9bfd424",
+    "Body_upload_markdown_source_api_upload_markdown_source_post": "8f89596f3e0985b550b63ca05025ec80ac6f1d3e6ce2f9296177a5137fc968c4"
   },
   "prior_intentional_updates": [
     {
       "previous_openapi_sha256": "d09a69ede236271789904e3902c6849e275bf55bef6998688523e48b4a9746a2",
       "reason": "One new catalogue path (GET/POST), four optional question filters, optional knowledge_points form fields; existing clients stay compatible.",
       "behavior_regressions": "tests/test_physics_knowledge_points.py; tests/test_knowledge_api_contract.py"
+    },
+    {
+      "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
+      "previous_openapi_sha256": "b275e386fdd33a56c764a710ab90a3b3902a8ab5ce29feed64e720d55ef95443",
+      "reason": "21 additional paths (including disabled project contracts), optional classification/source/request identity and project-import form fields; original route methods/names and fee opt-in defaults retained.",
+      "behavior_regressions": "tests/test_knowledge_api_contract.py; tests/test_library_transfer_api.py; tests/test_question_references_api.py; tests/test_physics_knowledge_points.py; tests/test_pdf_regional_flow.py"
     }
   ],
   "audited_components": {

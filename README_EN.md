@@ -10,7 +10,7 @@ aliases, teacher-created points and draft persistence. Bank filters support
 ANY/ALL, main-only and unlabeled questions. Optional AI classification uses the
 existing request to suggest points with literal evidence; suggestions remain
 pending until a teacher confirms them. Manual editing/search makes no AI calls.
-This branch adapts reusable MathBank 3.0 improvements while retaining physics
+This branch adapts reusable MathBank 3.0 and 3.0.1 improvements while retaining physics
 content rules. PhysicsBank's own schema is v12 (not MathBank's version numbering),
 with a database snapshot before migration; existing questions are not relabeled.
 Make a full backup and close the service before upgrading. Older programs cannot
@@ -32,6 +32,11 @@ Settings → Library sharing exports selected questions, answers, labels and
 referenced images as a ZIP without credentials or runtime configuration. Import
 validates the package, creates a full backup, and appends without overwriting.
 Repeated imports append again; they do not automatically merge duplicates.
+Sharing now shows task stages and progress. Refreshing or reconnecting queries
+the original task without uploading again. If the commit outcome is uncertain,
+check your library and backup before importing again. An intentional repeat
+requires explicit confirmation. Storage preflight reports permission, space
+and file-lock problems without elevating privileges or moving your data.
 Check content permissions and personal information before sharing.
 
 Markdown import, source-preserving classification, batch figure crops, tables,

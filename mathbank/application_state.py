@@ -36,3 +36,5 @@ class RuntimeState:
     # Match the released upstream boundary: retained PDF project experiments
     # are not product features until a separate acceptance enables them.
     PDF_CLOUD_ONLY: bool = True
+    _LIBRARY_TRANSFER_TASKS: Any = None
+    _LIBRARY_TRANSFER_TASKS_LOCK: Any = None

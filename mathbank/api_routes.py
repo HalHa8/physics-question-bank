@@ -1,6 +1,10 @@
 """HTTP registration, explicitly composed without a monolithic entry."""
 
 ROUTES = [
+  {"name": "start_library_import_task", "method": "post", "path": "/api/library-transfer/tasks/import", "options": {}},
+  {"name": "start_library_export_task", "method": "post", "path": "/api/library-transfer/tasks/export", "options": {}},
+  {"name": "get_library_transfer_task", "method": "get", "path": "/api/library-transfer/tasks/{task_id}", "options": {}},
+  {"name": "download_library_transfer_task", "method": "get", "path": "/api/library-transfer/tasks/{task_id}/download", "options": {}},
   {
     "name": "get_knowledge_points",
     "method": "get",
@@ -466,8 +470,17 @@ ROUTES = [
 
 def register_routes(app, resolve):
     from mathbank.document_project_api import register_document_project_routes
+    from mathbank.library_transfer_upload import create_library_transfer_upload_router
+    upload_router = create_library_transfer_upload_router(
+        lambda: resolve("SYSTEM_GENERATED_DIR") / "library_transfer_uploads")
     for route in ROUTES:
-        app.add_api_route(route["path"], resolve(route["name"]), methods=[route["method"].upper()], **route["options"])
+        if route["name"] in {"import_library_transfer", "start_library_import_task"}:
+            # Keep the public flat route inventory while using the receiving
+            # gate's per-application class; never override the global parser.
+            app.router.add_api_route(route["path"], resolve(route["name"]),
+                methods=[route["method"].upper()], route_class_override=upload_router.route_class, **route["options"])
+        else:
+            app.add_api_route(route["path"], resolve(route["name"]), methods=[route["method"].upper()], **route["options"])
     register_document_project_routes(app,
         get_service=resolve("_document_project_service"),
         dispatch_project=resolve("_dispatch_document_project"),

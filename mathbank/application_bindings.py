@@ -20,7 +20,6 @@ def _service_guards(function):
     return {
         ("mathbank.document_project_runtime", "_release_document_project_assets"): ('serialize_asset_lifecycle',),
         ("mathbank.library_transfer_service", "export_library_transfer"): ('serialize_asset_lifecycle',),
-        ("mathbank.library_transfer_service", "import_library_transfer"): ('serialize_asset_lifecycle',),
         ("mathbank.maintenance_service", "clean_orphaned_images"): ('serialize_asset_lifecycle',),
         ("mathbank.question_commands", "create_question"): ('serialize_asset_lifecycle', 'serialize_curriculum_write', 'project_import_guard'),
         ("mathbank.question_commands", "update_question"): ('serialize_asset_lifecycle', 'serialize_curriculum_write'),

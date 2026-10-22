@@ -19,6 +19,7 @@ class RuntimeServiceDependencies:
     SYSTEM_GENERATED_DIR: Any
     _document_project_service: Any
     _maintain_document_projects: Any
+    _library_transfer_tasks: Any
     copy: Any
     get_current_curriculum: Any
     harden_private_path: Any
@@ -62,6 +63,8 @@ async def app_lifespan(_app: FastAPI, *, dependencies: RuntimeServiceDependencie
     if dependencies.state.IS_TESTING:
         yield
         return
+    if (dependencies.SYSTEM_GENERATED_DIR / 'library_transfer_tasks').is_dir():
+        dependencies._library_transfer_tasks()
     dependencies.state.DOCUMENT_TASKS.start_maintenance(interval_seconds=60.0)
     project_service = dependencies._document_project_service()
     if project_service:
@@ -73,6 +76,9 @@ async def app_lifespan(_app: FastAPI, *, dependencies: RuntimeServiceDependencie
         yield
     finally:
         dependencies.state._DOCUMENT_PROJECT_STOP.set()
+        if dependencies.state._LIBRARY_TRANSFER_TASKS is not None:
+            import asyncio
+            await asyncio.to_thread(dependencies.state._LIBRARY_TRANSFER_TASKS.close)
         if dependencies.state.DATABASE_EXPORT_QUEUE.started:
             import asyncio
             await asyncio.to_thread(dependencies.state.DATABASE_EXPORT_QUEUE.close)
