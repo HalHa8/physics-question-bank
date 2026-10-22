@@ -11,6 +11,7 @@
 - 本轮隔离工作树：当前允许写入的visualizations根内 `pb-sync-22`；既有20261021更新树仍为干净fee2333，没有移动或复用其他功能工作树。
 - 本轮主代码提交：`0755d5e83cc17c0780da26a4087980011faa1902`；集成回执为本节所在后续纯文档提交，可由git log定位。此前1169e9b及fee2333的3.0适配历史保留。
 - 集成前已确认的远端解耦提交：`fee23330e0c53a8ca8a55be8d3ce9cfafdcc45bf`；origin/upstream、所有工作树及目标干净状态已重新核实。未迁移真实题库、修改现用环境或中断服务；本机通过不等于GitHub CI通过。
+- 首次正常推送提交为`8e0d84eef5f00ca866b71fbfb5c67ec8013f36e6`，已核对远端一致。CI六项成功，新增Windows分享专项有三个测试夹具编码失败；下方记录修复及重验，不把首次CI称为全部通过。
 
 ## 2026-10-22：3.0.1分享可靠性与Windows存储增量
 
@@ -54,6 +55,12 @@
 在实际解耦工作树复验架构/HTTP契约、物理题包和教材竞态、ZIP任务/接收/Windows往返、存储诊断、QA、原PDF裁片与物理抠图：**413通过、2条件跳过、0失败**，14.91秒；6条既有Pillow弃用警告，`.test-artifacts/post301.log`。随后纯源码副本/新空库/随机端口启动、身份、静态资源和鉴权正常关闭再次通过，`.test-artifacts/runtime-post301.log`。目标工作树保持干净，至此才提升成功基线至3ab3ad2。
 
 本段回执单独提交后再安全快进解耦分支，仅向已核实的origin推送该分支；不推main、不强推、不创建PR/Tag/Release、不打包。推送后须核对远端SHA及CI，本机通过不等于CI成功。该文档记录到本地验收完成，实际推送和CI最终状态以任务回复及Actions为准，避免为写入CI结果而反复触发流水线。
+
+### 首次远端CI与编码夹具修复
+
+首次推送已核对origin解耦分支为8e0d84e；[CI 39759155159](https://github.com/HalHa8/physics-question-bank/actions/runs/39759155159)中Python3.10/3.14全量、Windows/macOS发行检查与两平台Pandoc检查六项成功，新增Windows分享专项495通过、3失败。失败都在`test_restart_never_replays_pending_or_uncertain_append`的同一处：UTF-8的中文回执被测试里的`Path.read_text()`按英文Windows的cp1252读取，抛UnicodeDecodeError。应用的原子写入与恢复原本已显式UTF-8，没有因此修改产品行为或任务协议。
+
+修正该测试文件中所有回执读写，明确encoding="utf-8"；三种重启状态在测试内强制模拟cp1252默认读取，并证明旧式隐式读取确实会失败，同时核对中文诊断完整、已接收UUID不重放，原状态及幂等断言全部保留。关闭本机UTF-8模式后，任务/原生Windows往返/物理知识点/教材竞态**60通过**（6.84秒，`.test-artifacts/ci-ansi-fix2.log`）；完整复验再次**4493通过、165条件跳过、0失败**，253.48秒（`.test-artifacts/full3.log`）。本补充只含测试与此记录，不修改产品代码、依赖或契约。安全快进后再做同范围复验并正常推送；补充提交可由本节或测试文件的git log定位，远端CI最终结果见任务回复和Actions，不以先前本机通过掩盖首次CI失败。
 
 ## 2026-10-21：继续完成本次3.0适配（集成回执见当前状态）
 
