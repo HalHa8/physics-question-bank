@@ -2,15 +2,15 @@
 
 ## 当前状态
 
-- 检查日期：2026-10-22（北京时间）；完成新增上游3.0.1修复的物理适配、必要验收和本地安全快进，集成后复验通过；推送与CI结果见本任务最终回复及Actions。
+- 检查日期：2026-10-26（北京时间）；完成 MathBank e851927 的 Windows 测试适配、完整验收和解耦分支本地快进；推送与CI结果见本任务最终回复及Actions。
 - 来源：`https://github.com/JudgePeach/math-question-bank.git` 的默认分支 `main`。
 - 目标仓库：`https://github.com/HalHa8/physics-question-bank.git`；用户已授权验收成功的实际更新正常推送解耦分支，不推送 main、不强推。
-- 本次观察的上游提交：`3ab3ad25a24d03f354e85732101df64d5818e054`，默认分支main已重新核实；仅审阅此前bf587bb后的这一项新增提交。
-- 已完整审阅并按适用性处理的成功基线：`3ab3ad25a24d03f354e85732101df64d5818e054`，此前为 `bf587bbd8f7fc4ca3c181e668437849bbcb5a098`。本轮全部必要验收及集成后复验通过后才提升基线，不以局部通过替代；有意排除的数学及宣传内容不重复搬入。
-- 本地更新分支：`codex/upstream-sync-20261022`，基于干净的解耦提交 `fee23330e0c53a8ca8a55be8d3ce9cfafdcc45bf`；main和其他功能分支保持不动。
+- 本次观察的上游提交：`e85192750b103153c32ff32c7a1b57f1ed10a4b8`，通过 `git fetch` 重新确认默认分支 main；仅审阅 `3ab3ad2` 之后这一项新增提交。
+- 已完整审阅并按适用性处理的成功基线：`e85192750b103153c32ff32c7a1b57f1ed10a4b8`，此前为 `3ab3ad25a24d03f354e85732101df64d5818e054`。本轮适配、完整验收及本地集成复验通过后提升基线；有意排除的数学及宣传内容不重复搬入。
+- 本地更新分支：`codex/upstream-sync-20261022`，基于干净解耦提交 `98d5c861ceae086c690c00a5fc32ac153d2dd0fc`；主线工作树另有未提交工作，已完整保留。
 - 本轮隔离工作树：当前允许写入的visualizations根内 `pb-sync-22`；既有20261021更新树仍为干净fee2333，没有移动或复用其他功能工作树。
-- 本轮主代码提交：`0755d5e83cc17c0780da26a4087980011faa1902`；集成回执为本节所在后续纯文档提交，可由git log定位。此前1169e9b及fee2333的3.0适配历史保留。
-- 集成前已确认的远端解耦提交：`fee23330e0c53a8ca8a55be8d3ce9cfafdcc45bf`；origin/upstream、所有工作树及目标干净状态已重新核实。未迁移真实题库、修改现用环境或中断服务；本机通过不等于GitHub CI通过。
+- 本轮主代码提交：`a1676c59242c05f50a8305726cd83bdcb57e66cd`；更新日志随本次后续纯文档提交。此前 3.0/3.0.1 适配历史保留。
+- 集成前已确认远端解耦提交与本地均为 `98d5c861ceae086c690c00a5fc32ac153d2dd0fc`；以 `--ff-only` 集成本轮提交后为 `a1676c59242c05f50a8305726cd83bdcb57e66cd`。未迁移真实题库、修改现用环境或中断服务；本机通过不等于GitHub CI通过。
 - 首次正常推送提交为`8e0d84eef5f00ca866b71fbfb5c67ec8013f36e6`，已核对远端一致。CI六项成功，新增Windows分享专项有三个测试夹具编码失败；下方记录修复及重验，不把首次CI称为全部通过。
 
 ## 2026-10-22：3.0.1分享可靠性与Windows存储增量
@@ -353,3 +353,23 @@
 代码提交 `bc5fae4081808d9a6a9c9897a9a177a2412eb411` 从干净 `6fe0b10` 快进到解耦分支；同步记录是本次后续文档提交。主目录 main 的 9 项修改与 3 个未跟踪测试原样保留。整体成功基线仍为 `adbc2df`：PDF/Word 大批导入、资产生命周期、依赖升级和 schema 11 分类仍待分批处理，不能将本轮单题能力推广为所有上游功能已完成。
 
 本地验收及合并完成，下一步仅正常推送解耦分支并核对远端 SHA 与 CI；最终 GitHub 状态以本次任务回执为准。不推 main、不强推、不创建 Tag/Release、不打包。
+
+## 2026-10-26：Windows 测试编码与 JSON 导出基准
+
+### 来源与物理适用性
+
+上游 `e85192750b103153c32ff32c7a1b57f1ed10a4b8`（`test: fix Windows encoding and JSON export expectations`）只改两份测试文件，没有产品行为、数据库结构或依赖变更。
+
+- `test_library_transfer_tasks.py` 中状态回执文件的读写已在 PhysicsBank 既有分支明确指定 UTF-8，并含 Windows cp1252 容错回归；与这项上游修复等效，不重复修改。
+- `test_sync_batch_export.py` 采用真实 UTF-8 文本文件作为旧 JSON writer 字节基准，使 Windows 换行转换由运行时实际执行；严格字节失败改为短错误，避免 pytest 打印多 MB 差异。JSON 字节完全相同仍是断言条件，没有放宽。
+- 主线 `D:\Projects\physics-question-bank` 工作树中有用户未提交修改，且同一测试文件有编辑。本轮仅在隔离更新分支适配并集成解耦分支；主线工作树未更改、未暂存。
+
+### 验收与集成
+
+- 隔离验证环境：Python 3.10.21、`pdf-inspector==1.25.2`；未增删或升级依赖。第一次完整测试在收集阶段因 Windows 默认 GBK 读取既有 UTF-8 fixture 失败；随后只为该进程设置 `PYTHONUTF8=1`，全套通过。
+- 定向回归：`test_sync_batch_export.py` 与 `test_library_transfer_tasks.py` 合计 **60 passed**；解耦目标本地集成后同范围复验再次 **60 passed**。
+- 完整测试：**4476 passed, 182 skipped, 0 failed**（258.76 秒）；10 条既有 Pillow 弃用警告。
+- `pip check` 通过；10 个 JavaScript 文件 `node --check` 通过；`git diff --check` 通过。
+- 更新提交 `a1676c59242c05f50a8305726cd83bdcb57e66cd` 以 `--ff-only` 集成；集成前本地与 origin 解耦分支均为 `98d5c861ceae086c690c00a5fc32ac153d2dd0fc`。本机无真实题库/图片/密钥复制，没有付费模型请求或系统软件安装。
+- 本机 Git 原先因系统 Schannel 与 HTTPS 代理握手失败，仓库本地配置已设 `http.sslbackend=openssl`；默认配置下的上游查询及 fetch 均已成功。此设置仅作用于本仓库。
+- 推送及 GitHub CI 结果以本轮最终回复和 Actions 为准；不推送 main、不强推、不创建 PR/Tag/Release、不打包。
