@@ -21,8 +21,8 @@ class LibraryBrowseDependencies:
 
 def classification_expression(metadata, status):
     """Use precisely the stored values used by the existing curriculum filters."""
-    if status not in {'', 'unclassified', 'book_unassigned'}:
-        raise HTTPException(400, '归类状态必须是 unclassified 或 book_unassigned')
+    if status not in {'', 'unclassified', 'book_unassigned', 'section_unassigned'}:
+        raise HTTPException(400, '归类状态必须是 unclassified、book_unassigned 或 section_unassigned')
     if not status:
         return None
     curriculum = metadata.get('curriculum', {})
@@ -32,6 +32,12 @@ def classification_expression(metadata, status):
         for name, chapters in curriculum.items() if isinstance(chapters, dict)))
     if status == 'book_unassigned':
         return and_(book.in_(list(curriculum)), ~valid_chapter)
+    if status == 'section_unassigned':
+        section = func.coalesce(Question.category_knowledge, '')
+        valid_section = or_(false(), *(and_(book == name, chapter == title, section.in_(sections))
+            for name, chapters in curriculum.items() if isinstance(chapters, dict)
+            for title, sections in chapters.items() if isinstance(sections, list) and sections))
+        return and_(valid_chapter, ~valid_section)
     types = [item['value'] for item in metadata.get('question_types', []) if item.get('value')]
     levels = [item['value'] for item in metadata.get('difficulties', []) if item.get('value')]
     return ~and_(valid_chapter, func.coalesce(Question.question_type, '').in_(types),
@@ -55,7 +61,7 @@ def get_library_overview(db: Session = Depends(get_db), *, dependencies: Library
         books_count[book] += count
         chapters_count[book, chapter] += count
         sections_count[book, chapter, section] += count
-    books, covered, section_total = [], 0, 0
+    books, covered, section_total, section_unassigned = [], 0, 0, 0
     for book, chapters in curriculum.items():
         if not isinstance(chapters, dict):
             continue
@@ -67,7 +73,10 @@ def get_library_overview(db: Session = Depends(get_db), *, dependencies: Library
                 leaves.append({'name': section, 'count': count})
                 covered += bool(count)
                 section_total += 1
-            children.append({'name': chapter, 'count': chapters_count[book, chapter], 'sections': leaves})
+            unassigned = chapters_count[book, chapter] - sum(leaf['count'] for leaf in leaves)
+            section_unassigned += unassigned
+            children.append({'name': chapter, 'count': chapters_count[book, chapter],
+                             'section_unassigned': unassigned, 'sections': leaves})
         books.append({'name': book, 'count': books_count[book], 'chapters': children,
                       'unassigned': books_count[book] - sum(item['count'] for item in children)})
 
@@ -96,6 +105,7 @@ def get_library_overview(db: Session = Depends(get_db), *, dependencies: Library
         QuestionKnowledgePoint.status == 'suggested').scalar()
     return {
         'total': sum(row[3] for row in rows),
+        'section_unassigned': section_unassigned,
         'unclassified': db.query(func.count(Question.id)).filter(classification_expression(
             {**metadata, 'curriculum': curriculum}, 'unclassified')).scalar(),
         'books': books,

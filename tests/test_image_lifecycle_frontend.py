@@ -277,6 +277,8 @@ def test_review_draft_reload_keeps_asset_without_content_badge():
       globalThis.setEditorMetadataValue=(input,value)=>{ input.value=value; };
       globalThis.renderEditorPaperMeta=()=>{};
       globalThis.setQuestionDetailEditAvailability=()=>{};
+      const detailStates=[];
+      globalThis.setBankDetailStatus=state=>detailStates.push(state);
       elements.editCompulsory.onchange=()=>{};elements.editChapter.onchange=()=>{};
       const draft={id:'review-draft',content:'题干',answer_markdown:'正确解析',review:'错误示范 '+mark(old),
         image_paths:[old],content_tikz_assets:[],answer_tikz_assets:[]};
@@ -285,6 +287,7 @@ def test_review_draft_reload_keeps_asset_without_content_badge():
       assert.deepEqual(uploadedImages,[]);assert.deepEqual(uploadedAnswerImages,[]);
       assert.deepEqual(editorAssetReferences(),[old]);
       assert.equal(isEditorModified(),false);
+      assert.deepEqual(detailStates,['ready']);
     """, sources=sources)
 
 

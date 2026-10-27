@@ -2,169 +2,193 @@
   <img src="docs/images/physicsbank-avatar-b.png" alt="PhysicsBank book and pendulum avatar" width="112">
 </p>
 
-# PhysicsBank: Local High-School Physics Question Bank
+# PhysicsBank: A local question bank and paper builder for physics teachers
 
-The bank's **Chapter directory** opens a collapsible textbook/chapter/section
-drawer without shrinking the preview. Counts cover the entire bank; selecting
-a path combines it with the current search and filters. **Unclassified** means
-a missing or obsolete textbook, chapter, question type or difficulty; optional
-sections, tags and physics-point annotations are not required. Custom question
-types are loaded from settings and the current historical selection is retained.
-The homepage adds type, difficulty, tag and source distributions, section coverage
-and pending physics annotations, while keeping the original four overview cards.
-These read-only local features make no AI calls; a failed refresh explicitly
-keeps the last successful statistics instead of showing false zeros.
+**[⬇ Windows portable package][windows-download] · [📦 Source ZIP][source-zip] · [🏷 Releases][releases]**
 
-The Import Center now has a **Screenshot / Image** entry: upload, drop or paste
-images. Single-question mode opens the existing OCR editor for review and saving.
-Its optional automatic-answer checkbox runs the configured solver after OCR;
-it is off by default. Existing answers and source answer labels are preserved.
-Incomplete questions pause for correction, and late results cannot replace edits.
-Whole-page / multiple-question mode accepts up to 20 ordered images (10MB each,
-50MB total), with move-up/down and remove controls, then uses the existing paper
-splitting and question-review workflow. Choosing/reordering images stays local;
-recognition starts only when requested. Multi-question mode needs both image OCR
-and paper-parsing models. TeX companion illustrations remain a separate input.
-Independent physics points are now separate from textbook placement and personal
-tags. The editor supports manual main/auxiliary labels, 80 starter points,
-aliases, teacher-created points and draft persistence. Bank filters support
-ANY/ALL, main-only and unlabeled questions. Optional AI classification uses the
-existing request to suggest points with literal evidence; suggestions remain
-pending until a teacher confirms them. Manual editing/search makes no AI calls.
-The `main` branch integrates reusable MathBank 3.0 and 3.0.1 improvements while retaining physics
-content rules, screenshot corrections and per-paper image scales. PhysicsBank's own schema is v12 (not MathBank's version numbering),
-with a database snapshot before migration; existing questions are not relabeled.
-Make a full backup and close the service before upgrading. Older programs cannot
-open the upgraded database; rollback requires the pre-upgrade full backup and
-separate preservation of any newly added data. Portable packages are unchanged.
+[Physics adaptations](#physics) · [Download and start](#download) · [AI and export setup](#setup) · [Upgrade and backup](#upgrade) · [Help](#community) · [简体中文](README.md)
 
-Screenshot OCR now crops figures directly from the original image, preserving
-their text, option or table positions. Original-image mode is enabled by default.
-Unresolved or inaccurate figures can be manually cropped or re-cropped from the
-same screenshot; a separate illustration upload is unnecessary. Cropping is
-local and needs no LaTeX or extra AI review request. Check labels, axes, polarity
-and circuit connections before saving. Turning off original-image mode explicitly
-enables extra paid TikZ drawing calls per figure.
+PhysicsBank adapts [MathBank][upstream] for high-school physics preparation.
+It keeps the local bank, formula preview, document import and A4 paper builder,
+with physics curricula, question types, diagrams and physical-quantity handling.
 
-These changes and all three backend-decoupling stages are integrated into the
-`main` source. Existing Windows portable packages are not rebuilt by a local
-source update; check the downloaded build's commit and back up personal data.
+The bank is stored on your computer. Manual editing, search and paper assembly
+work without AI; configure your own provider when you need recognition or solutions.
+**The project does not bundle a freely redistributable question collection.**
 
-Settings → Library sharing exports selected questions, answers, labels and
-referenced images as a ZIP without credentials or runtime configuration. Import
-validates the package, creates a full backup, and appends without overwriting.
-Repeated imports append again; they do not automatically merge duplicates.
-Sharing now shows task stages and progress. Refreshing or reconnecting queries
-the original task without uploading again. If the commit outcome is uncertain,
-check your library and backup before importing again. An intentional repeat
-requires explicit confirmation. Storage preflight reports permission, space
-and file-lock problems without elevating privileges or moving your data.
-Check content permissions and personal information before sharing.
+> [!TIP]
+> **New here?** Download the [Windows release][windows-download], extract it fully and double-click the launcher. Python is included. Try manual entry first and configure AI only when needed.
 
-Markdown import, source-preserving classification, batch figure crops, tables,
-lists, image profiles and missing-asset export preflight are supported. Extra
-PDF/Word visual verification remains opt-in and may cost money. Failed paid
-requests are not automatically retried or silently routed to another provider.
-Word recovery requires an explicit click and may send unfinished requests.
-Upstream PDF local-project/fragment/checkpoint experiments remain disabled.
+---
 
-See the [adaptation scope and acceptance record](docs/mathbank-3-physics-adaptation.md) for included features and deliberate differences.
+<a id="physics"></a>
 
-[简体中文](README.md) · [AGPL-3.0 license](LICENSE) · [Notices](NOTICE.md)
+## 🧲 What changes for physics?
 
-PhysicsBank is a local-first question bank, AI-assisted solution, import, search,
-and paper-layout workbench for high-school physics. It is based on
-[JudgePeach/math-question-bank](https://github.com/JudgePeach/math-question-bank)
-and selectively adapts subsequent upstream PDF/Word import upgrades. This is not
-a claim that every upstream feature is synchronized; see [sync notes](docs/upstream-sync.md).
-Physics-specific source review
-checks units, vector directions, circuit connections, and experimental apparatus.
+| Teaching need | PhysicsBank adaptation |
+| --- | --- |
+| Physics textbook placement | The 2019 PEP high-school physics curriculum, covering six compulsory and selective-compulsory books, chapters and sections. |
+| Physics question types | Single choice, multiple choice, fill-in, experiment, calculation and short answer, with a regular physics paper default. |
+| Cross-topic retrieval | 80 starter physics points, main/auxiliary roles, aliases and teacher-created points. Combine momentum conservation and the work-energy theorem, for example. |
+| Faithful physical content | OCR, import and solution prompts emphasize unit case, dimensions, vectors, signs, significant figures, axes and circuit connections. Experiment solutions address procedure, data processing and errors. Teacher review remains necessary. |
+| Diagram-heavy papers | Separate percentage scales for bank previews and paper items; smaller paper defaults, four image choices in one row when space permits, and controls outside the printed layout. |
+| Correcting extracted figures | Crop from the original screenshot into its text, option or table position; manually add or recrop figures without uploading every diagram separately. |
 
-The physics adaptation adds a 2019 PEP high-school physics curriculum, six
-physics-oriented question types, physics-specific OCR and solution prompts,
-and regular-exam defaults. Data and API keys remain local by default.
+The bank also provides a chapter directory, classification filters and homepage
+statistics. **Unclassified** identifies missing textbook/chapter/type/difficulty;
+**Needs a section** identifies valid chapter placement without a current section.
+**Reclassification suggestions** show the existing placement and proposed result;
+only explicit confirmation applies and saves them.
 
-Browser previews support explicit upright constants `\iu` / `\upi` and
-`\eu` / `\upe` without rewriting ordinary current/charge variables `i` and `e`.
-Legacy-library startup repairs preserve custom knowledge labels and independent
-physics curriculum records.
+Textbook placement, physics points and personal tags remain separate. Upgrading
+does not automatically relabel existing questions. Some general interface features
+may overlap with subsequent upstream changes; see the
+[adaptation scope](docs/mathbank-3-physics-adaptation.md) and
+[upstream sync record](docs/upstream-sync.md).
 
-> This project does not bundle a freely redistributable question collection.
-> Imported questions, papers, and images remain subject to their own copyright
-> and usage terms.
+## ✨ Core capabilities retained from MathBank
 
-For each new PhysicsBank work session, first check the upstream MathBank `main`
-branch and review any changes before integrating them. This is an interactive
-project workflow, not an unattended background updater or an automatic GitHub push.
+- **Collect and organize:** manual or screenshot entry; PDF, Word, LaTeX and Markdown import; search by type, source, difficulty or knowledge point.
+- **Preview and build papers:** formulas and figures, simulated A4 layout, drag sorting, answer space, and Word, LaTeX or PDF export.
+- **Optional AI:** recognition, paper splitting, solutions, classification and selection, with task-specific provider settings.
+- **Save and share:** drafts, full backups, selected-question ZIPs and searchable offline QA.
 
-## Windows portable package
+These shared capabilities come from MathBank and selected adaptations.
+See the [original README][upstream-readme] for the upstream project;
+PhysicsBank does not claim to include every latest upstream feature.
 
-On Windows 10/11 x64, download the `PhysicsBank-Windows-x64` artifact from the
-[latest successful CI run on `main`](https://github.com/HalHa8/physics-question-bank/actions/workflows/ci.yml?query=branch%3Amain).
-GitHub may require you to sign in. Unzip the downloaded artifact, then fully
-extract the `PhysicsBank-Windows-x64.zip` inside it into a separate folder.
-Double-click `启动题库系统.bat` there and open <http://127.0.0.1:8000/> if your
-browser does not open automatically. Python and the required runtime are
-included. `Code → Download ZIP` is source code, not the portable package.
-CI artifacts expire; if none is available, use the source instructions below.
-Back up your database before moving or updating the extracted folder; see
-`覆盖升级说明.txt` inside the package.
+<a id="download"></a>
 
-## Run from source
+## 🚀 Download and start
 
-```bash
+| Download | Intended users | Availability |
+| --- | --- | --- |
+| **[⬇ Windows release][windows-download]** | Teachers who prefer extracting and launching | **v0.1.0** · Windows 10/11 x64 · Python and runtime dependencies included. |
+| **[📦 Matching source ZIP][source-zip]** | Users with Python or developers | Complete v0.1.0 source; install dependencies separately. Not the portable package. |
+| **[🏷 Releases][releases]** | Release notes, attachments and earlier versions | Official downloads are not subject to CI artifact retention periods. |
+
+### 🖥️ Option 1: Windows portable package (recommended)
+
+1. **Download the official package**
+
+   Get [PhysicsBank-Windows-x64.zip][windows-download]. Public release attachments require no GitHub login.
+
+2. **Extract everything**
+
+   Use a dedicated folder, not your MathBank folder. Do not run from inside an archive viewer.
+
+3. **Double-click the launcher**
+
+   Run **`启动题库系统.bat`**. If a browser does not open, visit <http://127.0.0.1:8000/>.
+
+> [!NOTE]
+> The application has no usage expiry. A [SHA-256 checksum][windows-sha256] is available for integrity checks. AI, PDF compilation and Word export have separate [setup requirements](#setup).
+
+Keep MathBank and PhysicsBank in separate folders with separate data. If MathBank
+uses port 8000, close it normally through its page, or use port 8001 from source.
+
+<details>
+<summary>🛠️ Option 2: Source ZIP or Git (expand)</summary>
+
+[Download the source ZIP][source-zip] and extract it, or clone:
+
+```powershell
 git clone https://github.com/HalHa8/physics-question-bank.git
 cd physics-question-bank
+git switch --detach v0.1.0
+```
+
+For a ZIP download, enter the extracted project directory first.
+Python 3.10+ is required. An isolated Conda environment is one option:
+
+```powershell
 conda create -n physicsbank-py310 python=3.10 -y
 conda activate physicsbank-py310
 python -m pip install -r requirements.txt
 python -m uvicorn main:app --host 127.0.0.1 --port 8001
 ```
 
-Open <http://127.0.0.1:8001/>. The Windows `启动题库系统.bat` launcher prepares a
-project-local virtual environment but currently uses port **8000**. Use the
-command above on port 8001 if MathBank occupies 8000; keep both projects'
-directories and databases separate.
+Open <http://127.0.0.1:8001/>. Conda is optional if you already have an isolated
+Python environment. This repository has no published macOS portable package;
+use source. The source `启动题库系统.command` launcher requires an installed
+Python 3.10+ and internet access for initial environment preparation.
 
-Basic question entry, search, and browser formula preview need no AI key, TeX
-installation, or Node.js. Configure a provider in the app's API settings or
-create a local `.env` from `.env.example` for AI features. External AI requests
-send the selected question content or images to that provider; review privacy
-and reuse rights first.
-Automatic PDF/Word question splitting needs a configured parsing model. Pages
-whose text cannot be extracted reliably also need an image-capable OCR model;
-the app will not silently accept incomplete native text as a complete page.
+</details>
 
-The upgraded importer preserves reliable native content and original answers,
-uses bounded local/hybrid recognition for uncertain regions, and retains source
-evidence and visible review markers. Shared temporary images are copied on save.
-Retired images can be recovered through their original references; the private
-retention store has no automatic expiry and is not a substitute for a full backup.
-Extra source verification stays off by default; failed model requests are not
-automatically retried or switched to another provider. After backing up, reinstall
-`requirements.txt` in your environment to obtain the upgraded PDF dependency.
+<details>
+<summary>🔎 Development source and backup CI downloads (expand)</summary>
 
-XeLaTeX is required for PDF compilation and TikZ previews, but not for question
-entry, import, search, or LaTeX source export. Pandoc is recommended for editable
-Word formulas. Neither tool is installed silently. For development, install
-`requirements-dev.txt`, then run `python -m pip check` and `python -m pytest -q`.
+- [Latest main source ZIP][main-zip] may contain changes newer than the official release and may not have a matching portable build.
+- [Main CI runs][ci]: open a successful run and download **Artifacts → PhysicsBank-Windows-x64**. This requires GitHub login and is subject to retention limits.
+- A CI download contains an inner portable ZIP and checksum; extract the inner ZIP too. Official release links download the portable ZIP directly.
 
-Never commit `.env`, API keys, local databases, personal backups, uploaded
-question images, or student data. See the [Chinese README](README.md) for the
-simple Windows setup guide.
+</details>
 
-## QQ user group
+---
 
-Group number: **904544454**.
+<a id="setup"></a>
+
+## ⚙️ AI and export setup
+
+| Task | Requirements |
+| --- | --- |
+| Manual entry, search, formula preview and paper assembly | No AI key or local LaTeX installation. |
+| Screenshot recognition or automated PDF/Word splitting | Configure the corresponding tasks; OCR requires an image-capable model, and multi-question splitting also needs a parsing model. |
+| AI solutions, classification and selection | Configure the task's API key and model; provider usage may incur fees. |
+| Local PDF or TikZ compilation | XeLaTeX, for example through [TeX Live](https://www.tug.org/texlive/) or [MiKTeX](https://miktex.org/). |
+| Word export with editable equations | Pandoc; follow the application's setup or installation prompt. |
+
+Upload, drop or paste screenshots. For a single question, optionally enable
+automatic detailed solutions; for whole pages, select multiple-question mode.
+Review text, units, formulas, figure placement and answers before saving.
+
+Choosing files, manual cropping and opening classification suggestions make no
+model calls. Recognition, analysis and solution actions send the relevant content
+to your configured provider. Extra source verification is off by default and may
+increase costs; failed recognition or splitting does not automatically resend paid requests.
+
+<a id="upgrade"></a>
+
+## 🔄 Upgrade, backup and sharing
+
+1. **Back up first:** save pending edits, create a full backup in Settings and separately retain your API configuration.
+2. **Close normally before updating:** stop the service through its page, extract the update into a temporary folder and follow `覆盖升级说明.txt`. Source users should reinstall `requirements.txt` in their existing isolated environment after updating.
+3. **Preserve personal data:** databases and WAL/SHM, `static/uploads/`, `data_backup/`, `.env`, `.system_generated/` and `venv/`. Required database migrations create a snapshot first; rollback needs the pre-upgrade full backup.
+
+> [!IMPORTANT]
+> **Back up before updating; share question packages only.** Do not send an entire used application folder: it may contain private data and API configuration.
+
+Use **Settings → Library sharing** for a selected-question ZIP. Import there
+validates the package and creates a full backup before appending questions.
+The package includes questions and referenced images,
+not API keys or runtime settings. **Repeated import appends duplicates**; there is
+no automatic merge. Full backups serve recovery rather than selected-question sharing.
+
+<a id="community"></a>
+
+## 💬 Help and community
+
+- **Usage help:** search the application's offline QA by topic or keyword.
+- **Report problems:** [open an issue][issues] with the package date, steps and error; redact keys and private information.
+- **QQ group:** **904544454**.
 
 <p align="center">
-  <img src="docs/images/physicsbank-qq-group.png" alt="PhysicsBank QQ user group QR code" width="272">
+  <img src="docs/images/physicsbank-qq-group.png" alt="PhysicsBank QQ group QR code, group 904544454" width="272">
 </p>
 
-## License
+## 📄 Credits and license
 
-PhysicsBank is distributed under GNU AGPL-3.0. It preserves the original
-project history and notices; see [LICENSE](LICENSE) and [NOTICE.md](NOTICE.md).
-If a modified version is offered to users over a network, provide those users
-with the Corresponding Source for the version that is actually running. This
-license does not automatically relicense imported questions or private data.
+Thanks to [JudgePeach and the MathBank contributors][upstream].
+PhysicsBank retains the original history and notices under [AGPL-3.0](LICENSE);
+see [NOTICE.md](NOTICE.md). The software license does not grant rights to imported
+questions, papers or images; their own usage terms continue to apply.
+
+[windows-download]: https://github.com/HalHa8/physics-question-bank/releases/download/v0.1.0/PhysicsBank-Windows-x64.zip
+[windows-sha256]: https://github.com/HalHa8/physics-question-bank/releases/download/v0.1.0/PhysicsBank-Windows-x64.zip.sha256
+[source-zip]: https://github.com/HalHa8/physics-question-bank/archive/refs/tags/v0.1.0.zip
+[main-zip]: https://github.com/HalHa8/physics-question-bank/archive/refs/heads/main.zip
+[releases]: https://github.com/HalHa8/physics-question-bank/releases
+[ci]: https://github.com/HalHa8/physics-question-bank/actions/workflows/ci.yml?query=branch%3Amain
+[issues]: https://github.com/HalHa8/physics-question-bank/issues
+[upstream]: https://github.com/JudgePeach/math-question-bank
+[upstream-readme]: https://github.com/JudgePeach/math-question-bank/blob/main/README.md

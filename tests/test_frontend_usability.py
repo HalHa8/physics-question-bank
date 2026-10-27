@@ -1271,7 +1271,7 @@ def test_ai_classification_requires_manual_single_or_multi_choice_confirmation()
     assert 'role="radiogroup"' in index_source
     assert index_source.count("question-type-choice-check") == 2
     assert "已识别为选择题，请手动确认" in index_source
-    assert "应用分类并保存题目" in index_source
+    assert "确认应用并保存" in index_source
     assert '.question-type-choice-button[aria-checked="true"]:hover' in css_source
     assert 'color: #ffffff;' in css_source
     assert '.question-type-choice-button[aria-checked="true"] .question-type-choice-check' in css_source
@@ -1755,7 +1755,7 @@ def test_bank_browser_uses_detail_first_layout_and_card_based_editor_dialog():
     assert "ratioFromPointer(event.clientX)" in editor_source
     assert "window.setBankSplitRatio = setBankSplitRatio" in editor_source
     assert "summary.textContent = `共 ${totalItems} 道题`" in editor_source
-    assert "shouldAutoSelectFirstQuestion" in editor_source
+    assert "function reconcileBankQuestionDetail()" in editor_source
     assert "setQuestionDetailEditAvailability(true)" in editor_source
     assert "setQuestionDetailEditAvailability(true)" in import_source
     assert "Bank browser and card-based editor dialog" in css_source
@@ -1971,7 +1971,8 @@ def test_sidebar_uses_server_pagination_and_latest_request_wins():
 
     assert "questions.sort(" not in load_source
     assert "questions.slice(" not in load_source
-    assert "selectQuestion(questions[0], { silent: true })" in load_source
+    assert "reconcileBankQuestionDetail();" in load_source
+    assert "{silent: true, fromBankList: true}" in editor_source
     assert "function selectQuestion(item, options = {})" in import_source
     assert "if (!silent)" in import_source
     assert "showToast(`题目 #${fullItem.seq_num} 载入成功`)" in import_source

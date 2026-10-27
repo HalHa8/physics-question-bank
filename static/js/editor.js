@@ -1489,11 +1489,60 @@ window.visualViewport?.addEventListener('scroll', repositionKnowledgePointPicker
         }
 
         function setQuestionDetailEditAvailability(isAvailable) {
-            const button = document.getElementById('editQuestionFromPreviewBtn');
-            if (!button) return;
-            button.disabled = !isAvailable;
-            button.setAttribute('aria-disabled', isAvailable ? 'false' : 'true');
+            ['editQuestionFromPreviewBtn', 'reclassifyQuestionBtn'].forEach(id => {
+                const button = document.getElementById(id);
+                if (!button) return;
+                button.disabled = !isAvailable;
+                button.setAttribute('aria-disabled', isAvailable ? 'false' : 'true');
+            });
         }
+
+        // Presentation state only: the editor remains the single owner of question identity.
+        function setBankDetailStatus(state, message = '') {
+            const panel = document.getElementById('previewSection');
+            const status = document.getElementById('bankDetailStatus');
+            const content = panel?.querySelector('.bank-preview-content');
+            if (!panel || !status || !content) return;
+            panel.dataset.detailState = state;
+            content.hidden = state !== 'ready';
+            status.hidden = state === 'ready';
+            status.textContent = message || ({loading: '正在同步题目详情…', empty: '当前没有匹配题目，请调整筛选条件。',
+                preserved: '当前编辑内容已保留，但不在本页结果中。请先完成编辑，或从左侧重新选择题目。',
+                error: '未能加载题目，请重新选择左侧题目或刷新列表。'})[state] || '';
+            panel.setAttribute('aria-busy', state === 'loading' ? 'true' : 'false');
+            setQuestionDetailEditAvailability(state === 'ready' && Boolean(EditorState.questionId || EditorState.draftId));
+        }
+        function reconcileBankQuestionDetail() {
+            if (activeSidebarTab !== 'bank') return;
+            const list = document.getElementById('questionsList');
+            if (!list) return;
+            if (list.getAttribute('aria-busy') === 'true' || questionDetailLoading) {
+                setBankDetailStatus('loading'); return;
+            }
+            if (list.dataset.loadFailed === 'true') { setBankDetailStatus('error'); return; }
+            const cards = [...list.querySelectorAll('.question-card[data-id]')];
+            const selected = cards.find(card => Number(card.dataset.id) === Number(EditorState.questionId));
+            if (selected) {
+                cards.forEach(card => card.classList.toggle('active', card === selected));
+                setBankDetailStatus('ready'); return;
+            }
+            if (window.__preserveNewQuestionEditor || EditorState.draftId || isEditorModified()
+                    || !document.getElementById('editorSection').classList.contains('hidden')
+                    || window.isQuestionSaveInFlight?.()) {
+                setBankDetailStatus('preserved'); return;
+            }
+            if (cards.length) selectQuestion({id: Number(cards[0].dataset.id)}, {silent: true, fromBankList: true});
+            else setBankDetailStatus('empty');
+        }
+        window.setBankDetailStatus = setBankDetailStatus;
+        window.reconcileBankQuestionDetail = reconcileBankQuestionDetail;
+
+        function openQuestionClassificationSuggestion() {
+            if (document.getElementById('reclassifyQuestionBtn')?.disabled) return;
+            openQuestionEditorModal('classification');
+            openClassifyModal(); // Opening is free; analysis requires a separate explicit click.
+        }
+        window.openQuestionClassificationSuggestion = openQuestionClassificationSuggestion;
 
         function openQuestionEditorModal(panelId = 'content') {
             const modal = document.getElementById('editorSection');
@@ -1575,6 +1624,7 @@ window.visualViewport?.addEventListener('scroll', repositionKnowledgePointPicker
                 }
                 delete modal.dataset.newQuestionMode;
                 delete modal.dataset.returnQuestionId;
+                queueMicrotask(() => reconcileBankQuestionDetail());
             });
         }
 
@@ -1851,6 +1901,7 @@ window.visualViewport?.addEventListener('scroll', repositionKnowledgePointPicker
 
             // Backup draft state
             backupEditorState(EditorState.questionId, draft.id);
+            setBankDetailStatus('ready');
             setQuestionDetailEditAvailability(true);
             
             // Active highlighting in sidebar drafts list
@@ -2490,7 +2541,12 @@ window.visualViewport?.addEventListener('scroll', repositionKnowledgePointPicker
             
             const qListContainer = document.getElementById('questionsList');
             if (!qListContainer) return;
+            delete qListContainer.dataset.loadFailed;
             qListContainer.setAttribute('aria-busy', 'true');
+            if (document.getElementById('editorSection').classList.contains('hidden') && !window.isQuestionSaveInFlight?.()) {
+                window.invalidatePendingQuestionDetailLoad?.({preserveRelated: true});
+            }
+            setBankDetailStatus('loading');
             const fetchOptions = requestController ? { signal: requestController.signal } : undefined;
             
             fetch(`/api/questions?${params.toString()}`, fetchOptions)
@@ -2521,9 +2577,6 @@ window.visualViewport?.addEventListener('scroll', repositionKnowledgePointPicker
 
                     currentBankPage = Math.min(responsePage, totalPages);
                     qListContainer.innerHTML = '';
-                    const shouldAutoSelectFirstQuestion = !window.__preserveNewQuestionEditor &&
-                        !EditorState.questionId &&
-                        questions.length > 0 && !isEditorModified();
                     
                     if (totalItems === 0) {
                         qListContainer.innerHTML = `
@@ -2611,19 +2664,15 @@ window.visualViewport?.addEventListener('scroll', repositionKnowledgePointPicker
                         }
                         
                         itemCard.onclick = () => {
-                            checkAndSwitch(() => selectQuestion(item));
+                            checkAndSwitch(() => {
+                                if (loadSequence === bankQuestionsLoadSequence) selectQuestion(item, {fromBankList: true});
+                            });
                         };
                         
                         qListContainer.appendChild(itemCard);
                         adaptChoicesGridLayout(itemCard);
                     });
 
-                    if (shouldAutoSelectFirstQuestion) {
-                        // Initial list hydration is background work, not a
-                        // user selection; avoid showing a success toast on
-                        // every page refresh while keeping the first preview.
-                        selectQuestion(questions[0], { silent: true });
-                    }
                     
                     renderSidebarPagination(totalItems, currentBankPage, 'bank');
                 })
@@ -2640,6 +2689,7 @@ window.visualViewport?.addEventListener('scroll', repositionKnowledgePointPicker
                             }
                         }, 1500);
                     } else {
+                        qListContainer.dataset.loadFailed = 'true';
                         qListContainer.innerHTML = `
                             <div class="ui-state ui-state-error bank-list-state" role="alert">
                                 <span class="ui-state-icon" aria-hidden="true"><i class="fa-solid fa-triangle-exclamation"></i></span>
@@ -2655,6 +2705,8 @@ window.visualViewport?.addEventListener('scroll', repositionKnowledgePointPicker
                 })
                 .finally(() => {
                     if (loadSequence !== bankQuestionsLoadSequence) return;
+                    qListContainer.removeAttribute('aria-busy');
+                    reconcileBankQuestionDetail();
                     if (window.__preserveNewQuestionEditor) {
                         window.__preserveNewQuestionEditor = false;
                     }
@@ -2773,6 +2825,15 @@ window.visualViewport?.addEventListener('scroll', repositionKnowledgePointPicker
             `;
             renderKnowledgePointBadges(badges, KnowledgePointState.snapshot(), KnowledgePointState.filter('bank'));
             sourceEl.textContent = `来源: ${editSource.value || '本地教研录入'}`;
+            const book = document.getElementById('editCompulsory').value;
+            const chapter = document.getElementById('editChapter').value;
+            const section = document.getElementById('editKnowledge').value;
+            const sections = window.systemMetadata?.curriculum?.[book]?.[chapter];
+            const classified = Array.isArray(sections) && sections.includes(section);
+            const status = document.getElementById('bankClassificationStatus');
+            if (status) status.textContent = !Array.isArray(sections) ? '教材章节待归类' : classified ? '已细分到小节' : '待细分到小节';
+            const path = document.getElementById('bankClassificationPath');
+            if (path) path.textContent = [book, chapter, classified ? section : ''].filter(Boolean).join(' › ') || '未填写教材位置';
         }
         window.renderEditorPaperMeta = renderEditorPaperMeta;
 

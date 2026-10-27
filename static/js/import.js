@@ -865,6 +865,8 @@
         // only after the requested detail payload has arrived successfully.
         function selectQuestion(item, options = {}) {
             const silent = options && options.silent === true;
+            const bankSequenceAtRequest = bankQuestionsLoadSequence;
+            let detailFailed = false;
             if (blockEditorSessionChangeWhileSaving()) {
                 return;
             }
@@ -884,6 +886,7 @@
             const figureLayoutPendingAtRequest = typeof window.hasPendingFigureLayoutWrite === 'function'
                 && window.hasPendingFigureLayoutWrite(requestedQuestionId);
             questionDetailLoading = true;
+            window.setBankDetailStatus?.('loading');
             if (typeof window.setQuestionDetailEditAvailability === 'function') {
                 window.setQuestionDetailEditAvailability(false);
             }
@@ -899,6 +902,9 @@
                     if (loadSequence !== questionDetailLoadSequence) {
                         return;
                     }
+                    if (options.fromBankList && (bankSequenceAtRequest !== bankQuestionsLoadSequence
+                            || ![...document.querySelectorAll('#questionsList .question-card[data-id]')]
+                                .some(card => Number(card.dataset.id) === requestedQuestionId))) return;
                     if (!fullItem || Number(fullItem.id) !== requestedQuestionId) {
                         throw new Error('题目详情与请求 ID 不匹配');
                     }
@@ -1044,6 +1050,7 @@
                 })
                 .catch(err => {
                     if (loadSequence !== questionDetailLoadSequence || err.name === 'AbortError') return;
+                    detailFailed = true;
                     console.error('Failed to load full question details:', err);
                     showToast('获取题目详情失败: ' + err.message, 'error');
                     if (typeof window.setQuestionDetailEditAvailability === 'function') {
@@ -1054,6 +1061,8 @@
                     if (loadSequence !== questionDetailLoadSequence) return;
                     questionDetailLoading = false;
                     updateQuestionSaveButtonState();
+                    if (detailFailed) window.setBankDetailStatus?.('error');
+                    else window.reconcileBankQuestionDetail?.();
                 });
         }
 
@@ -1537,6 +1546,15 @@
             if (classifyRequestController) classifyRequestController.abort();
             const modal = document.getElementById('aiClassifyModal');
             modal.dataset.classifyOpen = 'true';
+            const currentPlacement = document.getElementById('classifyCurrentPlacement');
+            if (currentPlacement) {
+                const book = document.getElementById('editCompulsory').value;
+                const chapter = document.getElementById('editChapter').value;
+                const section = document.getElementById('editKnowledge').value;
+                const valid = window.systemMetadata?.curriculum?.[book]?.[chapter]?.includes(section);
+                currentPlacement.textContent = [book || '教材未选', chapter || '章节未选',
+                    valid ? section : section ? `待细分（原记录：${section}）` : '待细分到小节'].join(' › ');
+            }
             modal.classList.remove('hidden');
             window.MathBankModal.open(modal, { onEscape: closeClassifyModal });
             
@@ -1694,12 +1712,12 @@
             const comp = temporaryClassifyData.compulsory;
             const chap = temporaryClassifyData.chapter;
             
-            // Ensure nodes exist in local dictionary structure
-            if (!categoryTree[comp]) {
-                categoryTree[comp] = {};
-            }
-            if (!categoryTree[comp][chap]) {
-                categoryTree[comp][chap] = [];
+            const section = temporaryClassifyData.knowledge || '';
+            const sections = window.systemMetadata?.curriculum?.[comp]?.[chap];
+            if (!Array.isArray(sections) || (section && !sections.includes(section))) {
+                setClassifyApplyEnabled(false);
+                showToast('建议分类不在当前教材目录中，请重新分析或手动选择。', 'info');
+                return;
             }
             
             populateCategoryDropdowns();
@@ -1708,7 +1726,7 @@
             compSelect.onchange();
             chapSelect.value = chap;
             chapSelect.onchange();
-            knowSelect.value = temporaryClassifyData.knowledge || '';
+            knowSelect.value = section;
 
             const additions = temporaryClassifyKnowledgePoints.filter(item => item.classification_selected !== false)
                 .map(({classification_selected, ...item}) => item);
@@ -1720,12 +1738,12 @@
             }
             
             closeClassifyModal();
-            showToast('教材、题型及所选知识点已应用。');
-            
+            window.renderEditorPaperMeta?.();
             const classifiedSession = EditorState.snapshot();
-            // Save only the editor session in which the teacher applied the result.
+            const approvedContext = captureAIClassifyContext();
+            // The closing animation must not turn a later edit into an approved save.
             setTimeout(() => {
-                if (EditorState.isCurrent(classifiedSession)) saveQuestion(true);
+                if (EditorState.isCurrent(classifiedSession) && isAIClassifyContextCurrent(approvedContext)) saveQuestion(true);
             }, 250);
         }
 

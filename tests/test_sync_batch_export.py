@@ -120,7 +120,9 @@ def test_batch_exports_exact_legacy_json_and_markdown_without_full_evidence_view
     assert report["question_count"] == 257
     assert [len(batch) for batch in batches] == [128, 128, 1]
     assert max(identities) <= 129
-    assert (directory / "questions.json").read_bytes() == expected_json
+    # Upstream e851927: avoid a multi-megabyte pytest diff on strict byte failures.
+    if (directory / "questions.json").read_bytes() != expected_json:
+        pytest.fail("Batch JSON export differs from the legacy JSON file.", pytrace=False)
     assert (directory / "questions.md").read_bytes() == expected_markdown.read_bytes()
     first = json.loads(expected_json)[0]
     assert first["question_references"][0]["target_question_id"] == 257

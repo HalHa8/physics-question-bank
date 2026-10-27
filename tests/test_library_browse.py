@@ -153,3 +153,40 @@ def test_null_metadata_and_bounded_aggregate_queries(library):
     assert data['unclassified'] == 1
     assert len(statements) <= 10
     assert not any('questions.content' in sql or 'questions.answer_markdown' in sql for sql in statements)
+
+
+@pytest.mark.parametrize('section', ['', None, '第一章', '旧小节', '另一章的小节'])
+def test_section_unassigned_counts_and_filter_are_read_only(library, section):
+    client, db, _, add = library
+    item = add(category_knowledge=section, content='待细分合成题')
+    if section is None:  # ORM insert defaults otherwise turn None into an empty string.
+        item.category_knowledge = None
+        db.commit()
+    add(category_knowledge='同名小节')
+    add(category_chapter='已失效章节', category_knowledge='')
+    add(category_compulsory='乙册', category_knowledge='')
+    data = overview(client)
+    assert data['section_unassigned'] == 2
+    chapter = data['books'][0]['chapters'][0]
+    assert chapter['count'] == 2 and chapter['section_unassigned'] == 1
+    assert chapter['count'] == chapter['section_unassigned'] + sum(s['count'] for s in chapter['sections'])
+    params = {'page': 1, 'compulsory': '甲册', 'chapter': '第一章',
+              'classification_status': 'section_unassigned', 'qtype': 'experiment', 'q': '待细分'}
+    result = client.get('/api/questions', params=params).json()
+    assert result['total'] == 1 and result['items'][0]['id'] == item.id
+    db.refresh(item)
+    assert item.category_knowledge == section
+    item.category_knowledge = '同名小节'
+    db.commit()
+    assert overview(client)['section_unassigned'] == 1
+    assert client.get('/api/questions', params=params).json()['total'] == 0
+
+
+def test_section_status_uses_full_path_and_handles_empty_chapter(library):
+    client, db, metadata, add = library
+    metadata['curriculum']['甲册']['空章'] = []
+    add(category_chapter='空章', category_knowledge='')
+    add(category_chapter='第二章', category_knowledge='未覆盖')  # Exists only in 第一章.
+    add(category_compulsory='无效教材', category_knowledge='')
+    result = client.get('/api/questions', params={'classification_status': 'section_unassigned'}).json()
+    assert len(result) == overview(client)['section_unassigned'] == 2

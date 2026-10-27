@@ -30,6 +30,7 @@ const fetch=(url,options)=>new Promise((resolve,reject)=>requests.push({url,opti
 const showToast=value=>toasts.push(value);
 const setTimeout=callback=>{timers.push(callback);};
 const categoryTree={};
+window.systemMetadata={curriculum:{'册':{'章':['节']}}};
 function populateCategoryDropdowns(){}
 function saveQuestion(skip){saves.push({skip,points:KnowledgePointState.snapshot()});}
 window.MathBankModal={open(){},close(){}};
