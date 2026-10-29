@@ -44,6 +44,51 @@ jobs:
             node --check "$script"
           done
 
+  pillow-windows311:
+    name: Pillow 13 application / Windows Python 3.11
+    runs-on: windows-2022
+    timeout-minutes: 45
+    env:
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          check-latest: true
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+      - name: Install locked application and test dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements-dev.txt
+      - name: Verify Pillow 13 on native Windows Python 3.11
+        shell: python {0}
+        run: |
+          import sys
+          import PIL
+          import pymupdf
+          import pdf_inspector
+
+          assert sys.platform == "win32", sys.platform
+          assert sys.version_info[:2] == (3, 11), sys.version
+          assert PIL.__version__ == "13.0.0", PIL.__version__
+          print(f"{sys.version} / Pillow {PIL.__version__}")
+      - name: Verify dependency consistency
+        run: python -m pip check
+      - name: Exercise native locks, image decoding and raster validation
+        run: >-
+          python -m pytest -q
+          tests/test_document_project_windows_locks.py
+          tests/test_document_projects.py
+          tests/test_asset_lifecycle.py
+          tests/test_asset_security.py
+          tests/test_raster_validation.py
+          tests/test_pdf_raster_guard.py
+          tests/test_pdf_raster_flow.py
+      - name: Run complete application regression suite
+        run: python -m pytest -q tests/
+
   sharing-windows:
     name: Native sharing round trip / Windows Python 3.10
     runs-on: windows-2022

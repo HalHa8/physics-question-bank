@@ -270,10 +270,10 @@ class RetainedUploadStaticFiles(StaticFiles):
             return Response(content, media_type=file_response.media_type, headers=dict(file_response.headers))
 
     async def get_response(self, path, scope):
-        # StaticFiles.get_path uses the host separator (backslashes on Windows).
-        # Convert only that framework-normalized path back to a URL path before
-        # dispatching; resolve_upload_asset still validates containment/type.
-        path = path.replace(os.sep, "/")
-        if path.startswith(self.upload_static_prefix):
-            return await anyio.to_thread.run_sync(self._upload_response, path, scope)
+        # StaticFiles.get_path returns OS-native separators, not URL separators.
+        # Normalize only the native separator; a literal backslash on POSIX must
+        # not become an alternative upload URL. Asset validation stays in place.
+        upload_path = path.replace(os.sep, "/")
+        if upload_path.startswith(self.upload_static_prefix):
+            return await anyio.to_thread.run_sync(self._upload_response, upload_path, scope)
         return await super().get_response(path, scope)
