@@ -373,3 +373,25 @@
 - 更新提交 `a1676c59242c05f50a8305726cd83bdcb57e66cd` 以 `--ff-only` 集成；集成前本地与 origin 解耦分支均为 `98d5c861ceae086c690c00a5fc32ac153d2dd0fc`。本机无真实题库/图片/密钥复制，没有付费模型请求或系统软件安装。
 - 本机 Git 原先因系统 Schannel 与 HTTPS 代理握手失败，仓库本地配置已设 `http.sslbackend=openssl`；默认配置下的上游查询及 fetch 均已成功。此设置仅作用于本仓库。
 - 推送及 GitHub CI 结果以本轮最终回复和 Actions 为准；不推送 main、不强推、不创建 PR/Tag/Release、不打包。
+
+## 2026-10-30：MathBank PR #24 Pillow 13 与 Windows 文件锁
+
+上游当前默认分支为 `fc3c213c5378cf4302857f419464d27e38927e9a`，其中已合入 PR #24（含 `5ee3726` Pillow 升级及 `91c4e78` Windows 兼容修复）。本轮仅适配该 PR 的物理系统相关内容，不代表 3.0.2 其余待处理功能已完整同步。
+
+- 运行依赖按 Python 版本选择 Pillow：Python <3.11 保持 `12.3.0` 兼容回退，Python >=3.11 使用 `13.0.0` 安全版本；Windows 3.10 目标锁改为显式依赖清单，发布守卫校验其与共享锁一致。文档明确 12.3.0 只是兼容回退，并非 Pillow 13 的安全修复。
+- 图片解码异常处理纳入 Pillow 13 在异常 EXIF 数据上的 `SyntaxError`；合成 PNG EXIF 回归覆盖上传、OCR 与有效 EXIF 保留。资产静态路径在识别 `/uploads/` 前归一化 Windows 分隔符。
+- 工程跨进程文件锁在 Windows 改用 `LockFileEx` / `UnlockFileEx`，确保真正的共享/独占语义；POSIX 继续使用 `flock`。仅锁冲突重试，其他 Win32 错误立即暴露；关闭描述符时显式解锁，并覆盖竞争、异常释放及 fd 清理回归。
+- CI 新增原生 Windows Python 3.11 / Pillow 13 job，检查锁版本、依赖一致性、Windows 锁、图片及栅格 PDF 用例和完整测试。PhysicsBank 保留品牌、物理资源和现有模块化结构，未覆盖 `main.py`、数据库迁移、题库/上传数据或模型调用。
+
+### 验收记录
+
+| 验收 | 结果 |
+| --- | --- |
+| Python 3.10.21 Windows 定向回归（资产、解码、工程锁、发布守卫） | 240 passed、15 skipped |
+| Python 3.10.21 Windows 全量回归 | 4517 passed、171 skipped、0 failed（256 秒；10 条 Pillow 14 弃用警告） |
+| `pip check`、发布目标依赖锁校验、全部静态 JS `node --check`、`git diff --check` | 通过 |
+| Python 3.11 / Pillow 13 wheel 本机验证 | 隔离 Python 3.13 环境的 wheel 元数据可取得，但下载停滞，已停止；没有修改其他环境。由新增 GitHub Windows CI job 执行真实 Pillow 13 验收，推送后状态另行核实 |
+
+测试开始时的 SQLite 路径错误由本地长临时路径导致；改用短系统临时目录后该用例单独通过，随后完整套件全通过。初次 Pytest 的临时目录编码/长度问题不计为代码失败。未复制真实题库、图片、上传、学生资料、密钥或运行配置；未升级共享环境、迁移数据库或发起付费模型请求。
+
+本地适配代码提交为 `c3ced25`。验收通过后以快进方式集成并正常推送解耦分支；推送 SHA 与 GitHub Actions 结果以本轮回执为准。只有实际 GitHub Actions 通过后才能将本适配标为已完成。
