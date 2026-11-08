@@ -588,6 +588,7 @@ paths = types.ModuleType("mathbank.paths")
 paths.TEMPLATES_DIR = Path(".")
 paths.PROJECT_ROOT = Path(".")
 paths.EXPORT_PREFLIGHTS_DIR = Path(".system_generated/export_preflights")
+paths.LOCAL_CONTENT_SOURCES_PATH = Path(".system_generated/content_sources.local.json")
 sys.modules["mathbank.paths"] = paths
 
 diagnostics = types.ModuleType("mathbank.latex_diagnostics")
@@ -1285,7 +1286,9 @@ def test_launchers_use_shared_environment_and_startup_flow():
     assert "find_supported_python" in mac
     assert "MATHBANK_NO_PAUSE" in windows
     assert "MATHBANK_NO_PAUSE" in mac
-    assert "Path(__file__).resolve().parents[1]" in shared
+    from mathbank.paths import PROJECT_ROOT as SHARED_PROJECT_ROOT
+    from scripts import local_launcher
+    assert local_launcher.PROJECT_ROOT == SHARED_PROJECT_ROOT == PROJECT_ROOT
     assert "ProxyHandler({})" in shared
     assert "MATHBANK_LAUNCH_ID" in shared
     for source in (mac, windows, shared):

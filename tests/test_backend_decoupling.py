@@ -142,6 +142,10 @@ def test_document_service_runs_without_application_globals(tmp_path, kind):
     seen = []
     def parse(source, generate_answers, **kwargs):
         seen.append(generate_answers)
+        if kind == "pdf":
+            kwargs["diagnostics"]["pdf_question_validation"] = {
+                "accepted_count": 1, "rejected_count": 2, "partial": True,
+            }
         return [{"content": "物体的速度为 $v=2\\,\\mathrm{m/s}$，求位移。", "answer_markdown": "原卷答案"}]
     def forbidden(*args, **kwargs):
         pytest.fail("Unexpected vision request in the native test")
@@ -178,6 +182,10 @@ def test_document_service_runs_without_application_globals(tmp_path, kind):
         result = tasks.snapshot("isolated")
         assert result["status"] == "completed", result.get("error")
         assert result["generate_answers"] is True
+        if kind == "pdf":
+            assert result["partial"] is True
+            assert "2 项格式无效未生成题卡" in result["log"]
+            assert result["diagnostics"]["pdf_question_validation"]["accepted_count"] == 1
         assert seen == [False]  # Original answers only; no paid solving in the service.
         assert result["data"][0]["answer_markdown"]
         assert not (tmp_path / "isolated.pdf").exists()

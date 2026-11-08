@@ -43,6 +43,14 @@ Markdown import, source-preserving classification, batch figure crops, tables,
 lists, image profiles and missing-asset export preflight are supported. Extra
 PDF/Word visual verification remains opt-in and may cost money. Failed paid
 requests are not automatically retried or silently routed to another provider.
+
+The source launcher starts with port 8000 and asks before switching to an
+available port. Set `MATHBANK_PORT` to use a fixed port. Browser drafts and
+the question basket stay at their original address. PDF imports retain usable
+cards when individual entries in an otherwise complete result are malformed.
+Word answer figures stay with the answers. Optional credits from
+`.system_generated/content_sources.local.json` accompany exports, so review
+them before sharing.
 Word recovery requires an explicit click and may send unfinished requests.
 Upstream PDF local-project/fragment/checkpoint experiments remain disabled.
 

@@ -1,6 +1,18 @@
 {
   "baseline_commit": "94de5dd1fd5e9fd4ea6256312be2e1ebf311899f",
   "intentional_algorithm_updates": {
+    "healthz": {
+      "upstream_commit": "393634b9c5f7d2a2a9a7319c43f88e621036bfd8",
+      "reason": "Expose a checkout-scoped identity for safe launcher port reuse.",
+      "previous_body_sha256": "adab4acf18e4099ef7ff609db0bd8fcb25b9d758afa2f5e1107c7deba9e1a922",
+      "behavior_regressions": "tests/test_health.py; tests/test_launcher_ports_integration.py"
+    },
+    "get_version_info": {
+      "upstream_commit": "393634b9c5f7d2a2a9a7319c43f88e621036bfd8",
+      "reason": "Match health and version responses to the same checkout without exposing its path.",
+      "previous_body_sha256": "3014a66debb2998af0b11792f2b7036b90146711059d0c4192f9e5825a22c91e",
+      "behavior_regressions": "tests/test_health.py; tests/test_launcher_ports_integration.py"
+    },
     "ocr_via_provider": {
       "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
       "reason": "Single selected provider, bounded stream timeout and cancellation; original physical image crops preserved; no paid retry or provider fallback.",
@@ -789,13 +801,13 @@
     "api_heartbeat": "9b224f174bba01e697125256f732145b59b8c6b361ac2af6e36a05311e18a1fc",
     "watchdog_loop": "1d40f664d28673eaeffd95caf8ea99958851f719bb9d5aaa1edbc83c864548df",
     "shutdown_server": "43591425ef684c3d035b8237eee7a391e85c02a794e3f5839ab76ca95e03f686",
-    "healthz": "adab4acf18e4099ef7ff609db0bd8fcb25b9d758afa2f5e1107c7deba9e1a922",
+    "healthz": "66292c86700eb43a31c0eef22cf483e4037ea9c7b31f46231f0129ae0db052ec",
     "read_index": "ec0df3826fe4872693e7b8e842122c6400aeaaf1961ed0ebb9da29cad0824f00",
     "read_favicon": "e36396108dbf34405a41be9754bf9c22d4daa29fda80b5af170423d43be78dbf",
     "read_favicon_svg": "a002e18e0807d6a674b7ea181246ceb2b0ce14d554f137769488e1c4ce02b0b5",
     "read_apple_touch_icon": "1a24455e48bf753c5130fa854d6411140da920b5ff0765fc7146cfcbac4a554e",
     "format_fraction_style": "07b0fc45c38735ad4f6ef010972d8cc28a0b6200c926f9764b5d17d5da000fdd",
-    "get_version_info": "3014a66debb2998af0b11792f2b7036b90146711059d0c4192f9e5825a22c91e",
+    "get_version_info": "a5a71a8ed881e94c6f8b902b3df6d8339affc665b2db5c4ac28cda34f3213097",
     "check_version_update": "6287b5e23c497ae1e953d15fa0a4258ef1b40496d1bd369bc1d01fb87b53cb0c",
     "get_pandoc_runtime_status": "e237f37c27d5e10396d33be6b00ba4ae4365e0fb0a20285df148228c127bda4b",
     "install_pandoc_runtime": "7d34774426f48e4e2f40aeb1aaad80ae3c25d7b8d4264d724b006f43bce2d808",

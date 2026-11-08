@@ -193,7 +193,7 @@ def test_truncated_or_unknown_completion_is_rejected_even_with_valid_json(setup,
 
 
 @pytest.mark.parametrize("field,value", [
-    ("markdown", ""), ("markdown", 2), ("page_complete", "true"),
+    ("markdown", ""), ("markdown", 2),
     ("warnings", "warning"), ("warnings", [None]),
     ("warnings", ["x" * 501]), ("warnings", ["warning"] * 17),
 ])
@@ -356,9 +356,21 @@ def test_invalid_figure_contract_preserves_transcript_for_manual_review(setup, c
     elif change == "both_used_and_ignored": data["ignored_candidates"] = [{"id": "p3_raster_001", "reason": "formula"}]
     result = call(setup, data)
     assert result["markdown"] == data["markdown"]
-    assert result["layout"]["figures"] == []
+    if change == "ignored_type":
+        assert len(result["layout"]["figures"]) == 1
+    else:
+        assert result["layout"]["figures"] == []
     assert result["layout"]["page_complete"] is False
     assert all(note.startswith("待核对：") for note in result["layout"]["notes"])
+    assert len(setup.calls) == 1
+
+
+def test_invalid_completeness_preserves_transcript_without_certifying_page(setup):
+    data = page_result()
+    data["page_complete"] = "true"
+    result = call(setup, data)
+    assert result["markdown"] == data["markdown"]
+    assert result["layout"]["page_complete"] is False
     assert len(setup.calls) == 1
 
 
