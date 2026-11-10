@@ -19,6 +19,8 @@ work without AI; configure your own provider when you need recognition or soluti
 > [!TIP]
 > **New here?** Download the [Windows release][windows-download], extract it fully and double-click the launcher. Python is included. Try manual entry first and configure AI only when needed.
 
+The current main branch includes the MathBank 3.0.3 adaptations. The v0.1.0 downloads below remain pinned to their original release. See the [sync record](docs/upstream-sync.md).
+
 ---
 
 <a id="physics"></a>

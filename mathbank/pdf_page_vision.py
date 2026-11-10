@@ -144,7 +144,8 @@ def _prompt_page_info(page_info: dict) -> dict:
 
 
 def _validated_page(result, page_info: dict) -> dict:
-    _require_fields(result, _PAGE_FIELDS, "页面")
+    if not isinstance(result, dict) or "markdown" not in result or set(result) - _PAGE_FIELDS:
+        raise ValueError("PDF 页面联合识别的页面字段缺失或包含未支持字段。")
     markdown = result["markdown"]
     if not isinstance(markdown, str) or not markdown.strip():
         raise ValueError("PDF 页面联合识别没有返回有效正文。")
@@ -152,12 +153,20 @@ def _validated_page(result, page_info: dict) -> dict:
         raise ValueError("PDF 页面联合识别正文过长，请缩小识别范围。")
     if _IMAGE_OR_ASSET_PATH.search(markdown):
         raise ValueError("PDF 页面联合识别不能生成图片路径，只能返回插图占位。")
-    if not isinstance(result["page_complete"], bool):
-        raise ValueError("PDF 页面联合识别的完整性标记必须为布尔值。")
-    warnings = result["warnings"]
+    warnings = result.get("warnings", [])
     if (not isinstance(warnings, list) or len(warnings) > MAX_WARNINGS
             or any(not isinstance(value, str) or not value.strip() or len(value) > MAX_REASON_CHARS for value in warnings)):
         raise ValueError("PDF 页面联合识别的核对提示格式无效。")
+    result = dict(result)
+    warnings = list(warnings)
+    for field, label in (("figures", "配图列表"), ("ignored_candidates", "未采用候选列表")):
+        if not isinstance(result.get(field), list):
+            result[field] = []
+            result["page_complete"] = False
+            warnings.append(f"{label}未返回或格式不规范，已保留正文，请对照原页核对插图。")
+    if not isinstance(result.get("page_complete"), bool):
+        result["page_complete"] = False
+        warnings.append("页面完整性标记无效，已保留正文，请对照原页核对是否完整。")
     try:
         return _validated_layout(result, page_info, markdown, warnings)
     except ValueError as exc:
@@ -355,7 +364,8 @@ def request_pdf_page(
         except (ValueError, OSError):
             pass
     def validate(body):
-        raw = completion_content(body, "PDF 页面联合识别", max_chars=MAX_RESPONSE_CHARS)
+        raw = completion_content(body, "PDF 页面联合识别", max_chars=MAX_RESPONSE_CHARS,
+                                 allow_missing_finish=True)
         try:
             parsed = parse_ai_json(raw)
         except Exception as exc:

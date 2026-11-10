@@ -396,8 +396,11 @@ def run_pdf_parsing_task(task_id: str, file_bytes: bytes, filename: str, generat
                 diagnostics['pdf_source_verification'] = {'status': 'no_candidates' if pdf_verify_suspicions else 'disabled', 'calls': 0, 'checked': 0, 'confirmed': 0, 'pending': diagnostics.get('source_review_count', 0), 'skipped': 0, 'usage': {}}
         dependencies.make_source_review_advisory(final_questions, diagnostics)
         dependencies.tasks.check_cancelled(task_id)
-        partial = bool(diagnostics.get('pdf_hybrid', {}).get('partial'))
+        rejected_count = diagnostics.get('pdf_question_validation', {}).get('rejected_count', 0)
+        partial = bool(diagnostics.get('pdf_hybrid', {}).get('partial') or rejected_count)
         completion_log = f'PDF 已保留 {len(final_questions)} 道完整题目；部分疑点题组仍需校对，未处理范围已保留，可展开原文与未匹配题段核对。' if partial else '拆分完成，可选择题目导入；原文和配图说明可按需展开查看。'
+        if rejected_count:
+            completion_log = f'PDF 已保留 {len(final_questions)} 道可用题目；有 {rejected_count} 项格式无效未生成题卡，请对照原页核对漏题。'
         completed = dependencies.tasks.complete(task_id, log=completion_log, partial=partial, data=final_questions, generate_answers=generate_answers, page_images=list(page_urls), page_numbers=[number + 1 for number in target_page_indices], temp_assets=list(temp_assets), document_type='pdf', diagnostics=diagnostics)
         if not completed:
             dependencies.delete_temp_assets(temp_assets)

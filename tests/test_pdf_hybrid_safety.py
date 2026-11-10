@@ -224,11 +224,12 @@ def test_real_plain_native_proof_and_visual_transcript_proof_cannot_exchange_dom
 
 
 @pytest.mark.parametrize('partial',[False,True])
-def test_pdf_task_completion_executed_tail_preserves_partial_flag_and_notice(partial):
+@pytest.mark.parametrize('rejected_count',[0,2])
+def test_pdf_task_completion_executed_tail_preserves_partial_flag_and_notice(partial,rejected_count):
     """Execute the actual PDF completion tail without importing app/main/DB.
 
     The HTTP/planner tests above exercise the real request. This isolates the
-    final task/UI contract directly from main's current source statements.
+    final task/UI contract directly from the service's current source statements.
     """
     import ast
     from pathlib import Path
@@ -236,21 +237,31 @@ def test_pdf_task_completion_executed_tail_preserves_partial_flag_and_notice(par
     tree=ast.parse((Path(__file__).resolve().parents[1]/'mathbank/pdf_import_service.py').read_text())
     function=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='run_pdf_parsing_task')
     assigns={target.id:node for node in ast.walk(function) if isinstance(node,ast.Assign)
-             for target in node.targets if isinstance(target,ast.Name) and target.id in {'partial','completion_log'}}
+             for target in node.targets if isinstance(target,ast.Name) and target.id in {'rejected_count','partial','completion_log'}}
+    rejection_notice=next(node for node in ast.walk(function) if isinstance(node,ast.If)
+        and isinstance(node.test,ast.Name) and node.test.id=='rejected_count')
+    initial_log=next(node for node in ast.walk(function) if isinstance(node,ast.Assign)
+        and node.lineno < rejection_notice.lineno
+        and any(isinstance(target,ast.Name) and target.id=='completion_log' for target in node.targets))
     completion=next(node for node in ast.walk(function) if isinstance(node,ast.Call)
         and isinstance(node.func,ast.Attribute) and node.func.attr=='complete'
         and isinstance(node.func.value,ast.Attribute) and node.func.value.attr=='tasks')
-    actual_ast=ast.Module(body=[assigns['partial'],assigns['completion_log'],ast.Expr(value=completion)],type_ignores=[])
+    actual_ast=ast.Module(body=[assigns['rejected_count'],assigns['partial'],initial_log,
+        rejection_notice,ast.Expr(value=completion)],type_ignores=[])
     ast.fix_missing_locations(actual_ast)
     captured=[]
     tasks=SimpleNamespace(complete=lambda task_id,**kwargs:captured.append((task_id,kwargs)) or True)
     data=[{'content':'One retained complete question'}]
     diagnostics={'pdf_hybrid':{'partial':partial,'failed_group_ids':['failed-source-group'] if partial else []}}
+    if rejected_count:
+        diagnostics['pdf_question_validation']={'rejected_count':rejected_count}
     namespace={'dependencies':SimpleNamespace(tasks=tasks),'diagnostics':diagnostics,'task_id':'pdf-ui-completion','final_questions':data,
                'generate_answers':False,'page_urls':['test-page'],'target_page_indices':[0],'temp_assets':[]}
     exec(compile(actual_ast,'actual-pdf-completion-tail','exec'),namespace)
     assert len(captured)==1
     kwargs=captured[0][1]
-    assert kwargs['partial'] is partial and kwargs['data'] is data and kwargs['diagnostics'] is diagnostics
-    assert ('部分疑点题组仍需校对' in kwargs['log']) is partial
+    assert kwargs['partial'] is (partial or bool(rejected_count))
+    assert kwargs['data'] is data and kwargs['diagnostics'] is diagnostics
+    assert ('部分疑点题组仍需校对' in kwargs['log']) is (partial and not rejected_count)
+    assert ('2 项格式无效未生成题卡' in kwargs['log']) is bool(rejected_count)
     assert kwargs['document_type']=='pdf' and kwargs['page_numbers']==[1]

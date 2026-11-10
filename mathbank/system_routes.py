@@ -8,6 +8,7 @@ from mathbank.database import get_db
 from dataclasses import dataclass
 from typing import Any, Callable
 from mathbank.application_state import RuntimeState
+from mathbank.paths import project_instance_id
 
 
 @dataclass(frozen=True)
@@ -31,6 +32,7 @@ class SystemRoutesDependencies:
 def healthz(*, dependencies: SystemRoutesDependencies):
     report = dependencies.readiness_report(dependencies.engine)
     report['server_instance_id'] = dependencies.state.SERVER_INSTANCE_ID
+    report['project_instance_id'] = project_instance_id(dependencies.PROJECT_ROOT)
     report['pdf_inspector_version'] = dependencies.get_pdf_inspector_version()
     return dependencies.JSONResponse(report, status_code=200 if report['ready'] else 503)
 
@@ -70,6 +72,7 @@ def get_version_info(*, dependencies: SystemRoutesDependencies):
         "repo": GITHUB_REPO,
         "is_git_repo": is_git_repo,
         "server_instance_id": dependencies.state.SERVER_INSTANCE_ID,
+        "project_instance_id": project_instance_id(dependencies.PROJECT_ROOT),
     }
 
 

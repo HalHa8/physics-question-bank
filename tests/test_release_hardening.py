@@ -300,7 +300,12 @@ def test_cross_platform_requirements_are_locked_and_target_explicit():
         if line.strip() and not line.lstrip().startswith("#")
     ]
     assert package_lines
-    assert all("==" in line and ";" not in line for line in package_lines)
+    pillow_markers = {
+        'pillow==12.3.0; python_version < "3.11"',
+        'pillow==13.0.0; python_version >= "3.11"',
+    }
+    assert pillow_markers.issubset(package_lines)
+    assert all("==" in line and (";" not in line or line in pillow_markers) for line in package_lines)
     assert "colorama==0.4.6" in package_lines
     assert "greenlet==3.5.4" in package_lines
 
@@ -331,9 +336,38 @@ def test_cross_platform_requirements_are_locked_and_target_explicit():
     windows_requirements = (PROJECT_ROOT / "requirements-windows.txt").read_text(
         encoding="utf-8"
     )
-    assert windows_requirements.count("-r requirements.txt") == 1
-    assert "sys_platform" not in windows_requirements
+    windows_lines = {
+        line.strip() for line in windows_requirements.splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+    assert all("==" in line and ";" not in line for line in windows_lines)
+    assert windows_lines == (set(package_lines) - pillow_markers) | {"pillow==12.3.0"}
     build_release.validate_target_requirements()
+
+
+@pytest.mark.parametrize("filename,old,new", [
+    ("requirements-windows.txt", "pillow==12.3.0", 'pillow==12.3.0; python_version < "3.11"'),
+    ("requirements-windows.txt", "pillow==12.3.0", "pillow==13.0.0"),
+    ("requirements-windows.txt", "colorama==0.4.6", "colorama==0.4.5"),
+    ("requirements-windows.txt", "pillow==12.3.0", "-r requirements.txt"),
+    ("requirements-windows.txt", "pillow==12.3.0", "pillow==12.3.0\npillow==12.3.0"),
+    ("requirements-windows.txt", "pillow==12.3.0", "pillow==12.3.0\nPillow==12.3.0"),
+    ("requirements.txt", 'pillow==13.0.0; python_version >= "3.11"', "pillow==13.0.0"),
+    ("requirements.txt", "colorama==0.4.6", 'colorama==0.4.6; sys_platform == "win32"'),
+    ("requirements.txt", "colorama==0.4.6", "colorama==0.4.6\ncolorama==0.4.6"),
+])
+def test_target_requirements_fail_closed_on_markers_includes_duplicates_or_drift(
+    tmp_path, monkeypatch, filename, old, new
+):
+    for name in ("requirements.txt", "requirements-windows.txt"):
+        (tmp_path / name).write_text((PROJECT_ROOT / name).read_text(encoding="utf-8"), encoding="utf-8")
+    path = tmp_path / filename
+    source = path.read_text(encoding="utf-8")
+    assert old in source
+    path.write_text(source.replace(old, new), encoding="utf-8")
+    monkeypatch.setattr(build_release, "BASE_DIR", str(tmp_path))
+    with pytest.raises(RuntimeError):
+        build_release.validate_target_requirements()
 
 
 def test_windows_runtime_layout_requires_platform_transitive_dependencies(tmp_path):
@@ -554,6 +588,7 @@ paths = types.ModuleType("mathbank.paths")
 paths.TEMPLATES_DIR = Path(".")
 paths.PROJECT_ROOT = Path(".")
 paths.EXPORT_PREFLIGHTS_DIR = Path(".system_generated/export_preflights")
+paths.LOCAL_CONTENT_SOURCES_PATH = Path(".system_generated/content_sources.local.json")
 sys.modules["mathbank.paths"] = paths
 
 diagnostics = types.ModuleType("mathbank.latex_diagnostics")
@@ -1251,7 +1286,9 @@ def test_launchers_use_shared_environment_and_startup_flow():
     assert "find_supported_python" in mac
     assert "MATHBANK_NO_PAUSE" in windows
     assert "MATHBANK_NO_PAUSE" in mac
-    assert "Path(__file__).resolve().parents[1]" in shared
+    from mathbank.paths import PROJECT_ROOT as SHARED_PROJECT_ROOT
+    from scripts import local_launcher
+    assert local_launcher.PROJECT_ROOT == SHARED_PROJECT_ROOT == PROJECT_ROOT
     assert "ProxyHandler({})" in shared
     assert "MATHBANK_LAUNCH_ID" in shared
     for source in (mac, windows, shared):

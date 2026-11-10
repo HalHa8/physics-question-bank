@@ -139,14 +139,18 @@ def test_bootstrap_preflight_runs_without_application_or_database_imports(tmp_pa
     (True, "other/app", False),
 ])
 def test_existing_service_requires_usable_physicsbank_page(monkeypatch, ready, repo, expected):
+    identity = {"project_instance_id": launcher.project_instance_id(launcher.ACTIVE_ROOT),
+                "server_instance_id": "synthetic-instance"}
     monkeypatch.setattr(launcher, "read_json", lambda route:
-                        {"repo": repo} if route == "/api/version" else {"ready": ready})
+                        {"repo": repo, **identity} if route == "/api/version" else {"ready": ready, **identity})
     assert launcher.existing_service_ready() is expected
 
 
 def test_second_launch_reuses_running_physicsbank_service(tmp_path, monkeypatch):
+    identity = {"project_instance_id": launcher.project_instance_id(tmp_path),
+                "server_instance_id": "synthetic-instance"}
     monkeypatch.setattr(launcher, "read_json", lambda route:
-                        {"repo": GITHUB_REPO} if route == "/api/version" else {"ready": True})
+                        {"repo": GITHUB_REPO, **identity} if route == "/api/version" else {"ready": True, **identity})
     monkeypatch.setattr(launcher, "port_in_use", lambda: True)
     monkeypatch.setattr(launcher, "prepare_python", lambda *_: pytest.fail("environment touched"))
     opened = []
