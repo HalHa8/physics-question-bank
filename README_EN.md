@@ -19,7 +19,7 @@ work without AI; configure your own provider when you need recognition or soluti
 > [!TIP]
 > **New here?** Download the [Windows release][windows-download], extract it fully and double-click the launcher. Python is included. Try manual entry first and configure AI only when needed.
 
-The current main branch includes the MathBank 3.0.3 adaptations. The v0.1.0 downloads below remain pinned to their original release. See the [sync record](docs/upstream-sync.md).
+Version v0.1.1 includes the MathBank 3.0.3 adaptations. See the [sync record](docs/upstream-sync.md).
 
 ---
 
@@ -65,8 +65,8 @@ PhysicsBank does not claim to include every latest upstream feature.
 
 | Download | Intended users | Availability |
 | --- | --- | --- |
-| **[⬇ Windows release][windows-download]** | Teachers who prefer extracting and launching | **v0.1.0** · Windows 10/11 x64 · Python and runtime dependencies included. |
-| **[📦 Matching source ZIP][source-zip]** | Users with Python or developers | Complete v0.1.0 source; install dependencies separately. Not the portable package. |
+| **[⬇ Windows release][windows-download]** | Teachers who prefer extracting and launching | **v0.1.1** · Windows 10/11 x64 · Python and runtime dependencies included. |
+| **[📦 Matching source ZIP][source-zip]** | Users with Python or developers | Complete v0.1.1 source; install dependencies separately. Not the portable package. |
 | **[🏷 Releases][releases]** | Release notes, attachments and earlier versions | Official downloads are not subject to CI artifact retention periods. |
 
 ### 🖥️ Option 1: Windows portable package (recommended)
@@ -97,7 +97,7 @@ uses port 8000, close it normally through its page, or use port 8001 from source
 ```powershell
 git clone https://github.com/HalHa8/physics-question-bank.git
 cd physics-question-bank
-git switch --detach v0.1.0
+git switch --detach v0.1.1
 ```
 
 For a ZIP download, enter the extracted project directory first.
@@ -185,9 +185,9 @@ PhysicsBank retains the original history and notices under [AGPL-3.0](LICENSE);
 see [NOTICE.md](NOTICE.md). The software license does not grant rights to imported
 questions, papers or images; their own usage terms continue to apply.
 
-[windows-download]: https://github.com/HalHa8/physics-question-bank/releases/download/v0.1.0/PhysicsBank-Windows-x64.zip
-[windows-sha256]: https://github.com/HalHa8/physics-question-bank/releases/download/v0.1.0/PhysicsBank-Windows-x64.zip.sha256
-[source-zip]: https://github.com/HalHa8/physics-question-bank/archive/refs/tags/v0.1.0.zip
+[windows-download]: https://github.com/HalHa8/physics-question-bank/releases/download/v0.1.1/PhysicsBank-Windows-x64.zip
+[windows-sha256]: https://github.com/HalHa8/physics-question-bank/releases/download/v0.1.1/PhysicsBank-Windows-x64.zip.sha256
+[source-zip]: https://github.com/HalHa8/physics-question-bank/archive/refs/tags/v0.1.1.zip
 [main-zip]: https://github.com/HalHa8/physics-question-bank/archive/refs/heads/main.zip
 [releases]: https://github.com/HalHa8/physics-question-bank/releases
 [ci]: https://github.com/HalHa8/physics-question-bank/actions/workflows/ci.yml?query=branch%3Amain

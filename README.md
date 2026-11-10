@@ -49,11 +49,11 @@ PhysicsBank 基于 [MathBank][upstream] 改造，面向高中物理的日常备�
 
 | 下载方式 | 适合谁 | 当前状态 |
 | --- | --- | --- |
-| **[⬇ Windows 正式便携包][windows-download]** | 希望解压后直接使用的老师 | **v0.1.0** · Windows 10/11 64 位 · 内含 Python 与运行依赖。 |
-| **[📦 对应版本源码 ZIP][source-zip]** | 已有 Python 环境或希望自行修改的用户 | v0.1.0 完整源码；需自行安装依赖，不是便携包。 |
+| **[⬇ Windows 正式便携包][windows-download]** | 希望解压后直接使用的老师 | **v0.1.1** · Windows 10/11 64 位 · 内含 Python 与运行依赖。 |
+| **[📦 对应版本源码 ZIP][source-zip]** | 已有 Python 环境或希望自行修改的用户 | v0.1.1 完整源码；需自行安装依赖，不是便携包。 |
 | **[🏷 Release 发行页][releases]** | 查看版本说明、附件与历史版本 | 正式发布渠道；附件不受 CI 构建产物的保留期限限制。 |
 
-> 当前主线源码已纳入 MathBank 3.0.3 兼容改动。下表的 v0.1.0 固定下载仍对应原发布版本。详见[上游同步记录](docs/upstream-sync.md)。
+> v0.1.1 纳入了 MathBank 3.0.3 的兼容改动。详见[上游同步记录](docs/upstream-sync.md)。
 
 ### 🖥️ 方式一：Windows 便携包（推荐）
 
@@ -82,7 +82,7 @@ MathBank 与 PhysicsBank 请放在不同文件夹，分别保存题库。若 Mat
 ```powershell
 git clone https://github.com/HalHa8/physics-question-bank.git
 cd physics-question-bank
-git switch --detach v0.1.0
+git switch --detach v0.1.1
 ```
 
 如果下载的是 ZIP，请先进入解压后的项目目录。需要 Python 3.10 或更新版本；下面用 Conda 创建独立环境：
@@ -156,9 +156,9 @@ python -m uvicorn main:app --host 127.0.0.1 --port 8001
 
 感谢 [JudgePeach 与 MathBank 贡献者][upstream]。PhysicsBank 保留原项目历史与声明，按 [AGPL-3.0](LICENSE) 开源，修改说明见 [NOTICE.md](NOTICE.md)。软件许可证不等于试题授权；自行导入的题目、试卷和图片仍须遵守各自的使用条件。
 
-[windows-download]: https://github.com/HalHa8/physics-question-bank/releases/download/v0.1.0/PhysicsBank-Windows-x64.zip
-[windows-sha256]: https://github.com/HalHa8/physics-question-bank/releases/download/v0.1.0/PhysicsBank-Windows-x64.zip.sha256
-[source-zip]: https://github.com/HalHa8/physics-question-bank/archive/refs/tags/v0.1.0.zip
+[windows-download]: https://github.com/HalHa8/physics-question-bank/releases/download/v0.1.1/PhysicsBank-Windows-x64.zip
+[windows-sha256]: https://github.com/HalHa8/physics-question-bank/releases/download/v0.1.1/PhysicsBank-Windows-x64.zip.sha256
+[source-zip]: https://github.com/HalHa8/physics-question-bank/archive/refs/tags/v0.1.1.zip
 [main-zip]: https://github.com/HalHa8/physics-question-bank/archive/refs/heads/main.zip
 [releases]: https://github.com/HalHa8/physics-question-bank/releases
 [ci]: https://github.com/HalHa8/physics-question-bank/actions/workflows/ci.yml?query=branch%3Amain
