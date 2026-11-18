@@ -174,6 +174,45 @@ def test_full_backup_round_trip_restores_database_uploads_and_metadata(tmp_path)
     assert json.loads(metadata.read_text(encoding="utf-8"))["curriculum"] == "original"
 
 
+def test_current_backup_restores_library_receipts_with_physics_question(tmp_path):
+    from datetime import datetime
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+    from mathbank.database import Base, LibraryImportReceipt, Question
+    from mathbank.db_migrations import LATEST_SCHEMA_VERSION
+
+    database = tmp_path / "questions.db"
+    uploads = tmp_path / "uploads"
+    uploads.mkdir()
+    engine = create_engine(f"sqlite:///{database}")
+    Base.metadata.create_all(engine)
+    digest = "a" * 64
+    imported_at = datetime(2026, 11, 18, 12, 0)
+    try:
+        with engine.begin() as connection:
+            connection.exec_driver_sql(f"PRAGMA user_version={LATEST_SCHEMA_VERSION}")
+        with Session(engine) as session:
+            session.add(Question(content="F=2.0 N，方向向右", question_type="experiment"))
+            session.add(LibraryImportReceipt(archive_sha256=digest, imported_at=imported_at, question_count=1))
+            session.commit()
+        archive = create_full_backup(database_path=database, uploads_dir=uploads,
+                                     metadata_path=tmp_path / "missing.json",
+                                     output_dir=tmp_path / "snapshots", retention=None)
+        assert verify_full_backup(archive)["database"]["row_counts"]["library_import_receipts"] == 1
+        with Session(engine) as session:
+            session.query(LibraryImportReceipt).delete()
+            session.query(Question).delete()
+            session.commit()
+    finally:
+        engine.dispose()
+    restore_full_backup(archive, database_path=database, uploads_dir=uploads,
+                        metadata_path=tmp_path / "missing.json", safety_backup_dir=tmp_path / "safety",
+                        runtime_lock_path=tmp_path / "runtime.lock")
+    with _sqlite_connection(database) as connection:
+        assert connection.execute("SELECT archive_sha256,question_count FROM library_import_receipts").fetchone() == (digest, 1)
+        assert connection.execute("SELECT content,question_type FROM questions").fetchone() == ("F=2.0 N，方向向右", "experiment")
+
+
 def test_backup_verifier_rejects_modified_payload(tmp_path):
     database = tmp_path / "math_question_bank.db"
     uploads = tmp_path / "uploads"
@@ -317,14 +356,14 @@ def test_restore_rejects_future_schema_before_replacing_current_database(tmp_pat
             "question_id INTEGER NOT NULL, fingerprint_version INTEGER NOT NULL, "
             "PRIMARY KEY(question_id, fingerprint_version))"
         )
-    # A future fixture must still contain all known v12 tables; otherwise the
+    # A future fixture must still contain all known v13 tables; otherwise the
     # new incomplete-backup guard correctly fails before the downgrade check.
     future_engine = create_engine(f"sqlite:///{future_database}")
     try:
         from mathbank.database import (QuestionSubKnowledge, QuestionSourceLabel,
-                                       QuestionReference, DocumentImportReceipt)
+                                       QuestionReference, DocumentImportReceipt, LibraryImportReceipt)
         for model in (KnowledgePoint, KnowledgePointCurriculum, QuestionKnowledgePoint,
-                      QuestionSubKnowledge, QuestionSourceLabel, QuestionReference, DocumentImportReceipt):
+                      QuestionSubKnowledge, QuestionSourceLabel, QuestionReference, DocumentImportReceipt, LibraryImportReceipt):
             model.__table__.create(future_engine)
     finally:
         future_engine.dispose()

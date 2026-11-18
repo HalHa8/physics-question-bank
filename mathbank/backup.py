@@ -78,6 +78,8 @@ def _backup_count_tables(schema_version: int) -> set[str]:
         tables.update({"knowledge_points", "knowledge_point_curriculums", "question_knowledge_points"})
     if schema_version >= 12:
         tables.update({"question_sub_knowledge", "question_source_labels", "question_references", "document_import_receipts"})
+    if schema_version >= 13:
+        tables.add("library_import_receipts")
     return tables
 
 
@@ -889,6 +891,9 @@ def verify_full_backup(archive_path: Path) -> dict[str, Any]:
                                 _validate_question_reference_schema(validation_connection)
                                 from mathbank.db_migrations import _validate_document_import_receipts
                                 _validate_document_import_receipts(validation_connection)
+                            if schema_version >= 13:
+                                from mathbank.db_migrations import _validate_library_import_receipts
+                                _validate_library_import_receipts(validation_connection)
                     finally:
                         validation_engine.dispose()
                 if "structured_upload_references" in database_manifest and database_manifest["structured_upload_references"] is not True:

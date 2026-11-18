@@ -4,6 +4,7 @@ from typing import List, Optional
 from pathlib import Path
 from fastapi import BackgroundTasks, Depends, File, Form, Header, HTTPException, Query, Request, Response, UploadFile
 from sqlalchemy.orm import Session
+from mathbank.library_transfer_tasks import RepeatLibraryImport, SynchronousImportInProgress
 from mathbank.database import get_db
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -31,6 +32,8 @@ class LibraryTransferServiceDependencies:
     TransferTaskError: Any
     TransferTaskQueueFull: Any
     _check_library_import_storage: Any
+    _lookup_library_import: Any
+    _library_import_conflict_response: Any
     _library_transfer_tasks: Any
     _receive_library_archive: Any
     _run_library_export_task: Any
@@ -110,17 +113,20 @@ def export_library_transfer(payload: dict, db: Session=Depends(get_db), *, depen
 
 
 
-def import_library_transfer(background_tasks: BackgroundTasks, file: UploadFile=File(...), db: Session=Depends(get_db), *, dependencies: LibraryTransferServiceDependencies):
-    """Validate, back up and append; importing the same archive appends again."""
+def import_library_transfer(background_tasks: BackgroundTasks, file: UploadFile=File(...), confirm_repeat_sha256: Optional[str]=Form(None), db: Session=Depends(get_db), *, dependencies: LibraryTransferServiceDependencies):
+    """Validate and append; a previously imported archive needs confirmation."""
     workspace = None
     try:
         transfer_root = dependencies.SYSTEM_GENERATED_DIR / 'library_transfer'
         transfer_root.mkdir(parents=True, exist_ok=True)
         workspace = dependencies.Path(dependencies.tempfile.mkdtemp(prefix='import-', dir=transfer_root))
         archive = workspace / 'library.zip'
-        dependencies._receive_library_archive(file, archive)
-        with dependencies.prepare_library_import(archive, workspace_dir=workspace) as prepared:
+        digest = dependencies._receive_library_archive(file, archive)
+        tasks = dependencies._library_transfer_tasks()
+        with tasks.reserve_synchronous_import(digest, confirm_repeat_sha256), dependencies.prepare_library_import(archive, workspace_dir=workspace) as prepared:
             with dependencies.ASSET_LIFECYCLE_LOCK, dependencies.state._METADATA_SAVE_LOCK:
+                if prepared.archive_sha256 != digest:
+                    raise ValueError('分享包在接收后发生变化，请重新选择文件。')
                 dependencies._check_library_import_storage(prepared)
                 import_version = dependencies.get_active_version_code()
                 backup_path = dependencies._sharing_backup()
@@ -129,6 +135,8 @@ def import_library_transfer(background_tasks: BackgroundTasks, file: UploadFile=
         return {'status': 'success', 'imported_count': result['imported_count'], 'image_count': result['image_count'], 'backup_path': str(backup_path), 'active_version_code': import_version}
     except dependencies.HTTPException:
         raise
+    except dependencies.TransferTaskConflict as exc:
+        return dependencies._library_import_conflict_response(exc)
     except ValueError as exc:
         raise dependencies.HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
@@ -167,12 +175,13 @@ def _check_library_import_storage(prepared, *, dependencies: LibraryTransferServ
         dependencies.check_directory_access(dependencies.Path(dependencies.state.UPLOAD_DIR), label='题目图片目录（static/uploads）')
 
 
-def _run_library_import_task(directory, progress, *, dependencies: LibraryTransferServiceDependencies):
+def _run_library_import_task(directory, progress, *, confirm_repeat_sha256=None, dependencies: LibraryTransferServiceDependencies):
     from mathbank.database import SessionLocal
     archive = directory / 'input.zip'
     with dependencies.prepare_library_import(archive, workspace_dir=directory / 'prepared', progress=progress) as prepared:
         progress('waiting')
         with dependencies.ASSET_LIFECYCLE_LOCK, dependencies.state._METADATA_SAVE_LOCK:
+            dependencies._library_transfer_tasks().check_import(prepared.archive_sha256, confirm_repeat_sha256, current_task_id=directory.name)
             dependencies._check_library_import_storage(prepared)
             import_version = dependencies.get_active_version_code()
             progress('backup')
@@ -199,7 +208,7 @@ def _library_transfer_tasks(*, dependencies: LibraryTransferServiceDependencies)
             dependencies.state._LIBRARY_TRANSFER_TASKS.close()
             dependencies.state._LIBRARY_TRANSFER_TASKS = None
         if dependencies.state._LIBRARY_TRANSFER_TASKS is None:
-            dependencies.state._LIBRARY_TRANSFER_TASKS = dependencies.LibraryTransferTasks(root, run_import=dependencies._run_library_import_task, run_export=dependencies._run_library_export_task)
+            dependencies.state._LIBRARY_TRANSFER_TASKS = dependencies.LibraryTransferTasks(root, run_import=dependencies._run_library_import_task, run_export=dependencies._run_library_export_task, lookup_import=dependencies._lookup_library_import)
         return dependencies.state._LIBRARY_TRANSFER_TASKS
 
 
@@ -232,21 +241,19 @@ def _transfer_task_http_error(exc, *, dependencies: LibraryTransferServiceDepend
     return dependencies.HTTPException(status_code=500, detail=error['message'])
 
 
-def start_library_import_task(file: UploadFile=File(...), client_request_id: str=Form(...), *, dependencies: LibraryTransferServiceDependencies):
+def start_library_import_task(file: UploadFile=File(...), client_request_id: str=Form(...), confirm_repeat_sha256: Optional[str]=Form(None), *, dependencies: LibraryTransferServiceDependencies):
     try:
         task_id = dependencies.normalize_transfer_task_id(client_request_id)
         tasks = dependencies._library_transfer_tasks()
         with tasks.upload_workspace() as workspace:
             archive = workspace / 'upload.zip'
             digest = dependencies._receive_library_archive(file, archive)
-            (result, created) = tasks.submit_import(task_id, archive, digest)
+            result, created = tasks.submit_import(task_id, archive, digest, confirm_repeat_sha256=confirm_repeat_sha256, retain_repeat=True)
         return dependencies.JSONResponse(result, status_code=202 if created else 200, headers={'Cache-Control': 'no-store'})
     except dependencies.HTTPException:
         raise
     except dependencies.TransferTaskConflict as exc:
-        if exc.active_task_id:
-            return dependencies.JSONResponse({'detail': str(exc), 'active_task_id': exc.active_task_id, 'code': 'active_import'}, status_code=409, headers={'Cache-Control': 'no-store'})
-        raise dependencies._transfer_task_http_error(exc) from exc
+        return dependencies._library_import_conflict_response(exc)
     except Exception as exc:
         raise dependencies._transfer_task_http_error(exc) from exc
     finally:
@@ -295,3 +302,38 @@ def download_library_transfer_task(task_id: str, *, dependencies: LibraryTransfe
     except Exception as exc:
         raise dependencies._transfer_task_http_error(exc) from exc
     return dependencies.FileResponse(archive, media_type='application/zip', filename=f"PhysicsBank-{summary.get('question_count', 0)}questions-{task_id}.zip", headers={'Cache-Control': 'no-store'})
+
+
+def _lookup_library_import(archive_sha256, *, dependencies: LibraryTransferServiceDependencies):
+    from mathbank.database import LibraryImportReceipt, SessionLocal
+    with SessionLocal() as db:
+        return db.get(LibraryImportReceipt, archive_sha256) is not None
+
+
+def _library_import_conflict_response(exc, *, dependencies: LibraryTransferServiceDependencies):
+    if isinstance(exc, RepeatLibraryImport):
+        return dependencies.JSONResponse(exc.details(), status_code=409, headers={'Cache-Control': 'no-store'})
+    if isinstance(exc, SynchronousImportInProgress):
+        return dependencies.JSONResponse({'code': 'import_in_progress', 'detail': str(exc)}, status_code=409, headers={'Cache-Control': 'no-store'})
+    if exc.active_task_id:
+        return dependencies.JSONResponse({'detail': str(exc), 'active_task_id': exc.active_task_id, 'code': 'active_import'}, status_code=409, headers={'Cache-Control': 'no-store'})
+    raise dependencies._transfer_task_http_error(exc) from exc
+
+
+def confirm_library_import_task(task_id: str, *, dependencies: LibraryTransferServiceDependencies):
+    try:
+        result, created = dependencies._library_transfer_tasks().confirm_repeat(task_id)
+        return dependencies.JSONResponse(result, status_code=202 if created else 200, headers={'Cache-Control': 'no-store'})
+    except FileNotFoundError as exc:
+        raise dependencies.HTTPException(status_code=410, detail='分享包暂存已失效，请重新选择并上传 ZIP。') from exc
+    except dependencies.TransferTaskConflict as exc:
+        return dependencies._library_import_conflict_response(exc)
+    except Exception as exc:
+        raise dependencies._transfer_task_http_error(exc) from exc
+
+
+def cancel_library_import_confirmation(task_id: str, *, dependencies: LibraryTransferServiceDependencies):
+    try:
+        dependencies._library_transfer_tasks().cancel_repeat(task_id)
+    except Exception as exc:
+        raise dependencies._transfer_task_http_error(exc) from exc

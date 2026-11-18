@@ -21,10 +21,18 @@ def test_old_operations_and_components_outside_knowledge_scope_are_unchanged():
                 assert _hash(schema['paths'][path][method]) == digest, (path, method)
         for name, digest in contract['unchanged_components'].items():
             assert _hash(schema['components']['schemas'][name]) == digest, name
+        for path, methods in contract.get('audited_operations', {}).items():
+            for method, audit in methods.items():
+                assert _hash(schema['paths'][path][method]) == audit['sha256'], (path, method)
+                assert audit['previous_sha256'] and audit['reason'] and audit['behavior_regressions']
         for name, audit in contract.get('audited_components', {}).items():
             assert _hash(schema['components']['schemas'][name]) == audit['sha256'], name
             assert audit['previous_sha256'] and audit['reason'] and audit['behavior_regressions']
         forms = schema['components']['schemas']
+        for name in ('Body_import_library_transfer_api_library_transfer_import_post',
+                     'Body_start_library_import_task_api_library_transfer_tasks_import_post'):
+            assert 'confirm_repeat_sha256' in forms[name]['properties']
+            assert 'confirm_repeat_sha256' not in forms[name].get('required', [])
         assert forms['Body_ai_classify_api_ai_classify_post']['required'] == ['content']
         assert forms['Body_ai_parse_paper_api_ai_parse_paper_post']['required'] == ['latex_content']
         for kind in ('pdf', 'docx'):

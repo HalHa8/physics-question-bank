@@ -17,7 +17,7 @@ from sqlalchemy.orm import sessionmaker
 
 from mathbank import database
 from mathbank.database import (
-    KnowledgePoint, KnowledgePointCurriculum, Question, QuestionCurriculum, QuestionFingerprint,
+    KnowledgePoint, KnowledgePointCurriculum, LibraryImportReceipt, Question, QuestionCurriculum, QuestionFingerprint,
     QuestionKnowledgePoint, QuestionReference, QuestionSourceLabel,
 )
 from mathbank import library_transfer as transfer
@@ -325,7 +325,14 @@ def test_repeated_import_always_appends_and_never_cross_links(share, tmp_path):
     uploads = tmp_path / "target_uploads"
     with isolated_db(tmp_path / "target.db") as db:
         first = transfer.import_library_zip(db, package, uploads_dir=uploads)
+        digest = hashlib.sha256(package.read_bytes()).hexdigest()
+        receipt = db.get(LibraryImportReceipt, digest)
+        assert receipt.question_count == 2 and receipt.imported_at is not None
+        first_imported_at = receipt.imported_at
         second = transfer.import_library_zip(db, package, uploads_dir=uploads)
+        db.expire_all()
+        assert db.query(LibraryImportReceipt).count() == 1
+        assert db.get(LibraryImportReceipt, digest).imported_at >= first_imported_at
         assert db.query(Question).count() == 4 and len(list(uploads.iterdir())) == 6
         assert set(first["id_map"].values()).isdisjoint(second["id_map"].values())
         assert db.get(Question, first["id_map"][1]).association_group_id != db.get(Question, second["id_map"][1]).association_group_id
@@ -478,6 +485,7 @@ def test_failed_commit_rolls_back_rows_catalog_and_installed_files(share, tmp_pa
         assert db.query(KnowledgePoint).count() == db.query(QuestionReference).count() == db.query(QuestionSourceLabel).count() == db.query(QuestionFingerprint).count() == 0
         assert list(uploads.iterdir()) == [sentinel]
         assert verified == [(tmp_path / "receiving.db", 2, True)]
+        assert db.query(LibraryImportReceipt).count() == 0
 
 
 @pytest.mark.parametrize("failure_mode", ["commit_wrapper", "after_commit_hook"])

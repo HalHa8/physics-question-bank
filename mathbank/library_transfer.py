@@ -23,6 +23,7 @@ import zipfile
 import zlib
 
 from sqlalchemy import func, null, or_
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import selectinload
 
 from mathbank import __version__
@@ -35,7 +36,7 @@ from mathbank.asset_security import (
     fsync_writable_file, replace_file_atomic, resolve_upload_asset,
 )
 from mathbank.database import (
-    KnowledgePoint, KnowledgePointCurriculum, Question, QuestionCurriculum,
+    KnowledgePoint, KnowledgePointCurriculum, LibraryImportReceipt, Question, QuestionCurriculum,
     QuestionKnowledgePoint, QuestionReference, QuestionSourceLabel,
 )
 from mathbank.curriculums import CURRICULUM_NAMES
@@ -151,6 +152,14 @@ class PreparedLibraryImport:
 
     def __init__(self):
         raise TypeError("请通过 prepare_library_import 准备分享包")
+
+    @property
+    def archive_sha256(self):
+        with _PREPARED_IMPORT_LOCK:
+            state = _PREPARED_IMPORTS.get(self)
+            if state is None:
+                raise ValueError("分享包预检已失效，请重新准备")
+            return state.archive_sha256
 
     @property
     def summary(self):
@@ -1022,6 +1031,7 @@ def import_library_zip(db, archive_path: Path, *, uploads_dir: Path, active_vers
             return import_library_zip(db, archive_path, uploads_dir=uploads_dir,
                                       active_version=active_version, prepared=prepared, progress=progress)
     package = _consume_prepared_import(prepared, archive_path)
+    archive_digest = prepared.archive_sha256
     installed, committed, commit_attempted = [], False, False
     import_database, id_map = None, {}
     try:
@@ -1147,6 +1157,15 @@ def import_library_zip(db, archive_path: Path, *, uploads_dir: Path, active_vers
         # Each batch already computed and stored the same complete index. This
         # final progress checkpoint confirms all indexes before the one commit.
         _progress(progress, "fingerprinting", len(id_map), len(package["records"]))
+        receipt = sqlite_insert(LibraryImportReceipt).values(
+            archive_sha256=archive_digest,
+            imported_at=datetime.now(timezone.utc).replace(tzinfo=None),
+            question_count=len(id_map),
+        )
+        db.execute(receipt.on_conflict_do_update(index_elements=["archive_sha256"], set_={
+            "imported_at": receipt.excluded.imported_at,
+            "question_count": receipt.excluded.question_count,
+        }))
         result = {"imported_count": len(id_map), "image_count": len(package["assets"]), "id_map": id_map}
         _progress(progress, "committing", 0, 1)
         commit_attempted = True

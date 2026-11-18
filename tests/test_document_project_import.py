@@ -199,7 +199,7 @@ def test_database_unique_card_constraint_is_real_not_only_python_check(environme
     assert _counts(factory) == (1, 1)
 
 
-def test_v11_to_v12_backs_up_before_ddl_and_preserves_all_question_fields(environment, tmp_path, monkeypatch):
+def test_v11_to_current_backs_up_before_ddl_and_preserves_all_question_fields(environment, tmp_path, monkeypatch):
     path, engine, factory, _, _, card = environment
     with factory() as db:
         question = Question(content=card["content"], answer_markdown=card["answer_markdown"],
@@ -210,6 +210,7 @@ def test_v11_to_v12_backs_up_before_ddl_and_preserves_all_question_fields(enviro
         db.add(question); db.commit()
     with engine.begin() as connection:
         connection.exec_driver_sql("DROP TABLE document_import_receipts")
+        connection.exec_driver_sql("DROP TABLE library_import_receipts")
         connection.exec_driver_sql("PRAGMA user_version=11")
     before = _question_hash(path)
     monkeypatch.setattr(db_migrations, "SCHEMA_SNAPSHOT_DIR", tmp_path / "snapshots")
@@ -231,9 +232,11 @@ def test_v11_to_v12_backs_up_before_ddl_and_preserves_all_question_fields(enviro
     monkeypatch.setattr(db_migrations, "create_pre_migration_backup", backup)
     monkeypatch.setattr(db_migrations, "_ensure_document_import_receipts", ensure)
     result = db_migrations.migrate_database(engine)
-    assert result['from_version'] == 11 and result['to_version'] == 12
-    assert db_migrations.schema_version(engine) == 12
+    assert result['from_version'] == 11 and result['to_version'] == db_migrations.LATEST_SCHEMA_VERSION
+    assert db_migrations.schema_version(engine) == db_migrations.LATEST_SCHEMA_VERSION
     assert 'document_import_receipts' in inspect(engine).get_table_names()
+    with engine.connect() as connection:
+        assert connection.exec_driver_sql("SELECT count(*) FROM library_import_receipts").scalar() == 0
     assert _question_hash(path) == before
     assert _question_hash(observed[0]) == before
 

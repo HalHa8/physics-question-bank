@@ -514,16 +514,22 @@
       "behavior_regressions": "tests/test_library_transfer_api.py; tests/test_library_transfer.py; tests/test_library_transfer_browser.py; tests/test_physics_v3_sync.py"
     },
     "import_library_transfer": {
-      "source_commit": "3ab3ad25a24d03f354e85732101df64d5818e054",
-      "reason": "Bound ZIP preparation, backup-first atomic append, single accepted intent and safe storage failures; retain PhysicsBank P data and no model requests.",
-      "previous_body_sha256": "71a3425ef4ab2c0014aa09fbb75a40dfd6a3a791a01f0e9179c04ca1a8cc3376",
-      "behavior_regressions": "tests/test_library_transfer_tasks.py; tests/test_library_transfer_tasks_api.py; tests/test_library_transfer_storage_api.py; tests/test_library_transfer_upload.py; tests/test_physics_sharing_tasks.py; tests/test_physics_sharing_curriculum.py",
+      "upstream_commit": "0048989267621ca4f7b555ea57e2111b53e83d77",
+      "previous_body_sha256": "a8d2d01093e4564295ff6c29a9ae05c1a247a079d1cfaf060443a04ce3c564d5",
+      "reason": "Require an exact-archive receipt confirmation before repeated append; retain mutation locks, backup-before-write, selected physics curriculum and no replay after uncertain commits.",
+      "behavior_regressions": "tests/test_library_transfer_api.py; tests/test_library_transfer_tasks_api.py; tests/test_library_transfer_tasks.py; tests/test_physics_sharing_curriculum.py",
       "previous_audits": [
         {
           "source_commit": "bf587bbd8f7fc4ca3c181e668437849bbcb5a098",
           "reason": "Validate portable sharing ZIP, preflight and snapshot before append-only import; protect origin/local data and exclude secrets.",
           "previous_body_sha256": null,
           "behavior_regressions": "tests/test_library_transfer_api.py; tests/test_library_transfer.py; tests/test_library_transfer_browser.py; tests/test_physics_v3_sync.py"
+        },
+        {
+          "source_commit": "3ab3ad25a24d03f354e85732101df64d5818e054",
+          "reason": "Bound ZIP preparation, backup-first atomic append, single accepted intent and safe storage failures; retain PhysicsBank P data and no model requests.",
+          "previous_body_sha256": "71a3425ef4ab2c0014aa09fbb75a40dfd6a3a791a01f0e9179c04ca1a8cc3376",
+          "behavior_regressions": "tests/test_library_transfer_tasks.py; tests/test_library_transfer_tasks_api.py; tests/test_library_transfer_storage_api.py; tests/test_library_transfer_upload.py; tests/test_physics_sharing_tasks.py; tests/test_physics_sharing_curriculum.py"
         }
       ]
     },
@@ -582,10 +588,18 @@
       "behavior_regressions": "tests/test_library_transfer_tasks.py; tests/test_library_transfer_tasks_api.py; tests/test_library_transfer_storage_api.py; tests/test_library_transfer_upload.py; tests/test_physics_sharing_tasks.py; tests/test_physics_sharing_curriculum.py"
     },
     "_run_library_import_task": {
-      "source_commit": "3ab3ad25a24d03f354e85732101df64d5818e054",
-      "reason": "Bound ZIP preparation, backup-first atomic append, single accepted intent and safe storage failures; retain PhysicsBank P data and no model requests.",
-      "previous_body_sha256": null,
-      "behavior_regressions": "tests/test_library_transfer_tasks.py; tests/test_library_transfer_tasks_api.py; tests/test_library_transfer_storage_api.py; tests/test_library_transfer_upload.py; tests/test_physics_sharing_tasks.py; tests/test_physics_sharing_curriculum.py"
+      "upstream_commit": "0048989267621ca4f7b555ea57e2111b53e83d77",
+      "previous_body_sha256": "ddac25284c37fabdf2f87054eb5260628c8f0c5db8f602eecd8825b852b724a6",
+      "reason": "Require an exact-archive receipt confirmation before repeated append; retain mutation locks, backup-before-write, selected physics curriculum and no replay after uncertain commits.",
+      "behavior_regressions": "tests/test_library_transfer_api.py; tests/test_library_transfer_tasks_api.py; tests/test_library_transfer_tasks.py; tests/test_physics_sharing_curriculum.py",
+      "previous_audits": [
+        {
+          "source_commit": "3ab3ad25a24d03f354e85732101df64d5818e054",
+          "reason": "Bound ZIP preparation, backup-first atomic append, single accepted intent and safe storage failures; retain PhysicsBank P data and no model requests.",
+          "previous_body_sha256": null,
+          "behavior_regressions": "tests/test_library_transfer_tasks.py; tests/test_library_transfer_tasks_api.py; tests/test_library_transfer_storage_api.py; tests/test_library_transfer_upload.py; tests/test_physics_sharing_tasks.py; tests/test_physics_sharing_curriculum.py"
+        }
+      ]
     },
     "_run_library_export_task": {
       "source_commit": "3ab3ad25a24d03f354e85732101df64d5818e054",
@@ -594,10 +608,18 @@
       "behavior_regressions": "tests/test_library_transfer_tasks.py; tests/test_library_transfer_tasks_api.py; tests/test_library_transfer_storage_api.py; tests/test_library_transfer_upload.py; tests/test_physics_sharing_tasks.py; tests/test_physics_sharing_curriculum.py"
     },
     "_library_transfer_tasks": {
-      "source_commit": "3ab3ad25a24d03f354e85732101df64d5818e054",
-      "reason": "Bound ZIP preparation, backup-first atomic append, single accepted intent and safe storage failures; retain PhysicsBank P data and no model requests.",
-      "previous_body_sha256": null,
-      "behavior_regressions": "tests/test_library_transfer_tasks.py; tests/test_library_transfer_tasks_api.py; tests/test_library_transfer_storage_api.py; tests/test_library_transfer_upload.py; tests/test_physics_sharing_tasks.py; tests/test_physics_sharing_curriculum.py"
+      "upstream_commit": "0048989267621ca4f7b555ea57e2111b53e83d77",
+      "previous_body_sha256": "87156eb357eda777fae1c665c3bd67570b1549be621789dff6281c8055f5f171",
+      "reason": "Require an exact-archive receipt confirmation before repeated append; retain mutation locks, backup-before-write, selected physics curriculum and no replay after uncertain commits.",
+      "behavior_regressions": "tests/test_library_transfer_api.py; tests/test_library_transfer_tasks_api.py; tests/test_library_transfer_tasks.py; tests/test_physics_sharing_curriculum.py",
+      "previous_audits": [
+        {
+          "source_commit": "3ab3ad25a24d03f354e85732101df64d5818e054",
+          "reason": "Bound ZIP preparation, backup-first atomic append, single accepted intent and safe storage failures; retain PhysicsBank P data and no model requests.",
+          "previous_body_sha256": null,
+          "behavior_regressions": "tests/test_library_transfer_tasks.py; tests/test_library_transfer_tasks_api.py; tests/test_library_transfer_storage_api.py; tests/test_library_transfer_upload.py; tests/test_physics_sharing_tasks.py; tests/test_physics_sharing_curriculum.py"
+        }
+      ]
     },
     "_receive_library_archive": {
       "source_commit": "3ab3ad25a24d03f354e85732101df64d5818e054",
@@ -612,10 +634,18 @@
       "behavior_regressions": "tests/test_library_transfer_tasks.py; tests/test_library_transfer_tasks_api.py; tests/test_library_transfer_storage_api.py; tests/test_library_transfer_upload.py; tests/test_physics_sharing_tasks.py; tests/test_physics_sharing_curriculum.py"
     },
     "start_library_import_task": {
-      "source_commit": "3ab3ad25a24d03f354e85732101df64d5818e054",
-      "reason": "Bound ZIP preparation, backup-first atomic append, single accepted intent and safe storage failures; retain PhysicsBank P data and no model requests.",
-      "previous_body_sha256": null,
-      "behavior_regressions": "tests/test_library_transfer_tasks.py; tests/test_library_transfer_tasks_api.py; tests/test_library_transfer_storage_api.py; tests/test_library_transfer_upload.py; tests/test_physics_sharing_tasks.py; tests/test_physics_sharing_curriculum.py"
+      "upstream_commit": "0048989267621ca4f7b555ea57e2111b53e83d77",
+      "previous_body_sha256": "64246e82710c457e262e6bf2b74d8597fc778a6911f0c9a632a461c2d30d911c",
+      "reason": "Require an exact-archive receipt confirmation before repeated append; retain mutation locks, backup-before-write, selected physics curriculum and no replay after uncertain commits.",
+      "behavior_regressions": "tests/test_library_transfer_api.py; tests/test_library_transfer_tasks_api.py; tests/test_library_transfer_tasks.py; tests/test_physics_sharing_curriculum.py",
+      "previous_audits": [
+        {
+          "source_commit": "3ab3ad25a24d03f354e85732101df64d5818e054",
+          "reason": "Bound ZIP preparation, backup-first atomic append, single accepted intent and safe storage failures; retain PhysicsBank P data and no model requests.",
+          "previous_body_sha256": null,
+          "behavior_regressions": "tests/test_library_transfer_tasks.py; tests/test_library_transfer_tasks_api.py; tests/test_library_transfer_storage_api.py; tests/test_library_transfer_upload.py; tests/test_physics_sharing_tasks.py; tests/test_physics_sharing_curriculum.py"
+        }
+      ]
     },
     "start_library_export_task": {
       "source_commit": "3ab3ad25a24d03f354e85732101df64d5818e054",
@@ -916,7 +946,7 @@
     "preview_library_transfer": "0061ff6b8365be33833a5006837675f8402770eb361b7059b7b2712d21d9312e",
     "select_library_transfer_ids": "99f433d5cf558551bd230ab66bf1982e30ca016e5820ae46f08acc181d4e9ff5",
     "export_library_transfer": "0f4eb88cccd76f0f492566d8af090a805f7047ef93501dbdea97648582493e54",
-    "import_library_transfer": "a8d2d01093e4564295ff6c29a9ae05c1a247a079d1cfaf060443a04ce3c564d5",
+    "import_library_transfer": "44d56df0c045785933c4c9e218c84857d4f2d9509084159db401475cc80e572c",
     "_document_project_service": "d1b0fc2d2dd323bec5f203a9947dca51e6f85f1f103a2fb21b2c040ec034c547",
     "_sync_document_project": "7e28ff2c649ff0cf95ce7da5b6064c0ead2a9bfe9b304aa8a489d0a7fe600960",
     "_restore_document_project_asset": "3a9f17c7af4b1e8922a47483ddc94e8939a1b5df4565866d819b8b1047cf2e7c",
@@ -926,12 +956,12 @@
     "_sharing_backup": "9a35d7936ea49deb8217e51774f4f310cda4345e8843a3cc12c93fd0502d1160",
     "_sharing_post_commit_export": "9ba6101966ff002129b8a9519ef78c28740fbfec58f7607350cc27997d74af62",
     "_check_library_import_storage": "5839d71c9c841ae5910c5b32cc9b743a83d0a7341c66be0e3277ca74e4c0d9f2",
-    "_run_library_import_task": "ddac25284c37fabdf2f87054eb5260628c8f0c5db8f602eecd8825b852b724a6",
+    "_run_library_import_task": "a9b6610edfff6a891409e9071476f8564bc18b0fc6f00ee1940e1c7327ab8af0",
     "_run_library_export_task": "a7ccead2791cb1e4db1fb0cd46496804df897712b0e38e8aa5908fc7cc7282f5",
-    "_library_transfer_tasks": "87156eb357eda777fae1c665c3bd67570b1549be621789dff6281c8055f5f171",
+    "_library_transfer_tasks": "240f6ef7a6612033e8bfc895cf0803525f4b9101d360ad702a23e999b8328034",
     "_receive_library_archive": "1d826a14e1aa183bae91ab7cad01db8f5304c617c72d8f11e413cbd0504c6014",
     "_transfer_task_http_error": "a6b4c0bd041135a592be8d4e3ac3e9309c79a615e2eadbbeb99248755bec6bbd",
-    "start_library_import_task": "64246e82710c457e262e6bf2b74d8597fc778a6911f0c9a632a461c2d30d911c",
+    "start_library_import_task": "145a79f7ba361f7bbc46a8b6ac209b3fb9214c3f756447004a17f5e8216e2004",
     "start_library_export_task": "1865d2f375d851014d217f8bce42e4282aa1d8161ce600adcc06ba3d55489f3a",
     "get_library_transfer_task": "f71a925c446999c3a833d55db2746dcbfcb431085b214049008f62d13c31b46d",
     "download_library_transfer_task": "da92f901dad01f6dfa1e91283a80e54068959108b3194bfc4664fcfcd5101cf0"

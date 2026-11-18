@@ -47,6 +47,33 @@ def _export(directory, payload, progress):
     return {"question_count": 2, "image_count": 0}
 
 
+def test_repeat_upload_timer_rearms_after_early_wakeup(tmp_path, monkeypatch):
+    timers = []
+    class Timer:
+        def __init__(self, seconds, callback, args):
+            self.seconds, self.callback, self.args = seconds, callback, args
+            timers.append(self)
+        def start(self): pass
+        def cancel(self): pass
+    tasks = LibraryTransferTasks(tmp_path / "tasks", run_import=lambda *_: None,
+                                 run_export=_export, lookup_import=lambda _: True)
+    monkeypatch.setattr(task_module.threading, "Timer", Timer)
+    task_id = _id()
+    archive, digest = _archive(tmp_path)
+    try:
+        with pytest.raises(task_module.RepeatLibraryImport):
+            tasks.submit_import(task_id, archive, digest, retain_repeat=True)
+        timers[0].callback(*timers[0].args)
+        assert len(timers) == 2 and timers[1].seconds > 0
+        assert tasks.get(task_id)["status"] == "awaiting_confirmation"
+        tasks._repeat_uploads[task_id].expires_at = 0
+        timers[1].callback(*timers[1].args)
+        assert tasks.get(task_id) is None
+        assert not list((tasks.root / "_repeat_uploads").iterdir())
+    finally:
+        tasks.close()
+
+
 def test_concurrent_same_intent_runs_once_and_new_intent_still_appends(tmp_path):
     entered, release = threading.Event(), threading.Event()
     calls = []

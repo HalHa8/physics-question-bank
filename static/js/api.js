@@ -2026,18 +2026,16 @@
         function libraryExportFilterSignature() { return JSON.stringify(libraryExportFilters()); }
         function updateLibraryTransferControls() {
             const busy = Boolean(libraryTransferBusy);
+            const repeat = libraryTransferTask?.status === 'awaiting_confirmation';
             const state = libraryExportSelection;
             document.getElementById('libraryTransferControls').disabled = busy;
             document.getElementById('libraryImportFile').disabled = busy;
-            document.getElementById('libraryExportBtn').disabled = busy || state.selecting || !state.ids.size || Boolean(state.missing.size);
+            document.getElementById('libraryExportBtn').disabled = busy || repeat || state.selecting || !state.ids.size || Boolean(state.missing.size);
             const selectedFile = document.getElementById('libraryImportFile').files[0];
-            const repeat = libraryTransferTask && libraryTransferTask.operation === 'import'
-                && libraryTransferTask.status === 'completed' && selectedFile
-                && libraryTransferTask.filename === selectedFile.name && libraryTransferTask.size === selectedFile.size
-                && libraryTransferTask.last_modified === selectedFile.lastModified;
             document.getElementById('libraryImportRepeatLabel').classList.toggle('hidden', !repeat);
-            document.getElementById('libraryImportBtn').disabled = busy || !selectedFile
-                || Boolean(repeat && !document.getElementById('libraryImportRepeatConfirm').checked);
+            document.getElementById('libraryImportRepeatConfirm').disabled = busy;
+            document.getElementById('libraryImportRepeatCancel').disabled = busy;
+            document.getElementById('libraryImportBtn').disabled = busy || repeat || !selectedFile;
             document.getElementById('settings-tab-transfer').setAttribute('aria-busy', String(busy));
             document.querySelector('#libraryExportBtn span').textContent = libraryTransferBusy === 'export' ? '正在打包…' : '导出 ' + state.ids.size + ' 题 · ZIP 分享包';
             document.querySelector('#libraryImportBtn span').textContent = libraryTransferBusy === 'import' ? '正在导入…' : '批量导入';
@@ -2055,6 +2053,11 @@
             document.getElementById('libraryExportList').setAttribute('aria-busy', String(state.loading));
             document.getElementById('libraryExportMissing').hidden = !state.missing.size;
             document.getElementById('libraryExportMissingText').textContent = '已选中有 ' + state.missing.size + ' 道题已被删除，已暂停导出。';
+        }
+        function onLibraryImportFileChange() {
+            document.getElementById('libraryImportRepeatConfirm').checked = false;
+            if (libraryTransferTask?.status === 'awaiting_confirmation') decideLibraryImportConfirmation(false);
+            updateLibraryTransferControls();
         }
         function libraryExportNode(tag, text = '', className = '') {
             const node = document.createElement(tag); node.textContent = text;
@@ -2372,6 +2375,8 @@
                 error.activeTaskId = data.active_task_id;
             }
             if (data && data.code === 'upload_rejected') error.uploadRejected = true;
+            if (data && data.code === 'repeat_import') error.repeatImport = data;
+            if (data && data.code === 'import_in_progress') error.uploadRejected = true;
             return error;
         }
 
@@ -2444,13 +2449,15 @@
             const status = snapshot ? snapshot.status : task.status;
             const completed = status === 'completed';
             const failed = status === 'failed';
+            const awaiting = status === 'awaiting_confirmation';
             const uncertain = ['interrupted', 'unknown'].includes(status);
-            libraryTransferBusy = libraryTransferTerminal.has(status) ? '' : task.operation;
+            libraryTransferBusy = libraryTransferTerminal.has(status) || (awaiting && !task.disconnected) ? '' : task.operation;
             const result = snapshot && snapshot.result || {};
-            let state = completed ? 'success' : failed || uncertain || task.disconnected ? 'error' : 'busy';
+            const state = completed ? 'success' : awaiting || failed || uncertain || task.disconnected ? 'error' : 'busy';
             if (!message) {
                 if (completed && task.operation === 'import') message = '导入完成：新增 ' + result.imported_count + ' 道题目、' + result.image_count + ' 张图片。全部题目已分配新 ID。';
                 else if (completed) message = 'ZIP 分享包已生成，可下载后交给对方导入。';
+                else if (awaiting) message = (snapshot?.error?.message || '这份 ZIP 正在等待确认。') + ' 勾选后直接使用刚才上传的文件。';
                 else if (failed && task.resolved_at) message = '已核实并结束此任务记录。再次导入仍会新增包内全部题目。';
                 else if (failed) message = (task.operation === 'import' ? '导入失败：' : '导出失败：') + (snapshot && snapshot.error && snapshot.error.message || task.error || '请查看服务日志后重试。');
                 else if (uncertain) message = '任务结果需要核实：' + (snapshot && snapshot.error && snapshot.error.message || '服务中断或未能确认提交结果。') + ' 请先查询原任务并核实题库，勿直接再次导入。';
@@ -2491,7 +2498,8 @@
             }
             if (!snapshot || snapshot.task_id !== taskId
                     || (snapshot.operation !== libraryTransferTask.operation && !(snapshot.operation === 'unknown' && snapshot.status === 'unknown'))
-                    || !['queued', 'running', 'committing', 'completed', 'failed', 'interrupted', 'unknown'].includes(snapshot.status)) {
+                    || !['awaiting_confirmation', 'queued', 'running', 'committing', 'completed', 'failed', 'interrupted', 'unknown'].includes(snapshot.status)
+                    || (snapshot.status === 'awaiting_confirmation' && (snapshot.operation !== 'import' || snapshot.error?.staged_task_id !== taskId))) {
                 throw new Error('任务回执格式无效。');
             }
             if (snapshot.status === 'completed' && snapshot.operation === 'import'
@@ -2499,6 +2507,7 @@
                         || !Number.isInteger(snapshot.result.image_count) || snapshot.result.image_count < 0)) throw new Error('导入结果格式无效。');
             const task = libraryTransferTask;
             task.snapshot = snapshot; task.status = snapshot.status; task.disconnected = false; task.failures = 0;
+            document.getElementById('libraryImportRepeatConfirm').checked = false;
             saveLibraryTransferTask(); renderLibraryTransferTask();
             if (snapshot.status === 'completed') {
                 if (task.operation === 'import' && libraryTransferRefreshedTask !== taskId) {
@@ -2508,7 +2517,7 @@
                     libraryTransferAutoDownload = ''; document.getElementById('libraryTransferDownload').click();
                 }
             }
-            return !libraryTransferTerminal.has(snapshot.status) && !['interrupted', 'unknown'].includes(snapshot.status);
+            return !libraryTransferTerminal.has(snapshot.status) && !['awaiting_confirmation', 'interrupted', 'unknown'].includes(snapshot.status);
         }
         async function pollLibraryTransferTask() {
             if (!libraryTransferTask || libraryTransferTask.resolved_at || libraryTransferPollPending) return;
@@ -2521,6 +2530,10 @@
                 const response = await fetch('/api/library-transfer/tasks/' + encodeURIComponent(taskId), {signal: controller.signal});
                 if (response.status === 404) {
                     if (!libraryTransferTaskIsCurrent(taskId, generation)) return;
+                    if (libraryTransferTask.status === 'awaiting_confirmation') {
+                        finishLibraryImportConfirmation('分享包暂存已失效，请重新选择并上传 ZIP。');
+                        return;
+                    }
                     libraryTransferTask.status = 'unknown'; libraryTransferTask.snapshot = null; libraryTransferTask.disconnected = true;
                     saveLibraryTransferTask(); renderLibraryTransferTask('未找到原任务回执，导入结果仍需核实。请检查题库或重新连接查询；不会重新上传分享包。');
                     return;
@@ -2579,6 +2592,58 @@
             }
             return guarded();
         }
+        function adoptActiveLibraryImport(activeTaskId) {
+            libraryTransferTask.status = 'failed';
+            archiveLibraryTransferTask();
+            const active = {...libraryTransferDescriptor(libraryTransferTask), task_id: activeTaskId, status: 'queued'};
+            restoreLibraryTransferTask(active); saveLibraryTransferTask();
+            renderLibraryTransferTask('同一分享包已在处理中，正在查询原任务。');
+        }
+
+        function finishLibraryImportConfirmation(message) {
+            Object.assign(libraryTransferTask, {status: 'failed', snapshot: null, disconnected: false,
+                submission_rejected: true, error: message});
+            saveLibraryTransferTask(); renderLibraryTransferTask(message);
+        }
+
+        async function decideLibraryImportConfirmation(accept) {
+            if (libraryTransferBusy || libraryTransferTask?.status !== 'awaiting_confirmation') return;
+            const taskId = libraryTransferTask.task_id, generation = libraryTransferGeneration;
+            libraryTransferTask.submitting = true;
+            libraryTransferBusy = 'import'; updateLibraryTransferControls();
+            const controller = new AbortController(), timeout = setTimeout(() => controller.abort(), 15000);
+            try {
+                const response = await fetch('/api/library-transfer/tasks/' + encodeURIComponent(taskId) + '/confirm-import',
+                    {method: accept ? 'POST' : 'DELETE', signal: controller.signal});
+                if (!libraryTransferTaskIsCurrent(taskId, generation)) return;
+                if (response.status === 204) {
+                    finishLibraryImportConfirmation('已取消本次重复导入。'); return;
+                }
+                if (response.ok) {
+                    if (applyLibraryTransferSnapshot(await response.json(), taskId, generation)) pollLibraryTransferTask();
+                    return;
+                }
+                const error = await libraryTransferResponseError(response);
+                if (error.activeTaskId) { adoptActiveLibraryImport(error.activeTaskId); return; }
+                if (response.status === 410 || error.uploadRejected) {
+                    finishLibraryImportConfirmation(error.message); return;
+                }
+                if (response.status === 503) {
+                    document.getElementById('libraryImportRepeatConfirm').checked = false;
+                    renderLibraryTransferTask(error.message); return;
+                }
+                throw error;
+            } catch (error) {
+                if (!libraryTransferTaskIsCurrent(taskId, generation)) return;
+                libraryTransferTask.disconnected = true;
+                renderLibraryTransferTask('正在查询同一次确认的结果。');
+                pollLibraryTransferTask();
+            } finally {
+                clearTimeout(timeout);
+                if (libraryTransferTaskIsCurrent(taskId, generation)) libraryTransferTask.submitting = false;
+            }
+        }
+
         async function submitLibraryTransferTask(operation, payload, file = null) {
             archiveLibraryTransferTask(); stopLibraryTransferPolling(); libraryTransferGeneration += 1;
             const taskId = newLibraryTransferId(), generation = libraryTransferGeneration;
@@ -2601,12 +2666,13 @@
                 if (!libraryTransferTaskIsCurrent(taskId, generation)) return;
                 if (!response.ok) {
                     const error = await libraryTransferResponseError(response);
+                    if (response.status === 409 && operation === 'import' && error.repeatImport?.staged_task_id === taskId) {
+                        applyLibraryTransferSnapshot({task_id: taskId, operation: 'import', status: 'awaiting_confirmation',
+                            error: error.repeatImport}, taskId, generation);
+                        return;
+                    }
                     if (response.status === 409 && operation === 'import' && error.activeTaskId) {
-                        libraryTransferTask.status = 'failed'; libraryTransferTask.error = error.message;
-                        archiveLibraryTransferTask();
-                        const active = {...libraryTransferDescriptor(libraryTransferTask), task_id: error.activeTaskId, status: 'queued'};
-                        restoreLibraryTransferTask(active); saveLibraryTransferTask();
-                        renderLibraryTransferTask('同一分享包已在处理中，正在查询原任务，不会重复新增。');
+                        adoptActiveLibraryImport(error.activeTaskId);
                         return;
                     }
                     if ((response.status >= 400 && response.status < 500 && response.status !== 409) || response.status === 503 || error.uploadRejected) {
@@ -2628,7 +2694,7 @@
             }
         }
         async function exportLibraryTransfer() {
-            if (libraryTransferBusy || libraryExportSelection.selecting) return;
+            if (libraryTransferBusy || libraryExportSelection.selecting || libraryTransferTask?.status === 'awaiting_confirmation') return;
             return withLibraryTransferStart(async () => {
                 const state = libraryExportSelection, questionIds = Array.from(state.ids);
                 if (!questionIds.length || state.missing.size) {
@@ -2673,7 +2739,7 @@
                 () => prepareLibraryExportFilters(true),
                 () => { if (typeof window.loadDashboardData === 'function') return window.loadDashboardData(); },
                 () => {
-                    if (window.PaperStore && window.PaperStore.activeWorkspace === 'paper'
+                    if (document.body.dataset.workspace === 'paper'
                             && typeof window.renderPaperWorkspace === 'function') return window.renderPaperWorkspace();
                 }
             ];

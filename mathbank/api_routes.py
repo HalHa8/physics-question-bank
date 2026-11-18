@@ -1,6 +1,8 @@
 """HTTP registration, explicitly composed without a monolithic entry."""
 
 ROUTES = [
+  {"name": "confirm_library_import_task", "method": "post", "path": "/api/library-transfer/tasks/{task_id}/confirm-import", "options": {}},
+  {"name": "cancel_library_import_confirmation", "method": "delete", "path": "/api/library-transfer/tasks/{task_id}/confirm-import", "options": {"status_code": 204}},
   {"name": "start_library_import_task", "method": "post", "path": "/api/library-transfer/tasks/import", "options": {}},
   {"name": "start_library_export_task", "method": "post", "path": "/api/library-transfer/tasks/export", "options": {}},
   {"name": "get_library_transfer_task", "method": "get", "path": "/api/library-transfer/tasks/{task_id}", "options": {}},

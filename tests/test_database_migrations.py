@@ -1159,3 +1159,41 @@ def test_init_db_rejects_damaged_questions_table_before_creating_missing_tables(
         } == {"questions"}
     assert not snapshot_dir.exists()
     damaged_engine.dispose()
+
+
+def test_v12_library_receipt_migration_preserves_physics_and_backup(tmp_path, monkeypatch):
+    path = tmp_path / "physics.db"
+    engine = create_engine(f"sqlite:///{path}")
+    database_module.Base.metadata.create_all(engine)
+    with engine.begin() as connection:
+        connection.exec_driver_sql("DROP TABLE library_import_receipts")
+        connection.exec_driver_sql("PRAGMA user_version=12")
+        connection.exec_driver_sql("INSERT INTO questions (id, content) VALUES (1, 'F=2.0 N，方向向右')")
+        connection.exec_driver_sql("INSERT INTO question_curriculums (question_id, version_code) VALUES (1, 'P')")
+    snapshots = tmp_path / "snapshots"
+    monkeypatch.setattr(db_migrations, "SCHEMA_SNAPSHOT_DIR", snapshots)
+    result = db_migrations.migrate_database(engine)
+    assert result["from_version"] == 12
+    assert result["to_version"] == 13
+    with engine.connect() as connection:
+        assert connection.exec_driver_sql("SELECT content FROM questions").scalar() == "F=2.0 N，方向向右"
+        assert connection.exec_driver_sql("SELECT version_code FROM question_curriculums").scalar() == "P"
+        assert connection.exec_driver_sql("SELECT count(*) FROM library_import_receipts").scalar() == 0
+    assert list(snapshots.glob("*.db"))
+    assert db_migrations.migrate_database(engine)["backup"] is None
+
+
+def test_library_receipt_migration_rolls_back_on_invalid_existing_table(tmp_path, monkeypatch):
+    path = tmp_path / "invalid.db"
+    engine = create_engine(f"sqlite:///{path}")
+    database_module.Base.metadata.create_all(engine)
+    with engine.begin() as connection:
+        connection.exec_driver_sql("DROP TABLE library_import_receipts")
+        connection.exec_driver_sql("CREATE TABLE library_import_receipts (archive_sha256 TEXT)")
+        connection.exec_driver_sql("PRAGMA user_version=12")
+    monkeypatch.setattr(db_migrations, "SCHEMA_SNAPSHOT_DIR", tmp_path / "snapshots")
+    with pytest.raises(RuntimeError, match="分享包导入记录表"):
+        db_migrations.migrate_database(engine)
+    assert db_migrations.schema_version(engine) == 12
+    with engine.connect() as connection:
+        assert [column[1] for column in connection.exec_driver_sql("PRAGMA table_info(library_import_receipts)")] == ["archive_sha256"]

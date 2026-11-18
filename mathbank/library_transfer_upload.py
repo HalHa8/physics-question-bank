@@ -52,7 +52,7 @@ class _SharingMultipartParser(MultiPartParser):
     """Pinned Starlette parser with scoped temporary-file creation and caps."""
 
     def __init__(self, headers, stream, *, directory, file_limit):
-        super().__init__(headers, stream, max_files=1, max_fields=1, max_part_size=4096)
+        super().__init__(headers, stream, max_files=1, max_fields=2, max_part_size=4096)
         self.directory = directory
         self.file_limit = file_limit
         self.file_bytes = 0

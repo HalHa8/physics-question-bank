@@ -26,7 +26,9 @@ def test_physics_zip_import_preparation_can_overlap_switch_but_backup_and_commit
     monkeypatch.setattr(main, "DATA_BACKUP_DIR", tmp_path / "backups")
     monkeypatch.setattr(main, "DATABASE_PATH", str(tmp_path / "isolated.db"))
     monkeypatch.setattr(main, "UPLOAD_DIR", str(tmp_path / "uploads"))
-    prepared_package = SimpleNamespace(summary={"image_count": 0})
+    import hashlib
+    prepared_package = SimpleNamespace(summary={"image_count": 0},
+        archive_sha256=hashlib.sha256(b"isolated test package").hexdigest())
     @contextmanager
     def prepare(_archive, *, workspace_dir=None):
         if pause_stage == "inspect":
