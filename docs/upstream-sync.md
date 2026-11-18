@@ -442,3 +442,5 @@
 验收：隔离 Python 3.11.15、Pillow 13.0.0、pdf-inspector 1.25.2，未变更当前运行环境。基础全套 4695 passed/168 skipped；最终产品代码全套 **4702 passed、168 skipped、0 failed**，275.39 秒，10 条既有 Pillow 弃用警告（`pbf194.log`）。保留审计历史后契约复验 **177 passed**；分享任务／物理课程专项 **77 passed**，领域／API／上传专项 **258 passed**。`pip check`、变更 JS `node --check`、`git diff --check` 通过。可选 agent-browser 套件因本机未装该 CLI 跳过；另以现有真实 Chromium/CDP 在临时源码副本验收重复包取消、确认不重传、确认重放和桌面／375px 控件，全部通过（`pb-share-smoke-195/browser-result.html`，题数 1→2→取消仍2→确认3→重放仍3，确认过程 uploads=0）。隔离启动 health ready、空库 schema13、回执0；原生导出实现未变。没有复制真实库、上传、密钥或配置，没有付费模型请求，也未中断现有服务。
 
 本次代码提交由本记录所在提交及其后集成记录定位；仅向 `codex/refactor-backend-modules` 集成并正常推送，不操作 main、Tag、Release 或便携包。
+
+集成证据：功能提交 `3a06040ebcd5f3dafa0514ea72d4838f940a6cb6` 已由干净的 `0b41a2e` 安全快进至本地解耦分支；目标工作树复验分享任务、物理课程、数据库迁移与完整备份 **150 passed（27.40 秒）**。推送前再次 fetch/ls-remote，origin 解耦分支仍为 `0b41a2e`，上游仍为 `0acd4bb`，没有需额外合并的远端改动。此记录提交随后同样快进至解耦分支；推送和 CI 结果以本轮对话及 GitHub Actions 对应提交为准，不把推送视为 CI 通过。
