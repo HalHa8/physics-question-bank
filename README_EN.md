@@ -83,6 +83,8 @@ For each new PhysicsBank work session, first check the upstream MathBank `main`
 branch and review any changes before integrating them. This is an interactive
 project workflow, not an unattended background updater or an automatic GitHub push.
 
+The source CLI accepts the question numbers shown on screen and supports keyword inclusion and exclusion, including case-sensitive physics units. [CLI guide](docs/AI_DATABASE_GUIDE.md)
+
 ## Windows portable package
 
 On Windows 10/11 x64, download the `PhysicsBank-Windows-x64` artifact from the

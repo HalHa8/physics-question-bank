@@ -292,6 +292,8 @@
 - **API设置布局**：API设置保持原来的服务商密钥与各任务模型双列同屏布局，保留原有模型选择、推理强度及保存行为，不使用新增的服务商向导、折叠高级区或连接测试接口。
 
 ## 7. 开发与运行指令
+- 只读检索工具按网页连续题号显示题目；`--seq-nums` 按网页题号取题，`--ids` 和关联检索使用内部 ID。包含和排除条件在数量限制之前执行，区分物理单位大小写，忽略图片地址。
+- 截图粘贴由当前编辑字段或可见编辑器内的投放区接收；题库搜索框和普通文本控件保留浏览器粘贴行为。
 - **Python 版本**：最低 Python 3.10。
 - **本地启动**：`uvicorn main:app --reload`
 - **验证**：运行针对改动的 `python3 -m pytest tests/`（混合插图重点执行 `tests/test_image_layout.py`；原生 PDF 用 `MATHBANK_TEST_TIKZ_NATIVE=1 python3 -m pytest --noconftest tests/test_image_layout.py -k "not api"`）、`python3 -m pip check`；JS 改动逐文件执行 `node --check`，macOS 启动器执行 `bash -n 启动题库系统.command`。Release 守卫继续检查 BAT ASCII/无 BOM/CRLF、Windows 平台接口缺失和 CP936 输出。启动器测试使用 `--noconftest`，覆盖旧状态/历史清单损坏仍可启动、现有服务直接打开、依赖补齐、端口冲突、实际错误日志和 Windows venv PID 转发。Windows CI 从最终 ZIP 解压至中文空格路径，放入损坏旧状态与指向无害进程的旧 PID，验证首次启动、重复打开保持同一服务且无关进程仍存活。macOS 用隔离目录和端口实测入口，不能以此替代真实 Windows 10/11 用户机验证。

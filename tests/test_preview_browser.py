@@ -1284,3 +1284,32 @@ def test_new_question_pastes_screenshot_into_answer_on_default_ai_tab(browser):
     assert saved["content"] == stem
     (path,) = saved["image_paths"]
     assert saved["answer_markdown"].splitlines() == ["解：", "", f"![图片解答]({path})", "", "拉力为 2.0 N，方向向右。"]
+
+
+def test_bank_search_and_editor_text_fields_leave_image_pastes_alone(browser):
+    browser.command("reload")
+    browser.command("click", "#appNavBank")
+    browser.command("focus", "#searchInput")
+    js = """(selector => {
+        const data = new DataTransfer();
+        data.items.add(new File(['image'], 'test.png', {type: 'image/png'}));
+        return document.querySelector(selector).dispatchEvent(new ClipboardEvent('paste', {
+            clipboardData: data, bubbles: true, cancelable: true
+        }));
+    })"""
+    assert browser.evaluate(js + "('#searchInput')")
+    browser.command("click", ".bank-create-btn")
+    assert browser.evaluate(js + "('#editRelatedQuestionSearch')")
+    # With every drop zone hidden, an editor-background paste has no destination.
+    assert browser.evaluate("""(() => {
+        const ids = ['illustrationDropZone','ocrDropZone','contentOcrDropZone','imageAnswerDropZone'];
+        const zones = ids.map(id => document.getElementById(id));
+        const original = zones.map(zone => zone.style.display);
+        try {
+            zones.forEach(zone => zone.style.display = 'none');
+            return """ + js + """('#editorSection');
+        } finally {
+            zones.forEach((zone, i) => zone.style.display = original[i]);
+        }
+    })()""")
+    assert browser.evaluate("!editContent.value.includes('![') && !editAnswerMarkdown.value.includes('![')")
